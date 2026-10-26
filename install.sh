@@ -5,11 +5,10 @@
 #   curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh -s -- --service
 #
 # Options:
-#   --service         also create the "up" user and install, enable and start
-#                     the systemd unit (database in /var/lib/up/up.db)
+#   --service         install, enable and start a systemd user service
+#                     (database in ~/.config/up/up.db)
 #   --version TAG     install a specific release, for example v1.2.0
-#   --uninstall       remove the binary and the unit; the database and the
-#                     "up" user are kept
+#   --uninstall       remove the binary and the unit; keep the database
 #   -h, --help        show this help
 #
 # Environment:
@@ -19,7 +18,8 @@ set -eu
 
 REPO="giulianotesta7/up"
 INSTALL_DIR="${UP_INSTALL_DIR:-/usr/local/bin}"
-UNIT_PATH="${UP_UNIT_PATH:-/etc/systemd/system/up.service}"
+UNIT_PATH="${UP_UNIT_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/up.service}"
+LEGACY_UNIT_PATH="${UP_LEGACY_UNIT_PATH:-/etc/systemd/system/up.service}"
 SERVICE=0
 UNINSTALL=0
 VERSION=""
@@ -33,17 +33,18 @@ Usage: install.sh [--service] [--version TAG] [--uninstall]
 
 Installs the up binary from a GitHub release (linux amd64/arm64).
 
-  --service         also create the "up" user and install, enable and start
-                    the systemd unit (database in /var/lib/up/up.db)
+  --service         install, enable and start a systemd user service
+                    (database in ~/.config/up/up.db); run as a normal user
   --version TAG     install a specific release, for example v1.2.0
-  --uninstall       remove the binary and the unit; the database and the
-                    "up" user are kept
+  --uninstall       remove the binary and user/legacy units; keep the database
   -h, --help        show this help
 
 Environment:
   UP_INSTALL_DIR    where the binary goes (default /usr/local/bin)
   UP_BASE_URL       directory URL holding the release files (testing/mirrors)
-  UP_UNIT_PATH      where the systemd unit goes (default /etc/systemd/system/up.service)
+  UP_UNIT_PATH      user unit path (default $XDG_CONFIG_HOME/systemd/user/up.service,
+                    or ~/.config/systemd/user/up.service)
+  UP_LEGACY_UNIT_PATH legacy unit to remove (default /etc/systemd/system/up.service)
 EOF
 }
 
@@ -85,18 +86,30 @@ in_dir() {
 }
 
 if [ "$UNINSTALL" -eq 1 ]; then
-	if command -v systemctl >/dev/null 2>&1 && [ -f "$UNIT_PATH" ]; then
-		as_root systemctl disable --now up >/dev/null 2>&1 || true
-		as_root rm -f "$UNIT_PATH"
-		as_root systemctl daemon-reload
+	if [ -f "$UNIT_PATH" ]; then
+		systemctl --user disable --now up >/dev/null 2>&1 || true
+		rm -f "$UNIT_PATH"
+		systemctl --user daemon-reload
 		say "Removed $UNIT_PATH"
+	fi
+	if [ -f "$LEGACY_UNIT_PATH" ]; then
+		as_root systemctl disable --now up >/dev/null 2>&1 || true
+		as_root rm -f "$LEGACY_UNIT_PATH"
+		as_root systemctl daemon-reload
+		say "Removed $LEGACY_UNIT_PATH"
+		say "Kept /var/lib/up (database) and the up user. To copy the data after creating ~/.config/up:"
+		say 'sudo cp /var/lib/up/up.db ~/.config/up/up.db && sudo chown $USER ~/.config/up/up.db'
 	fi
 	if [ -e "$INSTALL_DIR/up" ]; then
 		in_dir "$INSTALL_DIR" rm -f "$INSTALL_DIR/up"
 		say "Removed $INSTALL_DIR/up"
 	fi
-	say "Kept /var/lib/up (database) and the up user."
+	say "Kept ~/.config/up (database)."
 	exit 0
+fi
+
+if [ "$SERVICE" -eq 1 ] && [ "$(id -u)" -eq 0 ]; then
+	die "--service cannot run as root: user services belong to a normal user"
 fi
 
 [ "$(uname -s)" = "Linux" ] || die "only Linux is supported (found $(uname -s))"
@@ -136,24 +149,23 @@ say "Installed $INSTALL_DIR/up"
 
 if [ "$SERVICE" -eq 1 ]; then
 	command -v systemctl >/dev/null 2>&1 || die "--service needs systemd (systemctl not found); the binary is installed"
-	if ! id up >/dev/null 2>&1; then
-		NOLOGIN="$(command -v nologin || echo /usr/sbin/nologin)"
-		as_root useradd --system --no-create-home --shell "$NOLOGIN" up
-		say "Created system user up"
-	fi
 	if [ -f "$UNIT_PATH" ]; then
 		say "Kept existing $UNIT_PATH (delete it and rerun to replace it)"
 	else
 		curl -fsSL "$BASE_URL/up.service" -o "$TMP/up.service" || die "could not download $BASE_URL/up.service"
 		sed "s#/usr/local/bin/up#$INSTALL_DIR/up#" "$TMP/up.service" >"$TMP/up.service.out"
-		as_root install -m 0644 "$TMP/up.service.out" "$UNIT_PATH"
+		mkdir -p "$(dirname "$UNIT_PATH")"
+		install -m 0644 "$TMP/up.service.out" "$UNIT_PATH"
 		say "Installed $UNIT_PATH"
 	fi
-	as_root systemctl daemon-reload
-	as_root systemctl enable up >/dev/null 2>&1
-	as_root systemctl restart up
-	say "Service up is running. Logs: journalctl -u up -f"
-	say "Open the TUI with: sudo -u up $INSTALL_DIR/up tui --db /var/lib/up/up.db"
+	systemctl --user daemon-reload
+	systemctl --user enable up >/dev/null 2>&1
+	systemctl --user restart up
+	if ! (as_root loginctl enable-linger "${USER:-$(id -un)}"); then
+		say "To keep running after logout, run: sudo loginctl enable-linger ${USER:-$(id -un)}"
+	fi
+	say "Service up is running. Logs: journalctl --user -u up -f"
+	say "Database: ~/.config/up/up.db (honors XDG_CONFIG_HOME). Open it with: up tui (no flags needed)."
 else
 	say "Run it with: up serve   (add --service to install it under systemd)"
 fi

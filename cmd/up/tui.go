@@ -29,9 +29,14 @@ var runTUIProgram = tui.Run
 
 func runTUI(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
-	dbPath := fs.String("db", "up.db", "path to the SQLite database (created if missing)")
+	dbPath := databaseFlag(fs)
 	if code, ok := parseFlags(fs, tuiHelp, args, stdout, stderr); !ok {
 		return code
+	}
+
+	if err := prepareDatabase(fs, dbPath); err != nil {
+		fmt.Fprintf(stderr, "up: %v\n", err)
+		return 1
 	}
 
 	s, err := store.Open(*dbPath)

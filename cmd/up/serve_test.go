@@ -90,6 +90,7 @@ func TestServeRunsSQLiteDefinitionsAndPreservesHistory(t *testing.T) {
 }
 
 func TestServeHelpDescribesSQLite(t *testing.T) {
+	isolateDefaultDatabase(t)
 	code, out, errOut := runCmd(context.Background(), "serve", "--help")
 	if code != 0 || errOut != "" {
 		t.Fatalf("got %d, %q", code, errOut)
@@ -143,6 +144,7 @@ func TestServeRejectsNegativeRetention(t *testing.T) {
 }
 
 func TestServeHelpDescribesRetention(t *testing.T) {
+	isolateDefaultDatabase(t)
 	_, out, _ := runCmd(context.Background(), "serve", "--help")
 	for _, text := range []string{"-retention", "720h", "0 keeps"} {
 		if !strings.Contains(out, text) {
@@ -152,6 +154,7 @@ func TestServeHelpDescribesRetention(t *testing.T) {
 }
 
 func TestServeNoLongerAcceptsConfig(t *testing.T) {
+	isolateDefaultDatabase(t)
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "up.db")
 	code, out, errOut := runCmd(context.Background(), "serve", "--db", dbPath, "--config", filepath.Join(dir, "monitors.yaml"))

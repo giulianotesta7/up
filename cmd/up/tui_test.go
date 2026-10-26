@@ -15,6 +15,7 @@ import (
 )
 
 func TestTUICreationHelp(t *testing.T) {
+	isolateDefaultDatabase(t)
 	t.Chdir(t.TempDir())
 	code, out, errOut := runCmd(context.Background(), "tui", "--help")
 	if code != 0 || errOut != "" {
@@ -53,7 +54,7 @@ func TestTUIReadWriteFirstUseAndProgramErrors(t *testing.T) {
 				}
 				return errors.New("terminal unavailable")
 			}
-			code, out, errOut := runCmd(context.Background(), "tui")
+			code, out, errOut := runCmd(context.Background(), "tui", "--db", "up.db")
 			if code != 1 || out != "" || errOut != "up: terminal unavailable\n" {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 			}

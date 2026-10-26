@@ -40,16 +40,18 @@ curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh |
 ```
 
 The script downloads the release binary, verifies its checksum and installs it in
-`/usr/local/bin`. To also run it as a systemd service:
+`/usr/local/bin`. To also run it as a systemd user service, run as your normal user:
 
 ```console
 curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh -s -- --service
 ```
 
-That creates the `up` user, installs the unit from [`deploy/up.service`](deploy/up.service)
-and starts it, storing the database in `/var/lib/up/up.db`. Logs are in
-`journalctl -u up -f`. Other options: `--version vX.Y.Z` to pin a release and `--uninstall`
-to remove the binary and the unit (the database is kept).
+That installs the unit from [`deploy/up.service`](deploy/up.service) in
+`~/.config/systemd/user` and starts it as you, using `~/.config/up/up.db`.
+It only asks for sudo when the binary directory needs it and to enable linger,
+which keeps the service running after logout. If linger fails, follow the printed hint.
+Logs are in `journalctl --user -u up -f`. Other options: `--version vX.Y.Z` to pin a release
+and `--uninstall` to remove the binary and units (the database is kept).
 
 To build from source you need Go 1.26.10:
 
@@ -73,12 +75,10 @@ In another terminal, open the TUI and press `n` to add your first monitor:
 up tui
 ```
 
-Both commands use `up.db` in the current directory unless you pass `--db PATH`. With the
-systemd service, open the TUI on the server with:
-
-```console
-sudo -u up up tui --db /var/lib/up/up.db
-```
+Both commands use `~/.config/up/up.db` by default, creating the directory and database
+on first use. They honor `XDG_CONFIG_HOME`; `--db PATH` overrides the database without
+creating parent directories. With the user service, `up tui` opens the same database
+with no flags.
 
 ### Keys
 
@@ -101,7 +101,7 @@ not longer than the interval.
 
 | Flag | Commands | Default | Meaning |
 | --- | --- | --- | --- |
-| `--db PATH` | `serve`, `tui` | `up.db` | SQLite database; created if missing. |
+| `--db PATH` | `serve`, `tui` | `~/.config/up/up.db` | SQLite database; honors `XDG_CONFIG_HOME`, created if missing. |
 | `--retention DURATION` | `serve` | `720h` | How long to keep results; `0` keeps everything. |
 
 `up <command> -h` prints the full help.
