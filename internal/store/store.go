@@ -164,62 +164,33 @@ func (s *Store) SetChecks(ctx context.Context, checks []config.Check) error {
 	return nil
 }
 
-// AddCheck appends a validated definition. An existing name is always rejected,
-// even if its definition is identical. History and heartbeat are untouched.
+// AddCheck appends a validated definition. An existing name is rejected, even
+// if its definition is identical. History and heartbeat are untouched.
 func (s *Store) AddCheck(ctx context.Context, c config.Check) error {
-	return s.appendChecks(ctx, []config.Check{c}, false)
-}
-
-// ImportChecks atomically appends validated definitions in input order without
-// replacing existing definitions. Identical existing entries are no-ops; any
-// conflicting existing name or repeated input name rejects the entire batch.
-// Empty imports are no-ops. History and heartbeat are untouched.
-func (s *Store) ImportChecks(ctx context.Context, checks []config.Check) error {
-	return s.appendChecks(ctx, checks, true)
-}
-
-func (s *Store) appendChecks(ctx context.Context, checks []config.Check, importing bool) error {
-	op := "add check"
-	if importing {
-		op = "import checks"
-	}
-	if err := config.ValidateChecks(checks); err != nil {
-		return fmt.Errorf("store: %s: %w", op, err)
+	if err := config.ValidateCheck(c); err != nil {
+		return fmt.Errorf("store: add check: %w", err)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("store: %s: %w", op, err)
+		return fmt.Errorf("store: add check: %w", err)
 	}
 	defer tx.Rollback()
-	existing, err := readChecks(ctx, tx)
-	if err != nil {
-		return fmt.Errorf("store: %s: %w", op, err)
+	var exists bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM checks WHERE name = ?)", c.Name).Scan(&exists); err != nil {
+		return fmt.Errorf("store: add check: %w", err)
 	}
-	byName := make(map[string]config.Check, len(existing))
-	for _, c := range existing {
-		byName[c.Name] = c
+	if exists {
+		return fmt.Errorf("store: add check: name %q already exists", c.Name)
 	}
 	var next int
 	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(position), -1) + 1 FROM checks").Scan(&next); err != nil {
-		return fmt.Errorf("store: %s: %w", op, err)
+		return fmt.Errorf("store: add check: %w", err)
 	}
-	for _, c := range checks {
-		if old, ok := byName[c.Name]; ok {
-			if !importing {
-				return fmt.Errorf("store: %s: name %q already exists", op, c.Name)
-			}
-			if old != c {
-				return fmt.Errorf("store: %s: name %q conflicts with existing definition", op, c.Name)
-			}
-			continue
-		}
-		if err := insertCheck(ctx, tx, next, c); err != nil {
-			return fmt.Errorf("store: %s: %w", op, err)
-		}
-		next++
+	if err := insertCheck(ctx, tx, next, c); err != nil {
+		return fmt.Errorf("store: add check: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: %s: %w", op, err)
+		return fmt.Errorf("store: add check: %w", err)
 	}
 	return nil
 }

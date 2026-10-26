@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -94,7 +93,7 @@ func assertUnchanged(t *testing.T, s *store.Store, before snapshot) {
 func TestSetChecksStillReplacesAndKeepsHistory(t *testing.T) {
 	s, _ := seeded(t)
 	before := observe(t, s)
-	// This legacy replacement API intentionally remains distinct from import.
+	// This replacement API intentionally remains distinct from AddCheck.
 	if err := s.SetChecks(ctx, []config.Check{definition("web")}); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +122,7 @@ func TestAddCheckAppendsAndPersists(t *testing.T) {
 	assertUnchanged(t, reader, before)
 }
 
-func TestCreationAndImportRejectWithoutMutation(t *testing.T) {
+func TestAddCheckRejectsWithoutMutation(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*config.Check)
@@ -138,72 +137,22 @@ func TestCreationAndImportRejectWithoutMutation(t *testing.T) {
 		{"status", func(c *config.Check) { c.ExpectedStatus = 600 }, "must be between 100 and 599"},
 	}
 	for _, tt := range tests {
-		for _, operation := range []string{"add", "import"} {
-			t.Run(operation+"/"+tt.name, func(t *testing.T) {
-				s, _ := seeded(t)
-				before := observe(t, s)
-				c := definition("bad")
-				tt.mutate(&c)
-				var err error
-				if operation == "add" {
-					err = s.AddCheck(ctx, c)
-				} else {
-					if tt.name == "duplicate" {
-						c.URL = "https://conflicting.example.com"
-					}
-					err = s.ImportChecks(ctx, []config.Check{definition("new"), c, definition("last")})
-				}
-				want := tt.want
-				if operation == "import" && tt.name == "duplicate" {
-					want = "conflicts"
-				}
-				if err == nil || !strings.Contains(err.Error(), want) {
-					t.Fatalf("error = %v, want %q", err, want)
-				}
-				assertUnchanged(t, s, before)
-			})
-		}
-	}
-}
-
-func TestImportMergesInOrderAndIdenticalImportsAreNoOps(t *testing.T) {
-	s, _ := seeded(t)
-	before := observe(t, s)
-	input := []config.Check{definition("web"), definition("new"), definition("api"), definition("last")}
-	if err := s.ImportChecks(ctx, input); err != nil {
-		t.Fatal(err)
-	}
-	before.Checks = append(before.Checks, definition("new"), definition("last"))
-	assertUnchanged(t, s, before)
-	for _, batch := range [][]config.Check{input, nil, {}} {
-		if err := s.ImportChecks(ctx, batch); err != nil {
-			t.Fatal(err)
-		}
-		assertUnchanged(t, s, before)
-	}
-}
-
-func TestImportRejectsDuplicateBatchNames(t *testing.T) {
-	for _, different := range []bool{false, true} {
-		t.Run(map[bool]string{false: "identical", true: "conflicting"}[different], func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			s, _ := seeded(t)
 			before := observe(t, s)
-			c := definition("new")
-			other := c
-			if different {
-				other.Timeout = time.Second
-			}
-			err := s.ImportChecks(ctx, []config.Check{c, other})
-			if err == nil || !strings.Contains(err.Error(), "already used") {
-				t.Fatalf("error = %v, want duplicate input error", err)
+			c := definition("bad")
+			tt.mutate(&c)
+			if err := s.AddCheck(ctx, c); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 			assertUnchanged(t, s, before)
 		})
 	}
 }
 
-func TestImportRejectsEveryChangedExistingField(t *testing.T) {
-	for _, field := range []string{"url", "interval", "timeout", "status"} {
+func TestAddCheckRejectsEveryChangedExistingField(t *testing.T) {
+	// A same-name check with identical or different fields is a duplicate.
+	for _, field := range []string{"identical", "url", "interval", "timeout", "status"} {
 		t.Run(field, func(t *testing.T) {
 			s, _ := seeded(t)
 			before := observe(t, s)
@@ -218,58 +167,25 @@ func TestImportRejectsEveryChangedExistingField(t *testing.T) {
 			case "status":
 				c.ExpectedStatus = 204
 			}
-			err := s.ImportChecks(ctx, []config.Check{definition("new"), c})
-			if err == nil || !strings.Contains(err.Error(), "conflicts") {
-				t.Fatalf("error = %v, want conflict", err)
+			if err := s.AddCheck(ctx, c); err == nil || !strings.Contains(err.Error(), "already exists") {
+				t.Fatalf("error = %v, want duplicate", err)
 			}
 			assertUnchanged(t, s, before)
 		})
 	}
 }
 
-func TestLoadAndImportPreserveSourceYAML(t *testing.T) {
-	s, _ := seeded(t)
-	path := filepath.Join(t.TempDir(), "human.yaml")
-	data := []byte("# human comment\nchecks:\n  - name: new\n    url: https://example.com/new\n    interval: 30s\n    timeout: 5s\n    expected_status: 200\n")
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.Load(path)
+func TestNewDatabaseAcceptsCreation(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "empty.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ImportChecks(ctx, cfg.Checks); err != nil {
+	defer s.Close()
+	if err := s.AddCheck(ctx, definition("new")); err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != string(data) {
-		t.Fatal("source YAML changed")
-	}
-}
-
-func TestNewDatabaseAcceptsCreationAndImport(t *testing.T) {
-	for _, operation := range []string{"add", "import"} {
-		t.Run(operation, func(t *testing.T) {
-			s, err := store.Open(filepath.Join(t.TempDir(), "empty.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer s.Close()
-			if operation == "add" {
-				err = s.AddCheck(ctx, definition("new"))
-			} else {
-				err = s.ImportChecks(ctx, []config.Check{definition("new")})
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, err := s.Checks(ctx)
-			if err != nil || !reflect.DeepEqual(got, []config.Check{definition("new")}) {
-				t.Fatalf("Checks() = %+v, %v", got, err)
-			}
-		})
+	got, err := s.Checks(ctx)
+	if err != nil || !reflect.DeepEqual(got, []config.Check{definition("new")}) {
+		t.Fatalf("Checks() = %+v, %v", got, err)
 	}
 }

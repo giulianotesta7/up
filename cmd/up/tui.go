@@ -13,7 +13,7 @@ import (
 const tuiHelp = `Usage: up tui [flags]
 
 Create monitors and show stored results, refreshing every 2s.
-Creates the SQLite database on first use; no YAML or daemon startup required.
+Creates the SQLite database on first use; no daemon startup required.
 Keep 'up serve' running to discover monitors and record results while closed.
 New monitors require a name and HTTP/HTTPS URL. Defaults: interval 30s,
 timeout 5s, expected status 200. Creation only; no editing or deletion.

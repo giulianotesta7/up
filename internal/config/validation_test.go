@@ -51,11 +51,3 @@ func TestValidateCheck(t *testing.T) {
 		})
 	}
 }
-
-func TestParsePreservesDurationSpellingAndAggregatesErrors(t *testing.T) {
-	_, err := config.Parse([]byte("checks:\n  - name: api\n    url: ftp://x\n    interval: 1m\n    timeout: 120s\n    expected_status: 99\n"))
-	want := "config: checks[0] (api): url \"ftp://x\" must use http or https\nconfig: checks[0] (api): timeout (120s) must not exceed interval (1m)\nconfig: checks[0] (api): expected_status 99 must be between 100 and 599"
-	if err == nil || err.Error() != want {
-		t.Fatalf("Parse() = %v, want %s", err, want)
-	}
-}

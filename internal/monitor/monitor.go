@@ -29,11 +29,10 @@ type Runner interface {
 	Run(ctx context.Context, c config.Check) check.Result
 }
 
-// Storage is the append-only definition and observation API used by Run.
+// Storage is the definition and observation API used by Run.
 // *store.Store implements it.
 type Storage interface {
 	Checks(context.Context) ([]config.Check, error)
-	ImportChecks(context.Context, []config.Check) error
 	Record(context.Context, check.Result) error
 	Beat(context.Context, time.Time) error
 }
@@ -46,8 +45,6 @@ type Pruner interface {
 
 // Options configures Run.
 type Options struct {
-	// Checks is an optional additive import, not the scheduling source.
-	Checks            []config.Check
 	Store             Storage
 	Runner            Runner
 	HeartbeatInterval time.Duration
@@ -61,16 +58,11 @@ type Options struct {
 	Logger        *slog.Logger
 }
 
-// Run imports optional Checks, reads SQLite definitions, then starts each check
+// Run reads the SQLite definitions, then starts each check
 // immediately and every Interval. Discovery starts only new names; existing
 // loops are never restarted. Transient discovery errors are logged and retried.
 // Run joins every loop on cancellation; nothing is written after it returns.
 func Run(ctx context.Context, opts Options) error {
-	if len(opts.Checks) > 0 {
-		if err := opts.Store.ImportChecks(ctx, opts.Checks); err != nil {
-			return err
-		}
-	}
 	checks, err := opts.Store.Checks(ctx)
 	if err != nil {
 		return err

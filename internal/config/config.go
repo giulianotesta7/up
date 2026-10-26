@@ -1,16 +1,11 @@
-// Package config loads YAML and validates HTTP check definitions.
+// Package config defines and validates HTTP check definitions.
 package config
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
-	"os"
 	"time"
-
-	"go.yaml.in/yaml/v3"
 )
 
 // Check is one validated HTTP check.
@@ -22,52 +17,17 @@ type Check struct {
 	ExpectedStatus int
 }
 
-// Config is the validated up configuration.
-type Config struct {
-	Checks []Check
-}
-
-// rawConfig mirrors the YAML file. Durations stay strings and the status a
-// pointer so that missing and malformed values get their own error messages.
-type rawConfig struct {
-	Checks []rawCheck `yaml:"checks"`
-}
-
+// rawCheck keeps durations as strings and the status as a pointer so that
+// missing and malformed values get their own error messages.
 type rawCheck struct {
-	Name           string `yaml:"name"`
-	URL            string `yaml:"url"`
-	Interval       string `yaml:"interval"`
-	Timeout        string `yaml:"timeout"`
-	ExpectedStatus *int   `yaml:"expected_status"`
+	Name           string
+	URL            string
+	Interval       string
+	Timeout        string
+	ExpectedStatus *int
 }
 
-// Load reads and validates the configuration file at path.
-func Load(path string) (Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return Config{}, fmt.Errorf("config: read %s: %w", path, err)
-	}
-	return Parse(data)
-}
-
-// Parse validates YAML configuration data. It reports every problem found,
-// not only the first one.
-func Parse(data []byte) (Config, error) {
-	var raw rawConfig
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&raw); err != nil && !errors.Is(err, io.EOF) {
-		return Config{}, fmt.Errorf("config: invalid YAML: %w", err)
-	}
-
-	if len(raw.Checks) == 0 {
-		return Config{}, errors.New("config: at least one check is required")
-	}
-
-	return validateRawChecks(raw.Checks)
-}
-
-// ValidateCheck validates a programmatic definition using the YAML check rules.
+// ValidateCheck validates a check definition.
 // All fields are required; durations must be positive, timeout must not exceed
 // interval, and the expected HTTP status must be between 100 and 599.
 func ValidateCheck(c Check) error {
@@ -75,48 +35,11 @@ func ValidateCheck(c Check) error {
 	return errors.Join(errs...)
 }
 
-// ValidateChecks validates a batch, including unique names. An empty batch is
-// valid for an optional import; Parse still requires at least one YAML check.
-func ValidateChecks(checks []Check) error {
-	raw := make([]rawCheck, len(checks))
-	for i, c := range checks {
-		raw[i] = rawFromCheck(c)
-	}
-	_, err := validateRawChecks(raw)
-	return err
-}
-
 func rawFromCheck(c Check) rawCheck {
 	return rawCheck{
 		Name: c.Name, URL: c.URL, Interval: c.Interval.String(),
 		Timeout: c.Timeout.String(), ExpectedStatus: &c.ExpectedStatus,
 	}
-}
-
-func validateRawChecks(checks []rawCheck) (Config, error) {
-	var errs []error
-	cfg := Config{Checks: make([]Check, 0, len(checks))}
-	firstUse := make(map[string]int)
-	for i, rc := range checks {
-		check, checkErrs := parseCheck(rc)
-		label := fmt.Sprintf("checks[%d]", i)
-		if rc.Name != "" {
-			label = fmt.Sprintf("checks[%d] (%s)", i, rc.Name)
-			if first, ok := firstUse[rc.Name]; ok {
-				checkErrs = append(checkErrs, fmt.Errorf("name %q is already used by checks[%d]", rc.Name, first))
-			} else {
-				firstUse[rc.Name] = i
-			}
-		}
-		for _, err := range checkErrs {
-			errs = append(errs, fmt.Errorf("config: %s: %w", label, err))
-		}
-		cfg.Checks = append(cfg.Checks, check)
-	}
-	if len(errs) > 0 {
-		return Config{}, errors.Join(errs...)
-	}
-	return cfg, nil
 }
 
 func parseCheck(rc rawCheck) (Check, []error) {

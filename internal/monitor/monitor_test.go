@@ -58,13 +58,15 @@ func TestRunSchedulesEveryCheckAndBeats(t *testing.T) {
 		{Name: "api", URL: "http://api.invalid", Interval: 20 * time.Millisecond, Timeout: 10 * time.Millisecond, ExpectedStatus: 200},
 		{Name: "web", URL: "http://web.invalid", Interval: 30 * time.Millisecond, Timeout: 10 * time.Millisecond, ExpectedStatus: 200},
 	}
+	if err := s.SetChecks(context.Background(), checks); err != nil {
+		t.Fatal(err)
+	}
 	runner := &fakeRunner{calls: map[string]int{}}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 
 	go func() {
 		done <- Run(ctx, Options{
-			Checks:            checks,
 			Store:             s,
 			Runner:            runner,
 			HeartbeatInterval: 10 * time.Millisecond,
@@ -117,12 +119,15 @@ func TestRunSchedulesEveryCheckAndBeats(t *testing.T) {
 func TestRunRunsChecksImmediately(t *testing.T) {
 	s := openStore(t)
 	checks := []config.Check{{Name: "api", URL: "http://api.invalid", Interval: time.Hour, Timeout: time.Second, ExpectedStatus: 200}}
+	if err := s.SetChecks(context.Background(), checks); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Options{Checks: checks, Store: s, Runner: &fakeRunner{calls: map[string]int{}}, HeartbeatInterval: time.Hour, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+		done <- Run(ctx, Options{Store: s, Runner: &fakeRunner{calls: map[string]int{}}, HeartbeatInterval: time.Hour, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	}()
 	t.Cleanup(func() {
 		cancel()

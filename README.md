@@ -30,8 +30,6 @@ A single Go binary that never stops watching. Close the TUI, walk away, SSH back
   old.
 - **Retention.** Results older than 30 days are removed automatically (`--retention` changes
   it, `0` keeps everything). Monitor definitions are never removed.
-- **Optional YAML import.** Already have a file? `up serve --config monitors.yaml` adds its
-  monitors to the database. Nothing else reads YAML.
 
 ## Install
 
@@ -104,28 +102,9 @@ not longer than the interval.
 | Flag | Commands | Default | Meaning |
 | --- | --- | --- | --- |
 | `--db PATH` | `serve`, `tui` | `up.db` | SQLite database; created if missing. |
-| `--config PATH` | `serve` | none | Optional YAML file to import before scheduling. |
 | `--retention DURATION` | `serve` | `720h` | How long to keep results; `0` keeps everything. |
 
 `up <command> -h` prints the full help.
-
-### Importing a YAML file
-
-Every field is required:
-
-```yaml
-checks:
-  - name: api
-    url: https://api.example.com/health
-    interval: 30s
-    timeout: 5s
-    expected_status: 200
-```
-
-New monitors are added, identical ones are left alone, and the whole import is rejected if
-any name conflicts with a different definition or any field is invalid. A rejected import
-changes nothing, and the YAML file is never modified. See
-[`up.example.yaml`](up.example.yaml).
 
 ## Contributing
 
