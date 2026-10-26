@@ -1,0 +1,13 @@
+# Example up configuration. Every field is required.
+checks:
+  - name: api
+    url: https://api.example.com/health
+    interval: 30s
+    timeout: 5s
+    expected_status: 200
+
+  - name: website
+    url: https://example.com
+    interval: 1m
+    timeout: 10s
+    expected_status: 200
