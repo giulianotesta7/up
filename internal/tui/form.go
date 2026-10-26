@@ -16,15 +16,24 @@ import (
 var fieldLabels = [...]string{"Name", "HTTP/HTTPS URL", "Interval", "Timeout", "Expected status"}
 
 type monitorForm struct {
-	values [5]string
-	focus  int
-	cursor int // rune offset in the focused field
-	err    error
-	saving bool
+	values       [5]string
+	focus        int
+	cursor       int // rune offset in the focused field
+	err          error
+	saving       bool
+	editing      bool
+	returnDetail bool
 }
 
 func newMonitorForm() *monitorForm {
 	return &monitorForm{values: [5]string{"", "", "30s", "5s", "200"}}
+}
+
+func editMonitorForm(c config.Check, detail bool) *monitorForm {
+	return &monitorForm{
+		values: [5]string{c.Name, c.URL, c.Interval.String(), c.Timeout.String(), strconv.Itoa(c.ExpectedStatus)},
+		focus:  1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail,
+	}
 }
 
 // check converts text only; all semantic rules belong to config.ValidateCheck.
@@ -53,7 +62,13 @@ func (m Model) save(c config.Check) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 		defer cancel()
-		return saveMsg{generation: m.generation, name: c.Name, err: m.store.AddCheck(ctx, c)}
+		var err error
+		if m.form.editing {
+			err = m.store.UpdateCheck(ctx, c)
+		} else {
+			err = m.store.AddCheck(ctx, c)
+		}
+		return saveMsg{generation: m.generation, name: c.Name, err: err}
 	}
 }
 
@@ -73,7 +88,12 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == "shift+tab" {
 			delta = -1
 		}
-		f.focus = (f.focus + delta + len(f.values)) % len(f.values)
+		first := 0
+		if f.editing {
+			first = 1 // The stored name is displayed, never focused or editable.
+		}
+		count := len(f.values) - first
+		f.focus = first + (f.focus-first+delta+count)%count
 		f.cursor = len([]rune(f.values[f.focus]))
 	case "enter":
 		c, err := f.check()
@@ -136,7 +156,11 @@ func (f *monitorForm) edit(msg tea.KeyPressMsg) {
 
 func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("New monitor") + "\n")
+	title := "New monitor"
+	if f.editing {
+		title = "Edit monitor"
+	}
+	b.WriteString(titleStyle.Render(title) + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr) + "\n")
 	for i, label := range fieldLabels {
 		marker := " "

@@ -169,7 +169,7 @@ func TestDatabaseFooterAllViews(t *testing.T) {
 	m := New(nil, func() time.Time { return now }, Options{DatabasePath: "/shared/up.db"})
 	next, _ := m.Update(snapshotMsg{snap: seededSnapshot(t, now)})
 	m = next.(Model)
-	for _, name := range []string{"list", "detail", "form"} {
+	for _, name := range []string{"list", "detail", "form", "edit", "delete"} {
 		t.Run(name, func(t *testing.T) {
 			current := m
 			if name == "detail" {
@@ -177,6 +177,12 @@ func TestDatabaseFooterAllViews(t *testing.T) {
 			}
 			if name == "form" {
 				current, _ = press(t, current, keyN)
+			}
+			if name == "edit" {
+				current, _ = press(t, current, keyE)
+			}
+			if name == "delete" {
+				current, _ = press(t, current, keyD)
 			}
 			out := view(current)
 			if !strings.HasSuffix(out, "\ndatabase: /shared/up.db") || strings.Count(out, "database: ") != 1 {
