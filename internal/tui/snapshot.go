@@ -57,8 +57,21 @@ func (s Snapshot) Stale(now time.Time) bool {
 	return !s.HasBeat || now.Sub(s.LastBeat) > StaleAfter
 }
 
+// Store is the database boundary used by the TUI.
+type Store interface {
+	Checks(context.Context) ([]config.Check, error)
+	Recent(context.Context, string, int) ([]check.Result, error)
+	Outages(context.Context, string, int) ([]store.Outage, error)
+	LastBeat(context.Context) (time.Time, bool, error)
+	AddCheck(context.Context, config.Check) error
+	UpdateCheck(context.Context, config.Check) error
+	DeleteCheck(context.Context, string) error
+}
+
+var _ Store = (*store.Store)(nil)
+
 // Load reads a snapshot from the store.
-func Load(ctx context.Context, s *store.Store) (Snapshot, error) {
+func Load(ctx context.Context, s Store) (Snapshot, error) {
 	var snap Snapshot
 	checks, err := s.Checks(ctx)
 	if err != nil {

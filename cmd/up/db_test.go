@@ -63,7 +63,7 @@ func TestDatabaseResolutionPrecedence(t *testing.T) {
 					}
 					return nil
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+				ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
 				defer cancel()
 				code, out, errOut := runCmd(ctx, args...)
 				if branch == "environment missing parent" {

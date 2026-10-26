@@ -14,7 +14,7 @@ import (
 // DefaultHeartbeatInterval is how often the daemon records that it is alive.
 const DefaultHeartbeatInterval = 10 * time.Second
 
-// DefaultDiscoveryInterval bounds how long a newly added check waits to start.
+// DefaultDiscoveryInterval bounds how long definition changes wait to be discovered.
 const DefaultDiscoveryInterval = 2 * time.Second
 
 // DefaultPruneInterval is how often results older than the retention are removed.
@@ -43,6 +43,13 @@ type Pruner interface {
 	Prune(context.Context, time.Time) (int64, error)
 }
 
+// DefinedRecorder is the optional definition-aware result API. Run prefers it
+// over Record so deleted or edited definitions reject obsolete results. Storage
+// remains compatible with record-only implementations and test fakes.
+type DefinedRecorder interface {
+	RecordDefined(context.Context, config.Check, check.Result) (bool, error)
+}
+
 // Options configures Run.
 type Options struct {
 	Store             Storage
@@ -59,8 +66,9 @@ type Options struct {
 }
 
 // Run reads the SQLite definitions, then starts each check
-// immediately and every Interval. Discovery starts only new names; existing
-// loops are never restarted. Transient discovery errors are logged and retried.
+// immediately and every Interval. Discovery cancels removed loops and restarts
+// edited definitions, preserving their last transition status. Unchanged loops
+// are left alone. Transient discovery errors are logged and retried.
 // Run joins every loop on cancellation; nothing is written after it returns.
 func Run(ctx context.Context, opts Options) error {
 	checks, err := opts.Store.Checks(ctx)
@@ -88,21 +96,65 @@ func Run(ctx context.Context, opts Options) error {
 			prune(ctx, opts, pruner)
 		}()
 	}
-	started := make(map[string]bool)
-	start := func(checks []config.Check) {
+	type runningLoop struct {
+		definition config.Check
+		cancel     context.CancelFunc
+		done       chan struct{}
+		// Only read after done closes, which synchronizes the loop's final write.
+		last check.Status
+	}
+	running := make(map[string]*runningLoop)
+	reconcile := func(checks []config.Check) {
+		definitions := make(map[string]config.Check, len(checks))
 		for _, c := range checks {
-			if started[c.Name] || ctx.Err() != nil {
+			definitions[c.Name] = c
+		}
+		previous := make(map[string]check.Status)
+		// A loop can finish before discovery (for example, a rejected result).
+		// Do not mistake its retained entry for a live, unchanged loop.
+		for name, active := range running {
+			select {
+			case <-active.done:
+				if c, exists := definitions[name]; exists && c == active.definition {
+					previous[name] = active.last
+				}
+				delete(running, name)
+			default:
+			}
+		}
+		// Cancel all obsolete loops before joining any one of them.
+		// Joining means a Runner that ignores cancellation can stall discovery.
+		for name, active := range running {
+			if c, exists := definitions[name]; !exists || c != active.definition {
+				active.cancel()
+			}
+		}
+		for name, active := range running {
+			if c, exists := definitions[name]; !exists || c != active.definition {
+				<-active.done
+				if exists {
+					previous[name] = active.last
+				}
+				delete(running, name)
+			}
+		}
+		for _, c := range checks {
+			if _, exists := running[c.Name]; exists || ctx.Err() != nil {
 				continue
 			}
-			started[c.Name] = true
+			loopCtx, cancel := context.WithCancel(ctx)
+			active := &runningLoop{definition: c, cancel: cancel, done: make(chan struct{}), last: previous[c.Name]}
+			running[c.Name] = active
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				loop(ctx, opts, c)
+				defer close(active.done)
+				defer cancel()
+				active.last = loop(loopCtx, opts, c, active.last)
 			}()
 		}
 	}
-	start(checks)
+	reconcile(checks)
 	ticker := time.NewTicker(opts.DiscoveryInterval)
 	defer ticker.Stop()
 discovery:
@@ -118,7 +170,7 @@ discovery:
 				}
 				continue
 			}
-			start(checks)
+			reconcile(checks)
 		}
 	}
 	wg.Wait()
@@ -164,27 +216,35 @@ func heartbeat(ctx context.Context, opts Options) {
 	}
 }
 
-func loop(ctx context.Context, opts Options, c config.Check) {
+func loop(ctx context.Context, opts Options, c config.Check, last check.Status) check.Status {
 	ticker := time.NewTicker(c.Interval)
 	defer ticker.Stop()
-	var last check.Status
 	for {
 		res := opts.Runner.Run(ctx, c)
 		if res.Status == check.StatusCanceled || ctx.Err() != nil {
-			return
+			return last
 		}
 		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
-		if err := opts.Store.Record(wctx, res); err != nil {
-			opts.Logger.Error("storing result failed", "check", c.Name, "error", err)
+		stored := true
+		var err error
+		if recorder, ok := opts.Store.(DefinedRecorder); ok {
+			stored, err = recorder.RecordDefined(wctx, c, res)
+		} else {
+			err = opts.Store.Record(wctx, res)
 		}
 		cancel()
+		if err != nil {
+			opts.Logger.Error("storing result failed", "check", c.Name, "error", err)
+		} else if !stored {
+			return last
+		}
 		if res.Status != last {
 			logTransition(opts.Logger, c, res)
 			last = res.Status
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return last
 		case <-ticker.C:
 		}
 	}

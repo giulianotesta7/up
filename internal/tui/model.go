@@ -27,13 +27,14 @@ type tickMsg struct{ generation uint64 }
 // Model is the Bubble Tea model of the TUI.
 type Model struct {
 	databasePath string
-	store        *store.Store
+	store        Store
 	now          func() time.Time
 	snap         Snapshot
 	err          error
 	selected     int
 	detail       bool
 	form         *monitorForm
+	deletion     *deletePrompt
 	generation   uint64
 	selectName   string
 }
@@ -45,7 +46,7 @@ type Options struct {
 
 // New returns a model reading from s; now is the clock used for ages and
 // staleness. Options may specify the database path shown in the footer.
-func New(s *store.Store, now func() time.Time, options ...Options) Model {
+func New(s Store, now func() time.Time, options ...Options) Model {
 	m := Model{store: s, now: now}
 	if len(options) > 0 {
 		m.databasePath = options[0].DatabasePath
@@ -107,9 +108,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			f.saving, f.err = false, msg.err
 			m.form = &f
 		} else {
+			m.detail = m.form.editing && m.form.returnDetail
 			m.form = nil
-			m.detail = false
 			m.selectName = msg.name
+		}
+		return m, m.load
+	case deleteMsg:
+		if msg.generation != m.generation || m.deletion == nil || !m.deletion.saving {
+			return m, nil
+		}
+		if msg.err != nil {
+			p := *m.deletion
+			p.saving, p.err = false, msg.err
+			m.deletion = &p
+		} else {
+			// Drop the deleted row even if the subsequent refresh fails.
+			services := make([]Service, 0, len(m.snap.Services))
+			for _, svc := range m.snap.Services {
+				if svc.Check.Name != m.deletion.name {
+					services = append(services, svc)
+				}
+			}
+			m.snap.Services = services
+			m.selected = min(m.selected, max(0, len(services)-1))
+			m.deletion, m.detail, m.selectName = nil, false, ""
 		}
 		return m, m.load
 	case tea.PasteMsg:
@@ -132,11 +154,23 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.form != nil {
 		return m.handleFormKey(msg)
 	}
+	if m.deletion != nil {
+		return m.handleDeleteKey(msg)
+	}
 	switch msg.String() {
 	case "q":
 		return m, tea.Quit
 	case "n":
 		m.form = newMonitorForm()
+	case "e", "d":
+		if m.selected < len(m.snap.Services) {
+			c := m.snap.Services[m.selected].Check
+			if msg.String() == "e" {
+				m.form = editMonitorForm(c, m.detail)
+			} else {
+				m.deletion = &deletePrompt{name: c.Name}
+			}
+		}
 	case "up", "k":
 		if !m.detail && m.selected > 0 {
 			m.selected--
@@ -164,6 +198,9 @@ func (m Model) View() tea.View {
 	}
 	if m.form != nil {
 		content = renderForm(*m.form, m.snap, now, m.err)
+	}
+	if m.deletion != nil {
+		content = renderDelete(*m.deletion, m.snap, now, m.err)
 	}
 	content += "\n" + helpStyle.Render("database: "+m.databasePath)
 	v := tea.NewView(content)

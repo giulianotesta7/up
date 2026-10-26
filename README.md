@@ -20,6 +20,10 @@ A single Go binary that never stops watching. Close the TUI, walk away, SSH back
   Redirects are followed and the final status is compared.
 - **Create monitors in the TUI.** Press `n`, fill in the form, save. The running daemon picks
   the new monitor up within about two seconds, without a restart.
+- **Edit monitors in the TUI.** Press `e` to change a monitor's URL, interval, timeout or
+  expected status without renaming it or restarting the daemon.
+- **Delete monitors in the TUI.** Press `d` and confirm to permanently remove a monitor
+  and all its history.
 - **Status at a glance.** Status, latency, last check and failure reason for every service.
   Open one to see its last error, when it went down, its recent checks and its recent
   outages (`03:12 → 03:40`).
@@ -108,16 +112,16 @@ Both commands resolve the database in this order:
 Only the last choice creates the parent directory (mode `0700`). Explicit paths
 and `UP_DB` never create parent directories. With either service, `up tui` opens
 the matching database with no flags unless you override it. The TUI footer shows
-`database: <path>` in the list, details and new-monitor form so you can check which
-database is open.
+`database: <path>` in every view so you can check which database is open.
 
 ### Keys
 
 | Where | Keys |
 | --- | --- |
-| List | `↑`/`↓` or `k`/`j` select · `enter` details · `n` new monitor · `q` quit |
-| Details | `esc` back · `n` new monitor · `q` quit |
-| New monitor | `tab`/`shift+tab` change field · `enter` save · `esc` cancel |
+| List | `↑`/`↓` or `k`/`j` select · `enter` details · `n` new monitor · `e` edit · `d` delete · `q` quit |
+| Details | `esc` back · `n` new monitor · `e` edit · `d` delete · `q` quit |
+| New or edit monitor | `tab`/`shift+tab` change field · `enter` save · `esc` cancel |
+| Delete confirmation | `y` delete · `n`/`esc` cancel |
 
 A new monitor needs a name and an HTTP or HTTPS URL. The interval defaults to `30s`, the
 timeout to `5s` and the expected status to `200`. The timeout must be greater than zero and
@@ -128,7 +132,7 @@ not longer than the interval.
 | Command | What it does |
 | --- | --- |
 | `up serve` | Runs the checks and stores the results until SIGINT or SIGTERM. |
-| `up tui` | Shows the stored results and creates monitors. Refreshes every 2 seconds. |
+| `up tui` | Shows stored results and creates, edits or deletes monitors. Refreshes every 2 seconds. |
 
 | Flag | Commands | Default | Meaning |
 | --- | --- | --- | --- |
