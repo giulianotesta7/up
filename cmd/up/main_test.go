@@ -5,12 +5,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/store"
 )
 
@@ -48,7 +48,7 @@ func TestServeHelp(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("up serve -h = %d, stderr %q; want 0", code, stderr)
 	}
-	for _, want := range []string{"Usage: up serve [flags]", "-config", "-db"} {
+	for _, want := range []string{"Usage: up serve [flags]", "-db", "-retention"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("up serve -h stdout = %q, want it to contain %q", stdout, want)
 		}
@@ -63,50 +63,21 @@ func TestServeRejectsBadFlag(t *testing.T) {
 	}
 }
 
-func TestServeRejectsInvalidConfigWithoutStarting(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "up.yaml")
-	dbPath := filepath.Join(dir, "up.db")
-	if err := os.WriteFile(cfgPath, []byte("checks:\n  - name: api\n    url: ftp://example.com\n    interval: 30s\n    timeout: 5s\n    expected_status: 200\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	code, stdout, stderr := runCmd(context.Background(), "serve", "--config", cfgPath, "--db", dbPath)
-
-	if code != 1 || stdout != "" {
-		t.Fatalf("up serve = %d, stdout %q; want 1", code, stdout)
-	}
-	if want := "up: config: checks[0] (api): url \"ftp://example.com\" must use http or https\n"; stderr != want {
-		t.Fatalf("stderr = %q, want %q", stderr, want)
-	}
-	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
-		t.Fatalf("database was created for an invalid config (stat error %v)", err)
-	}
-}
-
-func TestServeMissingConfig(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "missing.yaml")
-
-	code, _, stderr := runCmd(context.Background(), "serve", "--config", cfgPath, "--db", filepath.Join(dir, "up.db"))
-
-	if code != 1 || !strings.HasPrefix(stderr, "up: config: read "+cfgPath) {
-		t.Fatalf("up serve = %d, stderr %q; want 1 with a read error", code, stderr)
-	}
-}
-
 func TestServeRecordsResultsUntilCanceled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "up.yaml")
 	dbPath := filepath.Join(dir, "up.db")
-	cfg := "checks:\n  - name: api\n    url: " + srv.URL + "\n    interval: 50ms\n    timeout: 50ms\n    expected_status: 200\n"
-	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+	seed, err := store.Open(dbPath)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if err := seed.AddCheck(context.Background(), config.Check{Name: "api", URL: srv.URL, Interval: 50 * time.Millisecond, Timeout: 50 * time.Millisecond, ExpectedStatus: 200}); err != nil {
+		t.Fatal(err)
+	}
+	seed.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	type outcome struct {
@@ -115,7 +86,7 @@ func TestServeRecordsResultsUntilCanceled(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		code, stdout, stderr := runCmd(ctx, "serve", "--config", cfgPath, "--db", dbPath)
+		code, stdout, stderr := runCmd(ctx, "serve", "--db", dbPath)
 		done <- outcome{code, stdout, stderr}
 	}()
 
