@@ -196,7 +196,7 @@ func TestListView(t *testing.T) {
 	out := view(modelWith(seededSnapshot(t, now.Add(-5*time.Second))))
 
 	for _, want := range []string{
-		"SERVICE", "STATUS", "LATENCY", "LAST CHECK",
+		"MONITOR", "STATUS", "LATENCY", "LAST CHECK",
 		"api", "UP", "84ms", "30s ago",
 		"payments", "DOWN", "1m ago", reason,
 		"new", "PENDING",
@@ -335,7 +335,7 @@ func TestEmptyConfigMessage(t *testing.T) {
 
 func lineWith(out, name string) string {
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(strings.TrimLeft(line, " >"), name+" ") {
+		if strings.HasPrefix(strings.TrimLeft(line, " >▌●"), name+" ") {
 			return line
 		}
 	}

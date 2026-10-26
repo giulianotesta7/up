@@ -161,14 +161,16 @@ func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) stri
 		title = "Edit monitor"
 	}
 	b.WriteString(titleStyle.Render(title) + "\n")
-	b.WriteString(renderBanners(snap, now, loadErr) + "\n")
+	b.WriteString(renderBanners(snap, now, loadErr))
 	for i, label := range fieldLabels {
 		marker := " "
 		value := f.values[i]
 		if i == f.focus {
 			marker = ">"
 			runes := []rune(value)
-			value = string(runes[:f.cursor]) + "│" + string(runes[f.cursor:])
+			value = string(runes[:f.cursor]) + accentStyle.Render("│") + string(runes[f.cursor:])
+			label = accentStyle.Render(label)
+			marker = accentStyle.Render(marker)
 		}
 		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, value)
 	}
@@ -176,9 +178,9 @@ func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) stri
 		b.WriteString("\n" + warnStyle.Render("Cannot save monitor: "+f.err.Error()) + "\n")
 	}
 	if f.saving {
-		b.WriteString("\nSaving monitor… · ctrl+c quit")
+		b.WriteString("\n" + renderHelp("Saving monitor… · ctrl+c quit"))
 	} else {
-		b.WriteString("\n" + helpStyle.Render("tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
+		b.WriteString("\n" + renderHelp("tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
 	}
 	return b.String()
 }

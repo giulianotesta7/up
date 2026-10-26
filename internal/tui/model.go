@@ -3,9 +3,11 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/giulianotesta7/up/internal/store"
 )
@@ -31,6 +33,7 @@ type Model struct {
 	now          func() time.Time
 	snap         Snapshot
 	err          error
+	width        int
 	selected     int
 	detail       bool
 	form         *monitorForm
@@ -69,6 +72,9 @@ func (m Model) load() tea.Msg {
 // Update handles snapshots, poll ticks and keys.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		return m, nil
 	case snapshotMsg:
 		if msg.generation != m.generation {
 			return m, nil
@@ -202,7 +208,13 @@ func (m Model) View() tea.View {
 	if m.deletion != nil {
 		content = renderDelete(*m.deletion, m.snap, now, m.err)
 	}
+	content = renderHeader(m.snap, m.width) + content
 	content += "\n" + helpStyle.Render("database: "+m.databasePath)
+	// Lipgloss v2 emits truecolor styles; colorprofile only recognizes boolean
+	// NO_COLOR values. Honor every nonempty value, including in direct renders.
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		content = ansi.Strip(content)
+	}
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
