@@ -110,3 +110,7 @@ not longer than the interval.
 
 Issues and pull requests are welcome. Run `go vet ./...` and `go test -race ./...` before
 sending changes.
+
+## License
+
+up is licensed under the MIT License. See [LICENSE](LICENSE).
