@@ -72,9 +72,9 @@ func parseCheck(rc rawCheck) (Check, []error) {
 
 	switch {
 	case rc.ExpectedStatus == nil:
-		errs = append(errs, errors.New("expected_status is required"))
+		errs = append(errs, errors.New("expected status is required"))
 	case *rc.ExpectedStatus < 100 || *rc.ExpectedStatus > 599:
-		errs = append(errs, fmt.Errorf("expected_status %d must be between 100 and 599", *rc.ExpectedStatus))
+		errs = append(errs, fmt.Errorf("expected status %d must be between 100 and 599", *rc.ExpectedStatus))
 	default:
 		check.ExpectedStatus = *rc.ExpectedStatus
 	}

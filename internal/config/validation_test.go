@@ -51,3 +51,14 @@ func TestValidateCheck(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateCheckMessagesUseReadableFieldName(t *testing.T) {
+	c := config.Check{Name: "api", URL: "https://example.com", Interval: time.Minute, Timeout: time.Second, ExpectedStatus: 99}
+	if err := config.ValidateCheck(c); err == nil || err.Error() != "expected status 99 must be between 100 and 599" {
+		t.Fatalf("ValidateCheck() = %v", err)
+	}
+	c.ExpectedStatus = 0
+	if err := config.ValidateCheck(c); err == nil || err.Error() != "expected status 0 must be between 100 and 599" {
+		t.Fatalf("zero status: %v", err)
+	}
+}
