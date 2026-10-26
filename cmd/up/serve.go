@@ -15,25 +15,34 @@ import (
 
 const serveHelp = `Usage: up serve [flags]
 
-Runs every check in the config file right away and then at its interval,
-storing each result in the database, until it receives SIGINT or SIGTERM.
-An invalid config is reported and nothing is started.
+Runs checks stored in SQLite right away and then at their intervals, storing
+results until SIGINT or SIGTERM. New checks are discovered about every 2 seconds
+without restarting existing checks. No YAML is required; an empty database is OK.
+
+--config PATH is an optional YAML import before scheduling. New definitions are
+appended, identical definitions are unchanged, and any same-name conflict rejects
+the entire import. Invalid imports start nothing. Existing definitions, history,
+and YAML files are preserved.
 
 Flags:
 `
 
 func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	cfgPath := fs.String("config", "up.yaml", "path to the YAML config file")
+	cfgPath := fs.String("config", "", "optional YAML file to import into SQLite")
 	dbPath := fs.String("db", "up.db", "path to the SQLite database (created if missing)")
 	if code, ok := parseFlags(fs, serveHelp, args, stdout, stderr); !ok {
 		return code
 	}
 
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "up: %v\n", err)
-		return 1
+	var checks []config.Check
+	if *cfgPath != "" {
+		cfg, err := config.Load(*cfgPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "up: %v\n", err)
+			return 1
+		}
+		checks = cfg.Checks
 	}
 	s, err := store.Open(*dbPath)
 	if err != nil {
@@ -43,7 +52,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	defer s.Close()
 
 	err = monitor.Run(ctx, monitor.Options{
-		Checks:            cfg.Checks,
+		Checks:            checks,
 		Store:             s,
 		Runner:            check.New(),
 		HeartbeatInterval: monitor.DefaultHeartbeatInterval,

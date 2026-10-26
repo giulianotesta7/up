@@ -9,11 +9,13 @@ import (
 
 	"github.com/giulianotesta7/up/internal/check"
 	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/store"
 )
 
 // DefaultHeartbeatInterval is how often the daemon records that it is alive.
 const DefaultHeartbeatInterval = 10 * time.Second
+
+// DefaultDiscoveryInterval bounds how long a newly added check waits to start.
+const DefaultDiscoveryInterval = 2 * time.Second
 
 // writeTimeout bounds each database write, so a locked database cannot
 // stall a check loop forever.
@@ -24,24 +26,45 @@ type Runner interface {
 	Run(ctx context.Context, c config.Check) check.Result
 }
 
+// Storage is the append-only definition and observation API used by Run.
+// *store.Store implements it.
+type Storage interface {
+	Checks(context.Context) ([]config.Check, error)
+	ImportChecks(context.Context, []config.Check) error
+	Record(context.Context, check.Result) error
+	Beat(context.Context, time.Time) error
+}
+
 // Options configures Run.
 type Options struct {
+	// Checks is an optional additive import, not the scheduling source.
 	Checks            []config.Check
-	Store             *store.Store
+	Store             Storage
 	Runner            Runner
 	HeartbeatInterval time.Duration
+	// DiscoveryInterval defaults to DefaultDiscoveryInterval when nonpositive.
+	DiscoveryInterval time.Duration
 	Logger            *slog.Logger
 }
 
-// Run stores the checks, then runs each one right away and every Interval
-// after that, recording the results, until ctx is done. It also records a
-// heartbeat every HeartbeatInterval. It returns once every loop stopped;
-// nothing is written after it returns.
+// Run imports optional Checks, reads SQLite definitions, then starts each check
+// immediately and every Interval. Discovery starts only new names; existing
+// loops are never restarted. Transient discovery errors are logged and retried.
+// Run joins every loop on cancellation; nothing is written after it returns.
 func Run(ctx context.Context, opts Options) error {
-	if err := opts.Store.SetChecks(ctx, opts.Checks); err != nil {
+	if len(opts.Checks) > 0 {
+		if err := opts.Store.ImportChecks(ctx, opts.Checks); err != nil {
+			return err
+		}
+	}
+	checks, err := opts.Store.Checks(ctx)
+	if err != nil {
 		return err
 	}
-	opts.Logger.Info("monitoring started", "checks", len(opts.Checks))
+	if opts.DiscoveryInterval <= 0 {
+		opts.DiscoveryInterval = DefaultDiscoveryInterval
+	}
+	opts.Logger.Info("monitoring started", "checks", len(checks))
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -49,12 +72,38 @@ func Run(ctx context.Context, opts Options) error {
 		defer wg.Done()
 		heartbeat(ctx, opts)
 	}()
-	for _, c := range opts.Checks {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			loop(ctx, opts, c)
-		}()
+	started := make(map[string]bool)
+	start := func(checks []config.Check) {
+		for _, c := range checks {
+			if started[c.Name] || ctx.Err() != nil {
+				continue
+			}
+			started[c.Name] = true
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				loop(ctx, opts, c)
+			}()
+		}
+	}
+	start(checks)
+	ticker := time.NewTicker(opts.DiscoveryInterval)
+	defer ticker.Stop()
+discovery:
+	for {
+		select {
+		case <-ctx.Done():
+			break discovery
+		case <-ticker.C:
+			checks, err := opts.Store.Checks(ctx)
+			if err != nil {
+				if ctx.Err() == nil {
+					opts.Logger.Error("discovering checks failed", "error", err)
+				}
+				continue
+			}
+			start(checks)
+		}
 	}
 	wg.Wait()
 	opts.Logger.Info("monitoring stopped")

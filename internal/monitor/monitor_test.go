@@ -120,7 +120,21 @@ func TestRunRunsChecksImmediately(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go Run(ctx, Options{Checks: checks, Store: s, Runner: &fakeRunner{calls: map[string]int{}}, HeartbeatInterval: time.Hour, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{Checks: checks, Store: s, Runner: &fakeRunner{calls: map[string]int{}}, HeartbeatInterval: time.Hour, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("Run did not stop")
+		}
+	})
 
 	waitFor(t, "the first result without waiting an interval", func() bool {
 		_, ok, _ := s.Latest(context.Background(), "api")
