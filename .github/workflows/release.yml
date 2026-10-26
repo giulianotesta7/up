@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./... -count=1 -timeout 10m
+
+      - name: Build release files
+        run: |
+          mkdir dist
+          for arch in amd64 arm64; do
+            mkdir "dist/$arch"
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "-s -w" -o "dist/$arch/up" ./cmd/up
+            tar -czf "dist/up_linux_${arch}.tar.gz" -C "dist/$arch" up
+          done
+          cp deploy/up.service dist/up.service
+          (cd dist && sha256sum up_linux_*.tar.gz > checksums.txt)
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/up_linux_amd64.tar.gz dist/up_linux_arm64.tar.gz dist/checksums.txt dist/up.service \
+            --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
