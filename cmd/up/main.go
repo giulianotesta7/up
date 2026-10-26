@@ -16,6 +16,7 @@ const usage = `Usage: up <command> [flags]
 
 Commands:
   serve   Run the HTTP checks and store their results (keep it running, for example under systemd)
+  tui     Show the stored results in the terminal
 
 Run 'up <command> -h' for the flags of a command.
 `
@@ -38,6 +39,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "serve":
 		return serve(ctx, args[1:], stdout, stderr)
+	case "tui":
+		return runTUI(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "up: unknown command %q\n\n%s", args[0], usage)
 		return 2

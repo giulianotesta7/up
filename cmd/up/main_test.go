@@ -149,3 +149,37 @@ func TestServeRecordsResultsUntilCanceled(t *testing.T) {
 		t.Fatal("serve did not stop after cancel")
 	}
 }
+
+func TestTUIHelp(t *testing.T) {
+	code, stdout, stderr := runCmd(context.Background(), "tui", "-h")
+
+	if code != 0 || stderr != "" {
+		t.Fatalf("up tui -h = %d, stderr %q; want 0", code, stderr)
+	}
+	for _, want := range []string{"Usage: up tui [flags]", "-db"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("up tui -h stdout = %q, want it to contain %q", stdout, want)
+		}
+	}
+}
+
+func TestTUIRejectsBadFlag(t *testing.T) {
+	code, stdout, stderr := runCmd(context.Background(), "tui", "--nope")
+
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "flag provided but not defined: -nope") || !strings.Contains(stderr, "Usage: up tui [flags]") {
+		t.Fatalf("up tui --nope = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+func TestTUIMissingDatabaseDoesNotCreateIt(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "up.db")
+
+	code, stdout, stderr := runCmd(context.Background(), "tui", "--db", dbPath)
+
+	if code != 1 || stdout != "" || !strings.HasPrefix(stderr, "up: store: open "+dbPath) {
+		t.Fatalf("up tui = %d, stdout %q, stderr %q; want 1 with a store open error", code, stdout, stderr)
+	}
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatalf("up tui created the database (stat error %v)", err)
+	}
+}
