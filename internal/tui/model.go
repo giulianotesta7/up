@@ -17,20 +17,24 @@ const pollInterval = 2 * time.Second
 const loadTimeout = 5 * time.Second
 
 type snapshotMsg struct {
-	snap Snapshot
-	err  error
+	snap       Snapshot
+	err        error
+	generation uint64
 }
 
-type tickMsg struct{}
+type tickMsg struct{ generation uint64 }
 
 // Model is the Bubble Tea model of the TUI.
 type Model struct {
-	store    *store.Store
-	now      func() time.Time
-	snap     Snapshot
-	err      error
-	selected int
-	detail   bool
+	store      *store.Store
+	now        func() time.Time
+	snap       Snapshot
+	err        error
+	selected   int
+	detail     bool
+	form       *monitorForm
+	generation uint64
+	selectName string
 }
 
 // New returns a model reading from s; now is the clock used for ages and
@@ -48,17 +52,29 @@ func (m Model) load() tea.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
 	snap, err := Load(ctx, m.store)
-	return snapshotMsg{snap: snap, err: err}
+	return snapshotMsg{snap: snap, err: err, generation: m.generation}
 }
 
 // Update handles snapshots, poll ticks and keys.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case snapshotMsg:
+		if msg.generation != m.generation {
+			return m, nil
+		}
 		// A failed read keeps the last good snapshot on screen.
 		m.err = msg.err
 		if msg.err == nil {
 			m.snap = msg.snap
+			if m.selectName != "" {
+				for i, svc := range m.snap.Services {
+					if svc.Check.Name == m.selectName {
+						m.selected = i
+						m.selectName = ""
+						break
+					}
+				}
+			}
 		}
 		if m.selected >= len(m.snap.Services) {
 			m.selected = max(0, len(m.snap.Services)-1)
@@ -66,9 +82,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.detail = false
 			}
 		}
-		return m, tea.Tick(pollInterval, func(time.Time) tea.Msg { return tickMsg{} })
+		return m, tea.Tick(pollInterval, func(time.Time) tea.Msg { return tickMsg{generation: m.generation} })
 	case tickMsg:
+		if msg.generation != m.generation {
+			return m, nil
+		}
 		return m, m.load
+	case saveMsg:
+		if msg.generation != m.generation || m.form == nil || !m.form.saving {
+			return m, nil
+		}
+		if msg.err != nil {
+			f := *m.form
+			f.saving, f.err = false, msg.err
+			m.form = &f
+		} else {
+			m.form = nil
+			m.detail = false
+			m.selectName = msg.name
+		}
+		return m, m.load
+	case tea.PasteMsg:
+		if m.form != nil && !m.form.saving {
+			f := *m.form
+			f.insert(msg.Content)
+			m.form = &f
+		}
+		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
@@ -76,9 +116,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "q", "ctrl+c":
+	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
+	if m.form != nil {
+		return m.handleFormKey(msg)
+	}
+	switch msg.String() {
+	case "q":
+		return m, tea.Quit
+	case "n":
+		m.form = newMonitorForm()
 	case "up", "k":
 		if !m.detail && m.selected > 0 {
 			m.selected--
@@ -103,6 +151,9 @@ func (m Model) View() tea.View {
 	content := renderList(m.snap, m.selected, now, m.err)
 	if m.detail && m.selected < len(m.snap.Services) {
 		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err)
+	}
+	if m.form != nil {
+		content = renderForm(*m.form, m.snap, now, m.err)
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

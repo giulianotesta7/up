@@ -171,15 +171,27 @@ func TestTUIRejectsBadFlag(t *testing.T) {
 	}
 }
 
-func TestTUIMissingDatabaseDoesNotCreateIt(t *testing.T) {
+func TestTUIMissingDatabaseCreatesIt(t *testing.T) {
+	t.Chdir(t.TempDir())
 	dbPath := filepath.Join(t.TempDir(), "up.db")
-
+	previous := runTUIProgram
+	t.Cleanup(func() { runTUIProgram = previous })
+	started := false
+	runTUIProgram = func(ctx context.Context, s *store.Store) error {
+		started = true
+		checks, err := s.Checks(ctx)
+		if err != nil || len(checks) != 0 {
+			t.Fatalf("first-use checks = %v, %v", checks, err)
+		}
+		return nil
+	}
 	code, stdout, stderr := runCmd(context.Background(), "tui", "--db", dbPath)
-
-	if code != 1 || stdout != "" || !strings.HasPrefix(stderr, "up: store: open "+dbPath) {
-		t.Fatalf("up tui = %d, stdout %q, stderr %q; want 1 with a store open error", code, stdout, stderr)
+	if code != 0 || stdout != "" || stderr != "" || !started {
+		t.Fatalf("up tui = %d, stdout %q, stderr %q, started %v", code, stdout, stderr, started)
 	}
-	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
-		t.Fatalf("up tui created the database (stat error %v)", err)
+	s, err := store.OpenReadOnly(dbPath)
+	if err != nil {
+		t.Fatalf("first-use database not initialized: %v", err)
 	}
+	s.Close()
 }

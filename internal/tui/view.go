@@ -54,7 +54,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error) strin
 		}
 	}
 
-	b.WriteString("\n" + helpStyle.Render("↑/↓ select · enter details · q quit"))
+	b.WriteString("\n" + helpStyle.Render("↑/↓ select (k/j) · enter details · n new monitor · q quit · ctrl+c quit"))
 	return b.String()
 }
 
@@ -103,7 +103,7 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error) string
 		fmt.Fprintf(&b, "  %s → %s (%s)   %s\n", formatTime(o.Start, now), formatTime(o.End, now), o.End.Sub(o.Start), o.Error)
 	}
 
-	b.WriteString("\n" + helpStyle.Render("esc back · q quit"))
+	b.WriteString("\n" + helpStyle.Render("esc back · n new monitor · q quit · ctrl+c quit"))
 	return b.String()
 }
 

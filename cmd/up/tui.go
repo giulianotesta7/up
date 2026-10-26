@@ -12,29 +12,36 @@ import (
 
 const tuiHelp = `Usage: up tui [flags]
 
-Shows the checks and results stored by 'up serve', refreshing every 2s.
-It only reads the database; checks keep running while it is closed.
+Create monitors and show stored results, refreshing every 2s.
+Creates the SQLite database on first use; no YAML or daemon startup required.
+Keep 'up serve' running to discover monitors and record results while closed.
+New monitors require a name and HTTP/HTTPS URL. Defaults: interval 30s,
+timeout 5s, expected status 200. Creation only; no editing or deletion.
 
-Keys: ↑/↓ or k/j select · enter details · esc back · q quit
+Keys: ↑/↓ or k/j select · enter details · n new monitor · esc back · q/ctrl+c quit
+Form: tab/shift+tab focus · enter save · esc cancel · ctrl+c quit
 
 Flags:
 `
 
+// runTUIProgram is the interactive boundary, replaced in CLI tests.
+var runTUIProgram = tui.Run
+
 func runTUI(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
-	dbPath := fs.String("db", "up.db", "path to the SQLite database written by 'up serve'")
+	dbPath := fs.String("db", "up.db", "path to the SQLite database (created if missing)")
 	if code, ok := parseFlags(fs, tuiHelp, args, stdout, stderr); !ok {
 		return code
 	}
 
-	s, err := store.OpenReadOnly(*dbPath)
+	s, err := store.Open(*dbPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "up: %v\n", err)
 		return 1
 	}
 	defer s.Close()
 
-	if err := tui.Run(ctx, s); err != nil {
+	if err := runTUIProgram(ctx, s); err != nil {
 		fmt.Fprintf(stderr, "up: %v\n", err)
 		return 1
 	}
