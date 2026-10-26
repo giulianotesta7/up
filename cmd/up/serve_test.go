@@ -17,6 +17,7 @@ import (
 )
 
 func TestServeRunsSQLiteDefinitionsAndPreservesHistory(t *testing.T) {
+	isolateDefaultDatabase(t)
 	for _, mode := range []string{"empty", "preexisting"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
@@ -103,6 +104,7 @@ func TestServeHelpDescribesSQLite(t *testing.T) {
 }
 
 func TestServeRetentionPrunesOldResults(t *testing.T) {
+	isolateDefaultDatabase(t)
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "up.db")
 	s, err := store.Open(dbPath)
@@ -132,6 +134,7 @@ func TestServeRetentionPrunesOldResults(t *testing.T) {
 }
 
 func TestServeRejectsNegativeRetention(t *testing.T) {
+	isolateDefaultDatabase(t)
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "up.db")
 	code, out, errOut := runCmd(context.Background(), "serve", "--db", dbPath, "--retention", "-1h")

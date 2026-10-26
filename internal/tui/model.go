@@ -26,21 +26,31 @@ type tickMsg struct{ generation uint64 }
 
 // Model is the Bubble Tea model of the TUI.
 type Model struct {
-	store      *store.Store
-	now        func() time.Time
-	snap       Snapshot
-	err        error
-	selected   int
-	detail     bool
-	form       *monitorForm
-	generation uint64
-	selectName string
+	databasePath string
+	store        *store.Store
+	now          func() time.Time
+	snap         Snapshot
+	err          error
+	selected     int
+	detail       bool
+	form         *monitorForm
+	generation   uint64
+	selectName   string
+}
+
+// Options supplies display metadata for the open store.
+type Options struct {
+	DatabasePath string
 }
 
 // New returns a model reading from s; now is the clock used for ages and
-// staleness.
-func New(s *store.Store, now func() time.Time) Model {
-	return Model{store: s, now: now}
+// staleness. Options may specify the database path shown in the footer.
+func New(s *store.Store, now func() time.Time, options ...Options) Model {
+	m := Model{store: s, now: now}
+	if len(options) > 0 {
+		m.databasePath = options[0].DatabasePath
+	}
+	return m
 }
 
 // Init loads the first snapshot.
@@ -155,14 +165,15 @@ func (m Model) View() tea.View {
 	if m.form != nil {
 		content = renderForm(*m.form, m.snap, now, m.err)
 	}
+	content += "\n" + helpStyle.Render("database: "+m.databasePath)
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
 }
 
 // Run shows the TUI until the user quits or ctx is done.
-func Run(ctx context.Context, s *store.Store) error {
-	p := tea.NewProgram(New(s, time.Now), tea.WithContext(ctx))
+func Run(ctx context.Context, s *store.Store, options ...Options) error {
+	p := tea.NewProgram(New(s, time.Now, options...), tea.WithContext(ctx))
 	_, err := p.Run()
 	if err != nil && ctx.Err() != nil && errors.Is(err, tea.ErrProgramKilled) {
 		return nil

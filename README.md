@@ -50,8 +50,31 @@ That installs the unit from [`deploy/up.service`](deploy/up.service) in
 `~/.config/systemd/user` and starts it as you, using `~/.config/up/up.db`.
 It only asks for sudo when the binary directory needs it and to enable linger,
 which keeps the service running after logout. If linger fails, follow the printed hint.
-Logs are in `journalctl --user -u up -f`. Other options: `--version vX.Y.Z` to pin a release
-and `--uninstall` to remove the binary and units (the database is kept).
+Logs are in `journalctl --user -u up -f`.
+
+For a shared system service, use `--system` instead of `--service`:
+
+```console
+curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh -s -- --system
+```
+
+This installs [`deploy/up-system.service`](deploy/up-system.service), runs it as the
+system user `up`, and shares `/var/lib/up/up.db` through the `up` group. It requires
+root privileges and adds the invoking user (or `SUDO_USER`) to that group. When run
+as root without `SUDO_USER`, it skips membership changes; add each intended user
+with `sudo usermod -aG up USER`. Members can read and change all monitors and history.
+Run `newgrp up` to use the TUI in the current shell, or log out and back in. Until
+then, use `sudo -u up up tui`. Logs are in `journalctl -u up -f`.
+The installer warns when an existing unit lacks `UMask=0007` and fixes permissions of an existing `/var/lib/up/up.db`.
+
+The installer prints a copy command if it finds the invoking user's old database;
+it never migrates data automatically. An existing user unit is kept, but the shared
+system database takes precedence for `up tui` unless overridden.
+
+Choose the plain binary for manual startup, `--service` for a per-user daemon, or
+`--system` for a shared daemon. Other options: `--version vX.Y.Z` to pin a release
+and `--uninstall` to remove the binary and units. Databases, the system `up` user
+and the `up` group are kept.
 
 To build from source you need Go 1.26.10:
 
@@ -75,10 +98,18 @@ In another terminal, open the TUI and press `n` to add your first monitor:
 up tui
 ```
 
-Both commands use `~/.config/up/up.db` by default, creating the directory and database
-on first use. They honor `XDG_CONFIG_HOME`; `--db PATH` overrides the database without
-creating parent directories. With the user service, `up tui` opens the same database
-with no flags.
+Both commands resolve the database in this order:
+
+1. `--db PATH`, when passed.
+2. `UP_DB`, when non-empty.
+3. `/var/lib/up/up.db`, when it exists as a regular file.
+4. `~/.config/up/up.db`, honoring `XDG_CONFIG_HOME`.
+
+Only the last choice creates the parent directory (mode `0700`). Explicit paths
+and `UP_DB` never create parent directories. With either service, `up tui` opens
+the matching database with no flags unless you override it. The TUI footer shows
+`database: <path>` in the list, details and new-monitor form so you can check which
+database is open.
 
 ### Keys
 
@@ -101,7 +132,7 @@ not longer than the interval.
 
 | Flag | Commands | Default | Meaning |
 | --- | --- | --- | --- |
-| `--db PATH` | `serve`, `tui` | `~/.config/up/up.db` | SQLite database; honors `XDG_CONFIG_HOME`, created if missing. |
+| `--db PATH` | `serve`, `tui` | `UP_DB`, existing system database, or user config path | SQLite database, created if missing; see resolution order above. |
 | `--retention DURATION` | `serve` | `720h` | How long to keep results; `0` keeps everything. |
 
 `up <command> -h` prints the full help.

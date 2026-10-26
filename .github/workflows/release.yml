@@ -33,6 +33,7 @@ jobs:
             tar -czf "dist/up_linux_${arch}.tar.gz" -C "dist/$arch" up
           done
           cp deploy/up.service dist/up.service
+          cp deploy/up-system.service dist/up-system.service
           (cd dist && sha256sum up_linux_*.tar.gz > checksums.txt)
 
       - name: Publish release
@@ -46,5 +47,5 @@ jobs:
             notes_flag="--generate-notes"
           fi
           gh release create "$GITHUB_REF_NAME" \
-            dist/up_linux_amd64.tar.gz dist/up_linux_arm64.tar.gz dist/checksums.txt dist/up.service \
+            dist/up_linux_amd64.tar.gz dist/up_linux_arm64.tar.gz dist/checksums.txt dist/up.service dist/up-system.service \
             --title "$GITHUB_REF_NAME" $notes_flag --verify-tag

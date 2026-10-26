@@ -12,6 +12,7 @@ import (
 
 	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/store"
+	"github.com/giulianotesta7/up/internal/tui"
 )
 
 func TestTUICreationHelp(t *testing.T) {
@@ -35,6 +36,7 @@ func TestTUICreationHelp(t *testing.T) {
 }
 
 func TestTUIReadWriteFirstUseAndProgramErrors(t *testing.T) {
+	isolateDefaultDatabase(t)
 	for _, emptyFile := range []bool{false, true} {
 		t.Run(map[bool]string{false: "missing", true: "empty"}[emptyFile], func(t *testing.T) {
 			t.Chdir(t.TempDir())
@@ -45,7 +47,7 @@ func TestTUIReadWriteFirstUseAndProgramErrors(t *testing.T) {
 			}
 			previous := runTUIProgram
 			t.Cleanup(func() { runTUIProgram = previous })
-			runTUIProgram = func(ctx context.Context, s *store.Store) error {
+			runTUIProgram = func(ctx context.Context, s *store.Store, _ ...tui.Options) error {
 				if err := s.AddCheck(ctx, config.Check{
 					Name: "first", URL: "https://example.com", Interval: 30 * time.Second,
 					Timeout: 5 * time.Second, ExpectedStatus: 200,
@@ -72,6 +74,7 @@ func TestTUIReadWriteFirstUseAndProgramErrors(t *testing.T) {
 }
 
 func TestTUIInvalidDatabasesRemainClear(t *testing.T) {
+	isolateDefaultDatabase(t)
 	for _, kind := range []string{"corrupt", "incompatible", "uninitialized incompatible"} {
 		t.Run(kind, func(t *testing.T) {
 			t.Chdir(t.TempDir())
@@ -101,7 +104,7 @@ func TestTUIInvalidDatabasesRemainClear(t *testing.T) {
 			}
 			previous := runTUIProgram
 			t.Cleanup(func() { runTUIProgram = previous })
-			runTUIProgram = func(context.Context, *store.Store) error {
+			runTUIProgram = func(context.Context, *store.Store, ...tui.Options) error {
 				t.Fatal("UI started for invalid database")
 				return nil
 			}
