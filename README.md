@@ -127,11 +127,6 @@ any name conflicts with a different definition or any field is invalid. A reject
 changes nothing, and the YAML file is never modified. See
 [`up.example.yaml`](up.example.yaml).
 
-## Not included
-
-Editing and deleting monitors, alerts, a remote API or client, non-HTTP checks and
-resource or process monitoring. `up` is meant to run on the server you use it from.
-
 ## Contributing
 
 Issues and pull requests are welcome. Run `go vet ./...` and `go test -race ./...` before
