@@ -241,7 +241,7 @@ func TestDetailView(t *testing.T) {
 		"payments", "https://pay.example.com",
 		"Interval: 1m0s", "Timeout: 10s", "Expected status: 204",
 		"Status: DOWN", "Last error: " + reason, "Down since: Oct 25 03:44:00 (1m ago)",
-		"Recent checks (oldest → newest): █▁▁█▁",
+		"84ms│", "0│", "older", "avg 84ms · p95 84ms · max 84ms · 3 failed of 5",
 		"Oct 25 03:44:00 → ongoing",
 		"Oct 25 03:12:00 → Oct 25 03:40:00 (28m0s)",
 		"esc back",

@@ -16,7 +16,7 @@ import (
 const StaleAfter = 3 * monitor.DefaultHeartbeatInterval
 
 const (
-	recentLimit = 20
+	recentLimit = 28
 	outageLimit = 5
 )
 

@@ -198,9 +198,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // View renders the list, or the detail of the selected service.
 func (m Model) View() tea.View {
 	now := m.now()
-	content := renderList(m.snap, m.selected, now, m.err)
+	content := renderList(m.snap, m.selected, now, m.err, m.width)
 	if m.detail && m.selected < len(m.snap.Services) {
-		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err)
+		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width)
 	}
 	if m.form != nil {
 		content = renderForm(*m.form, m.snap, now, m.err)

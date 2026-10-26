@@ -31,6 +31,7 @@ var (
 	headerStyle       = helpStyle.Bold(true)
 	upStyle           = lipgloss.NewStyle().Foreground(theme.up)
 	downStyle         = lipgloss.NewStyle().Foreground(theme.down).Bold(true)
+	slowStyle         = lipgloss.NewStyle().Foreground(theme.warn)
 	pendingStyle      = helpStyle
 	warnStyle         = lipgloss.NewStyle().Foreground(theme.warn).Bold(true)
 )

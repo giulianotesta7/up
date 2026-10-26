@@ -7,13 +7,11 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-
-	"github.com/giulianotesta7/up/internal/check"
 )
 
 const timeLayout = "Jan 02 15:04:05"
 
-func renderList(snap Snapshot, selected int, now time.Time, loadErr error) string {
+func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width int) string {
 	var b strings.Builder
 	b.WriteString(renderBanners(snap, now, loadErr))
 
@@ -24,11 +22,22 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error) strin
 		for _, s := range snap.Services {
 			nameWidth = max(nameWidth, ansi.StringWidth(s.Check.Name))
 		}
-		row := func(marker, dot, name, status, latency, last, reason string) string {
+		// Drop the trend before it crowds the existing columns. Long names
+		// also consume terminal cells, including double-width characters.
+		showTrend := width <= 0 || width >= max(78, nameWidth+62)
+		row := func(marker, dot, name, status, latency, trend, last, reason string) string {
 			padding := strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name)))
-			return strings.TrimRight(marker+" "+dot+" "+name+padding+"  "+status+fmt.Sprintf("  %8s  %-10s  %s", latency, last, reason), " ")
+			middle := ""
+			if showTrend {
+				middle = "  " + trend + strings.Repeat(" ", max(0, 16-ansi.StringWidth(trend)))
+			}
+			prefix := marker + " " + dot + " " + name + padding + "  " + status + fmt.Sprintf("  %8s", latency) + middle
+			if showTrend {
+				return prefix + "  " + strings.TrimRight(fmt.Sprintf("%-10s  %s", last, reason), " ")
+			}
+			return strings.TrimRight(prefix+fmt.Sprintf("  %-10s  %s", last, reason), " ")
 		}
-		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", "STATUS ", "LATENCY", "LAST CHECK", "")) + "\n")
+		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", "STATUS ", "LATENCY", "TREND (16)", "LAST CHECK", "")) + "\n")
 		for i, s := range snap.Services {
 			marker := " "
 			if i == selected {
@@ -43,7 +52,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error) strin
 			if i == selected {
 				name = selectedNameStyle.Render(name)
 			}
-			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, 7), latency, last, reason) + "\n")
+			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, 7), latency, sparkline(s.Recent, 16), last, reason) + "\n")
 		}
 	}
 
@@ -51,7 +60,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error) strin
 	return b.String()
 }
 
-func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error) string {
+func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width int) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + s.Check.URL + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
@@ -72,15 +81,18 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error) string
 	if len(s.Recent) == 0 {
 		b.WriteString("No checks yet.\n")
 	} else {
-		var strip strings.Builder
-		for i := len(s.Recent) - 1; i >= 0; i-- {
-			if s.Recent[i].Status == check.StatusUp {
-				strip.WriteString(upStyle.Render("█"))
-			} else {
-				strip.WriteString(downStyle.Render("▁"))
-			}
+		chartWidth := recentLimit
+		if width > 0 {
+			chartWidth = min(chartWidth, max(8, width-graphLabelWidth-1))
 		}
-		fmt.Fprintf(&b, "Recent checks (oldest → newest): %s\n", strip.String())
+		window := graphWindow(s.Recent, chartWidth)
+		b.WriteString(strings.Join(chart(window, chartWidth, 4), "\n") + "\n")
+		avg, p95, maximum, failed, total := latencyStats(window)
+		if failed == total {
+			fmt.Fprintf(&b, "no successful checks · %d failed of %d\n", failed, total)
+		} else {
+			fmt.Fprintf(&b, "avg %s · p95 %s · max %s · %d failed of %d\n", formatLatency(avg), formatLatency(p95), formatLatency(maximum), failed, total)
+		}
 	}
 
 	b.WriteString("\nRecent outages:\n")
