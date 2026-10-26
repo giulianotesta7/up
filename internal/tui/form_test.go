@@ -249,7 +249,7 @@ func TestFormCancelWithoutSubmitAndReadError(t *testing.T) {
 	if cmd == nil || !strings.Contains(view(m), "read unavailable") || !strings.Contains(view(m), "draft") {
 		t.Fatal("poll read error lost draft or stopped polling")
 	}
-	m, _ = press(t, m, keyEsc)
+	_, _ = press(t, m, keyEsc)
 	checks, err := s.Checks(context.Background())
 	if err != nil || len(checks) != 0 {
 		t.Fatalf("cancel wrote %v, %v", checks, err)
@@ -386,7 +386,7 @@ func TestCreatedMonitorDiscoveredByDaemon(t *testing.T) {
 	}
 	m = fillForm(t, m, "live", srv.URL, "30s", "5s", "204")
 	m, cmd := press(t, m, keyEnter)
-	m = finishCommand(t, m, cmd)
+	_ = finishCommand(t, m, cmd)
 	for {
 		r, ok, err := s.Latest(ctx, "live")
 		if err != nil {
