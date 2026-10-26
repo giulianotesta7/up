@@ -43,11 +43,11 @@ type Pruner interface {
 	Prune(context.Context, time.Time) (int64, error)
 }
 
-// DefinedRecorder is the optional orphan-safe result API. Run prefers it over
-// Record so deletion by another process cannot leave orphan history. Storage
+// DefinedRecorder is the optional definition-aware result API. Run prefers it
+// over Record so deleted or edited definitions reject obsolete results. Storage
 // remains compatible with record-only implementations and test fakes.
 type DefinedRecorder interface {
-	RecordDefined(context.Context, check.Result) (bool, error)
+	RecordDefined(context.Context, config.Check, check.Result) (bool, error)
 }
 
 // Options configures Run.
@@ -110,7 +110,20 @@ func Run(ctx context.Context, opts Options) error {
 			definitions[c.Name] = c
 		}
 		previous := make(map[string]check.Status)
+		// A loop can finish before discovery (for example, a rejected result).
+		// Do not mistake its retained entry for a live, unchanged loop.
+		for name, active := range running {
+			select {
+			case <-active.done:
+				if c, exists := definitions[name]; exists && c == active.definition {
+					previous[name] = active.last
+				}
+				delete(running, name)
+			default:
+			}
+		}
 		// Cancel all obsolete loops before joining any one of them.
+		// Joining means a Runner that ignores cancellation can stall discovery.
 		for name, active := range running {
 			if c, exists := definitions[name]; !exists || c != active.definition {
 				active.cancel()
@@ -215,7 +228,7 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 		stored := true
 		var err error
 		if recorder, ok := opts.Store.(DefinedRecorder); ok {
-			stored, err = recorder.RecordDefined(wctx, res)
+			stored, err = recorder.RecordDefined(wctx, c, res)
 		} else {
 			err = opts.Store.Record(wctx, res)
 		}

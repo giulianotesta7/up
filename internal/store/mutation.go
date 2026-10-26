@@ -58,17 +58,25 @@ func (s *Store) DeleteCheck(ctx context.Context, name string) error {
 	return nil
 }
 
-// RecordDefined stores a result only while its definition exists. The existence
-// check and insert share one statement, serialized with DeleteCheck even across
-// database handles/processes. Record intentionally still allows undefined names.
-func (s *Store) RecordDefined(ctx context.Context, r check.Result) (bool, error) {
+// RecordDefined stores a result only while the definition it measured still
+// exists unchanged. The comparison and insert share one statement, serialized
+// with mutations even across database handles/processes. Schema v1 cannot detect
+// deletion and recreation with an identical definition during an in-flight
+// check; that measurement of the same definition may enter the fresh history.
+// Record intentionally still allows undefined names.
+func (s *Store) RecordDefined(ctx context.Context, c config.Check, r check.Result) (bool, error) {
 	if r.Status != check.StatusUp && r.Status != check.StatusDown {
 		return false, fmt.Errorf("store: refusing to record status %q for %s", r.Status, r.CheckName)
 	}
+	if r.CheckName != c.Name {
+		return false, nil
+	}
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error)
-SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM checks WHERE name = ?)`,
-		r.CheckName, r.At.UnixNano(), string(r.Status), int64(r.Latency), r.StatusCode, r.Error, r.CheckName)
+SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (
+SELECT 1 FROM checks WHERE name = ? AND url = ? AND interval_ns = ? AND timeout_ns = ? AND expected_status = ?)`,
+		r.CheckName, r.At.UnixNano(), string(r.Status), int64(r.Latency), r.StatusCode, r.Error,
+		c.Name, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus)
 	if err != nil {
 		return false, fmt.Errorf("store: record %s: %w", r.CheckName, err)
 	}

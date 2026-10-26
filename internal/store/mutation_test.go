@@ -27,6 +27,48 @@ func diskState(t *testing.T, path string) [][]byte {
 	return state
 }
 
+func TestRecordDefinedRejectsObsoleteDefinition(t *testing.T) {
+	for _, field := range []string{"url", "interval", "timeout", "status", "other handle recreate"} {
+		t.Run(field, func(t *testing.T) {
+			s, path := seeded(t)
+			started := definition("api")
+			changed := started
+			switch field {
+			case "url", "other handle recreate":
+				changed.URL += "/new"
+			case "interval":
+				changed.Interval += time.Second
+			case "timeout":
+				changed.Timeout += time.Second
+			case "status":
+				changed.ExpectedStatus = 204
+			}
+			if field == "other handle recreate" {
+				other, err := store.Open(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer other.Close()
+				if err := other.DeleteCheck(ctx, started.Name); err != nil {
+					t.Fatal(err)
+				}
+				if err := other.AddCheck(ctx, changed); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := s.UpdateCheck(ctx, changed); err != nil {
+				t.Fatal(err)
+			}
+			before := observe(t, s)
+			r := check.Result{CheckName: started.Name, At: at, Status: check.StatusDown, StatusCode: 503}
+			stored, err := s.RecordDefined(ctx, started, r)
+			if stored || err != nil {
+				t.Fatalf("obsolete RecordDefined = %v, %v; want false, nil", stored, err)
+			}
+			assertUnchanged(t, s, before)
+		})
+	}
+}
+
 func TestUpdateCheckKeepsOrderHistoryAndHeartbeat(t *testing.T) {
 	s, path := seeded(t)
 	before := observe(t, s)
@@ -116,7 +158,7 @@ func TestDeleteCheckAndRecordDefinedAcrossHandles(t *testing.T) {
 	}
 	defer tui.Close()
 	r := check.Result{CheckName: "web", At: at, Status: check.StatusDown, Error: "web failure"}
-	if stored, err := daemon.RecordDefined(ctx, r); err != nil || !stored {
+	if stored, err := daemon.RecordDefined(ctx, definition(r.CheckName), r); err != nil || !stored {
 		t.Fatalf("RecordDefined = %v, %v", stored, err)
 	}
 	before := observe(t, daemon)
@@ -127,7 +169,7 @@ func TestDeleteCheckAndRecordDefinedAcrossHandles(t *testing.T) {
 	before.Recent["api"], before.Outages["api"] = nil, nil
 	assertUnchanged(t, daemon, before)
 	r.CheckName = "api"
-	if stored, err := daemon.RecordDefined(ctx, r); err != nil || stored {
+	if stored, err := daemon.RecordDefined(ctx, definition(r.CheckName), r); err != nil || stored {
 		t.Fatalf("late RecordDefined = %v, %v; want false, nil", stored, err)
 	}
 	assertUnchanged(t, daemon, before)
@@ -136,7 +178,7 @@ func TestDeleteCheckAndRecordDefinedAcrossHandles(t *testing.T) {
 	}
 	before.Checks = append(before.Checks, definition("api"))
 	assertUnchanged(t, daemon, before)
-	if stored, err := daemon.RecordDefined(ctx, r); err != nil || !stored {
+	if stored, err := daemon.RecordDefined(ctx, definition(r.CheckName), r); err != nil || !stored {
 		t.Fatalf("re-added RecordDefined = %v, %v", stored, err)
 	}
 	before.Recent["api"] = []check.Result{r}
@@ -146,11 +188,17 @@ func TestDeleteCheckAndRecordDefinedAcrossHandles(t *testing.T) {
 
 func TestRecordDefinedValidationAndRecordCompatibility(t *testing.T) {
 	s, _ := seeded(t)
+	beforeMismatch := observe(t, s)
+	mismatched := check.Result{CheckName: "web", At: at, Status: check.StatusUp}
+	if stored, err := s.RecordDefined(ctx, definition("api"), mismatched); stored || err != nil {
+		t.Fatalf("mismatched name = %v, %v; want false, nil", stored, err)
+	}
+	assertUnchanged(t, s, beforeMismatch)
 	for _, name := range []string{"api", "new"} {
 		for _, status := range []check.Status{check.StatusCanceled, "unknown", ""} {
 			before := observe(t, s)
 			r := check.Result{CheckName: name, At: at, Status: status}
-			stored, err := s.RecordDefined(ctx, r)
+			stored, err := s.RecordDefined(ctx, definition(r.CheckName), r)
 			want := fmt.Sprintf("store: refusing to record status %q for %s", status, name)
 			if stored || err == nil || err.Error() != want {
 				t.Fatalf("RecordDefined = %v, %v; want false, %s", stored, err, want)
@@ -160,7 +208,7 @@ func TestRecordDefinedValidationAndRecordCompatibility(t *testing.T) {
 	}
 	before := observe(t, s)
 	r := check.Result{CheckName: "new", At: at, Status: check.StatusUp}
-	if stored, err := s.RecordDefined(ctx, r); err != nil || stored {
+	if stored, err := s.RecordDefined(ctx, definition(r.CheckName), r); err != nil || stored {
 		t.Fatalf("undefined RecordDefined = %v, %v", stored, err)
 	}
 	assertUnchanged(t, s, before)
@@ -172,14 +220,14 @@ func TestRecordDefinedValidationAndRecordCompatibility(t *testing.T) {
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
 	r.CheckName = "api"
-	if stored, err := s.RecordDefined(canceled, r); stored || err == nil {
+	if stored, err := s.RecordDefined(canceled, definition(r.CheckName), r); stored || err == nil {
 		t.Fatalf("canceled context = %v, %v", stored, err)
 	}
 	assertUnchanged(t, s, before)
 	// All fields of a successful result are preserved, including down/up outages.
 	for i, status := range []check.Status{check.StatusDown, check.StatusUp} {
 		r = check.Result{CheckName: "web", At: at.Add(time.Duration(i) * time.Minute), Status: status, Latency: time.Second, StatusCode: 503, Error: "reason"}
-		if stored, err := s.RecordDefined(ctx, r); err != nil || !stored {
+		if stored, err := s.RecordDefined(ctx, definition(r.CheckName), r); err != nil || !stored {
 			t.Fatalf("RecordDefined = %v, %v", stored, err)
 		}
 		before.Recent["web"] = append([]check.Result{r}, before.Recent["web"]...)
