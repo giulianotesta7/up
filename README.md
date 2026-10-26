@@ -9,10 +9,8 @@ A self-hosted HTTP uptime monitor with a terminal UI.
 
 </div>
 
-A permanent daemon checks your HTTP endpoints and writes the results to SQLite; a terminal
-UI shows what is happening and lets you add monitors. One Go binary, no external database,
-no agents, no YAML to write by hand. Close the TUI and the daemon keeps checking, so when you
-SSH back in you see what happened while you were away.
+Uptime monitoring that lives in your terminal.
+A single Go binary that never stops watching. Close the UI, walk away, SSH back in hours later, and catch up on everything you missed. No database server, no agents, no YAML.
 
 ## Capabilities
 
