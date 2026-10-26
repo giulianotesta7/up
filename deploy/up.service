@@ -8,7 +8,7 @@ After=network-online.target
 Type=simple
 User=up
 Group=up
-ExecStart=/usr/local/bin/up serve --config /etc/up/up.yaml --db /var/lib/up/up.db
+ExecStart=/usr/local/bin/up serve --db /var/lib/up/up.db
 # Creates /var/lib/up owned by the up user.
 StateDirectory=up
 Restart=on-failure
