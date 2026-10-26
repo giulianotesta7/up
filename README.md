@@ -10,7 +10,7 @@ A self-hosted HTTP uptime monitor with a terminal UI.
 </div>
 
 Uptime monitoring that lives in your terminal.
-A single Go binary that never stops watching. Close the UI, walk away, SSH back in hours later, and catch up on everything you missed. No database server, no agents, no YAML.
+A single Go binary that never stops watching. Close the TUI, walk away, SSH back in hours later, and catch up on everything you missed. No database server, no agents, no YAML.
 
 ## Capabilities
 
