@@ -29,13 +29,18 @@ Flags:
 
 func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	dbPath := fs.String("db", "up.db", "path to the SQLite database (created if missing)")
+	dbPath := databaseFlag(fs)
 	retention := fs.Duration("retention", 720*time.Hour, "how long to keep results, for example 720h (30 days); 0 keeps everything")
 	if code, ok := parseFlags(fs, serveHelp, args, stdout, stderr); !ok {
 		return code
 	}
 	if *retention < 0 {
 		fmt.Fprintln(stderr, "up: --retention must not be negative")
+		return 1
+	}
+
+	if err := prepareDatabase(fs, dbPath); err != nil {
+		fmt.Fprintf(stderr, "up: %v\n", err)
 		return 1
 	}
 

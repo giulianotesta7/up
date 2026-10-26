@@ -43,6 +43,7 @@ func TestUnknownCommand(t *testing.T) {
 }
 
 func TestServeHelp(t *testing.T) {
+	isolateDefaultDatabase(t)
 	code, stdout, stderr := runCmd(context.Background(), "serve", "-h")
 
 	if code != 0 || stderr != "" {
@@ -56,6 +57,7 @@ func TestServeHelp(t *testing.T) {
 }
 
 func TestServeRejectsBadFlag(t *testing.T) {
+	isolateDefaultDatabase(t)
 	code, stdout, stderr := runCmd(context.Background(), "serve", "--nope")
 
 	if code != 2 || stdout != "" || !strings.Contains(stderr, "flag provided but not defined: -nope") || !strings.Contains(stderr, "Usage: up serve [flags]") {
@@ -122,6 +124,7 @@ func TestServeRecordsResultsUntilCanceled(t *testing.T) {
 }
 
 func TestTUIHelp(t *testing.T) {
+	isolateDefaultDatabase(t)
 	code, stdout, stderr := runCmd(context.Background(), "tui", "-h")
 
 	if code != 0 || stderr != "" {
@@ -135,6 +138,7 @@ func TestTUIHelp(t *testing.T) {
 }
 
 func TestTUIRejectsBadFlag(t *testing.T) {
+	isolateDefaultDatabase(t)
 	code, stdout, stderr := runCmd(context.Background(), "tui", "--nope")
 
 	if code != 2 || stdout != "" || !strings.Contains(stderr, "flag provided but not defined: -nope") || !strings.Contains(stderr, "Usage: up tui [flags]") {
