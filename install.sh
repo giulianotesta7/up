@@ -16,12 +16,14 @@
 #   UP_INSTALL_DIR    where the binary goes (default /usr/local/bin)
 #   UP_BASE_URL       directory URL holding the release files (testing/mirrors)
 #   UP_SYSTEM_UNIT_PATH system unit path (default /etc/systemd/system/up.service)
+#   UP_STATE_DIR      shared database directory for permission repair (default /var/lib/up)
 set -eu
 
 REPO="giulianotesta7/up"
 INSTALL_DIR="${UP_INSTALL_DIR:-/usr/local/bin}"
 UNIT_PATH="${UP_UNIT_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/up.service}"
 SYSTEM_UNIT_PATH="${UP_SYSTEM_UNIT_PATH:-${UP_LEGACY_UNIT_PATH:-/etc/systemd/system/up.service}}"
+UP_STATE_DIR="${UP_STATE_DIR:-/var/lib/up}"
 SERVICE=0
 SYSTEM=0
 UNINSTALL=0
@@ -84,6 +86,7 @@ Environment:
   UP_UNIT_PATH      user unit path (default $XDG_CONFIG_HOME/systemd/user/up.service,
                     or ~/.config/systemd/user/up.service)
   UP_SYSTEM_UNIT_PATH system unit path (default /etc/systemd/system/up.service)
+  UP_STATE_DIR      shared database directory for permission repair (default /var/lib/up)
   UP_LEGACY_UNIT_PATH compatibility alias for the system unit path
 EOF
 }
@@ -236,12 +239,28 @@ elif [ "$SYSTEM" -eq 1 ]; then
 	fi
 	if [ -f "$SYSTEM_UNIT_PATH" ]; then
 		warn "Kept existing $SYSTEM_UNIT_PATH (delete it and rerun to replace it)"
+		if ! grep -q '^UMask=0007' "$SYSTEM_UNIT_PATH"; then
+			warn "The existing unit does not set UMask=0007, so group members cannot write the shared database. To replace it, run:"
+			cmd "  sudo rm $SYSTEM_UNIT_PATH && curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh -s -- --system"
+		fi
 	else
 		curl -fsSL "$BASE_URL/up-system.service" -o "$TMP/up-system.service" 2>/dev/null || die "could not download $BASE_URL/up-system.service"
 		sed "s#/usr/local/bin/up#$INSTALL_DIR/up#" "$TMP/up-system.service" >"$TMP/up-system.service.out"
 		as_root mkdir -p "$(dirname "$SYSTEM_UNIT_PATH")"
 		as_root install -m 0644 "$TMP/up-system.service.out" "$SYSTEM_UNIT_PATH"
 		ok "Installed $SYSTEM_UNIT_PATH"
+	fi
+	if [ -f "$UP_STATE_DIR/up.db" ]; then
+		as_root chmod 660 "$UP_STATE_DIR/up.db"
+		for sidecar in "$UP_STATE_DIR/up.db-wal" "$UP_STATE_DIR/up.db-shm"; do
+			if [ -f "$sidecar" ]; then
+				as_root chmod 660 "$sidecar"
+			fi
+		done
+		if [ -d "$UP_STATE_DIR" ]; then
+			as_root chmod 2770 "$UP_STATE_DIR"
+		fi
+		ok "Adjusted permissions on the shared database"
 	fi
 	as_root systemctl daemon-reload
 	as_root systemctl enable up >/dev/null 2>&1

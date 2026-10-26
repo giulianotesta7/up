@@ -65,6 +65,7 @@ as root without `SUDO_USER`, it skips membership changes; add each intended user
 with `sudo usermod -aG up USER`. Members can read and change all monitors and history.
 Run `newgrp up` to use the TUI in the current shell, or log out and back in. Until
 then, use `sudo -u up up tui`. Logs are in `journalctl -u up -f`.
+The installer warns when an existing unit lacks `UMask=0007` and fixes permissions of an existing `/var/lib/up/up.db`.
 
 The installer prints a copy command if it finds the invoking user's old database;
 it never migrates data automatically. An existing user unit is kept, but the shared

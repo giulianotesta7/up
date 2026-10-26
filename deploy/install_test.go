@@ -62,7 +62,12 @@ func install(t *testing.T, baseURL string, installDir string, args ...string) (c
 	if system == "" {
 		system = legacy
 	}
+	state := os.Getenv("UP_STATE_DIR")
+	if state == "" {
+		state = filepath.Join(t.TempDir(), "state")
+	}
 	cmd.Env = append(os.Environ(),
+		"UP_STATE_DIR="+state,
 		"UP_SYSTEM_UNIT_PATH="+system,
 		"UP_BASE_URL="+baseURL,
 		"UP_INSTALL_DIR="+installDir,
@@ -84,7 +89,7 @@ func install(t *testing.T, baseURL string, installDir string, args ...string) (c
 }
 
 func TestInstallSystemService(t *testing.T) {
-	for _, scenario := range []string{"new", "existing user", "root", "existing unit"} {
+	for _, scenario := range []string{"new", "existing user", "root", "existing unit", "existing unit with umask", "database", "database with sidecars", "sidecars without database"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := t.TempDir()
 			log := filepath.Join(dir, "calls")
@@ -93,6 +98,23 @@ func TestInstallSystemService(t *testing.T) {
 			t.Setenv("HOME", dir)
 			t.Setenv("TARGET_HOME", dir)
 			t.Setenv("SUDO_USER", "installer")
+			state := filepath.Join(dir, "state")
+			t.Setenv("UP_STATE_DIR", state)
+			if err := os.Mkdir(state, 0700); err != nil {
+				t.Fatal(err)
+			}
+			var dbFiles []string
+			if strings.HasPrefix(scenario, "database") {
+				dbFiles = append(dbFiles, "up.db")
+			}
+			if strings.Contains(scenario, "sidecars") {
+				dbFiles = append(dbFiles, "up.db-wal", "up.db-shm")
+			}
+			for _, name := range dbFiles {
+				if err := os.WriteFile(filepath.Join(state, name), []byte("shared data"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			uid, exists := "1000", "1"
 			if scenario == "root" {
 				uid = "0"
@@ -109,6 +131,8 @@ func TestInstallSystemService(t *testing.T) {
 				"usermod":   "printf 'usermod %s\\n' \"$*\" >>\"$CALL_LOG\"\n",
 				"getent":    "printf '%s:x:1000:1000::%s:/bin/sh\\n' \"$2\" \"$TARGET_HOME\"\n",
 				"loginctl":  "exit 99\n",
+				"chmod":     "printf 'chmod %s\\n' \"$*\" >>\"$CALL_LOG\"\n",
+				"chown":     "printf 'chown %s\\n' \"$*\" >>\"$CALL_LOG\"\nexit 99\n",
 			} {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body), 0755); err != nil {
 					t.Fatal(err)
@@ -128,11 +152,15 @@ func TestInstallSystemService(t *testing.T) {
 			if err := os.WriteFile(oldDB, []byte("human data"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if scenario == "existing unit" {
+			unitContent := "custom unit"
+			if scenario == "existing unit with umask" {
+				unitContent += "\nUMask=0007\n"
+			}
+			if strings.HasPrefix(scenario, "existing unit") {
 				if err := os.MkdirAll(filepath.Dir(unit), 0755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(unit, []byte("custom unit"), 0644); err != nil {
+				if err := os.WriteFile(unit, []byte(unitContent), 0644); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -152,8 +180,17 @@ func TestInstallSystemService(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			warning := "! The existing unit does not set UMask=0007, so group members cannot write the shared database. To replace it, run:\n"
+			replace := "  sudo rm " + unit + " && curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh -s -- --system\n"
 			if scenario == "existing unit" {
-				if string(got) != "custom unit" || !strings.Contains(out, "Kept existing "+unit+" (delete it and rerun to replace it)") {
+				if !strings.Contains(out, warning+replace) {
+					t.Errorf("missing exact warning and replacement command: %s", out)
+				}
+			} else if strings.Contains(out, "The existing unit does not set UMask") || strings.Contains(out, "sudo rm ") {
+				t.Errorf("unexpected replacement warning: %s", out)
+			}
+			if strings.HasPrefix(scenario, "existing unit") {
+				if string(got) != unitContent || !strings.Contains(out, "Kept existing "+unit+" (delete it and rerun to replace it)") {
 					t.Fatalf("replaced unit: %s %s", got, out)
 				}
 			} else if !strings.Contains(string(got), "ExecStart="+dir+"/up serve --db /var/lib/up/up.db") {
@@ -195,6 +232,40 @@ func TestInstallSystemService(t *testing.T) {
 			for _, want := range []string{"systemctl daemon-reload\n", "systemctl enable up\n", "systemctl restart up\n"} {
 				if !strings.Contains(string(calls), want) {
 					t.Errorf("missing %q: %s", want, calls)
+				}
+			}
+			var chmodCalls []string
+			for _, line := range strings.Split(string(calls), "\n") {
+				if strings.HasPrefix(line, "chmod ") {
+					chmodCalls = append(chmodCalls, line)
+				}
+			}
+			var wantChmod []string
+			wantAdjusted := 0
+			if strings.HasPrefix(scenario, "database") {
+				wantAdjusted = 1
+				for _, name := range dbFiles {
+					wantChmod = append(wantChmod, "chmod 660 "+filepath.Join(state, name))
+				}
+				wantChmod = append(wantChmod, "chmod 2770 "+state)
+				lastChmod := strings.LastIndex(string(calls), "chmod ")
+				if lastChmod > strings.Index(string(calls), "systemctl restart up\n") {
+					t.Errorf("permissions adjusted after restart: %s", calls)
+				}
+			}
+			if strings.Join(chmodCalls, "\n") != strings.Join(wantChmod, "\n") {
+				t.Errorf("chmod calls: got %q, want %q", chmodCalls, wantChmod)
+			}
+			if strings.Count(out, "+ Adjusted permissions on the shared database\n") != wantAdjusted {
+				t.Errorf("permission notice: %s", out)
+			}
+			if strings.Contains(string(calls), "chown ") {
+				t.Errorf("unexpected ownership change: %s", calls)
+			}
+			for _, name := range dbFiles {
+				data, err := os.ReadFile(filepath.Join(state, name))
+				if err != nil || string(data) != "shared data" {
+					t.Errorf("changed shared database %s: %q %v", name, data, err)
 				}
 			}
 			adds := strings.Count(string(calls), "\nuseradd ")
@@ -347,7 +418,7 @@ func TestInstallHelp(t *testing.T) {
 	if code != 0 || errOut != "" {
 		t.Fatalf("got %d, %q", code, errOut)
 	}
-	for _, want := range []string{"--service", "--system", "--version", "--uninstall", "UP_INSTALL_DIR", "UP_SYSTEM_UNIT_PATH"} {
+	for _, want := range []string{"--service", "--system", "--version", "--uninstall", "UP_INSTALL_DIR", "UP_SYSTEM_UNIT_PATH", "UP_STATE_DIR"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help missing %q: %s", want, out)
 		}
