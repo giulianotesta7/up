@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -53,7 +54,12 @@ func install(t *testing.T, baseURL string, installDir string, args ...string) (c
 	if legacy == "" {
 		legacy = filepath.Join(t.TempDir(), "legacy.service")
 	}
+	system := os.Getenv("UP_SYSTEM_UNIT_PATH")
+	if system == "" {
+		system = legacy
+	}
 	cmd.Env = append(os.Environ(),
+		"UP_SYSTEM_UNIT_PATH="+system,
 		"UP_BASE_URL="+baseURL,
 		"UP_INSTALL_DIR="+installDir,
 		"UP_UNIT_PATH="+unit,
@@ -68,6 +74,188 @@ func install(t *testing.T, baseURL string, installDir string, args ...string) (c
 		t.Fatal(err)
 	}
 	return code, out.String(), errOut.String()
+}
+
+func TestInstallSystemService(t *testing.T) {
+	for _, scenario := range []string{"new", "existing user", "root", "existing unit"} {
+		t.Run(scenario, func(t *testing.T) {
+			dir := t.TempDir()
+			log := filepath.Join(dir, "calls")
+			t.Setenv("CALL_LOG", log)
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("HOME", dir)
+			t.Setenv("TARGET_HOME", dir)
+			t.Setenv("SUDO_USER", "installer")
+			uid, exists := "1000", "1"
+			if scenario == "root" {
+				uid = "0"
+				t.Setenv("SUDO_USER", "")
+			}
+			if scenario == "existing user" {
+				exists = "0"
+			}
+			for name, body := range map[string]string{
+				"id":        "case \"$1\" in -u) echo " + uid + ";; -un) echo installer;; up) exit " + exists + ";; *) exit 99;; esac\n",
+				"systemctl": "printf 'systemctl %s\\n' \"$*\" >>\"$CALL_LOG\"\n",
+				"sudo":      "printf 'sudo %s\\n' \"$*\" >>\"$CALL_LOG\"\nexec \"$@\"\n",
+				"useradd":   "printf 'useradd %s\\n' \"$*\" >>\"$CALL_LOG\"\n",
+				"usermod":   "printf 'usermod %s\\n' \"$*\" >>\"$CALL_LOG\"\n",
+				"getent":    "printf '%s:x:1000:1000::%s:/bin/sh\\n' \"$2\" \"$TARGET_HOME\"\n",
+				"loginctl":  "exit 99\n",
+			} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			unit := filepath.Join(dir, "system", "up.service")
+			t.Setenv("UP_SYSTEM_UNIT_PATH", unit)
+			userUnit := filepath.Join(dir, "user.service")
+			t.Setenv("UP_UNIT_PATH", userUnit)
+			if err := os.WriteFile(userUnit, []byte("user unit"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			oldDB := filepath.Join(dir, ".config", "up", "up.db")
+			if err := os.MkdirAll(filepath.Dir(oldDB), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(oldDB, []byte("human data"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "existing unit" {
+				if err := os.MkdirAll(filepath.Dir(unit), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(unit, []byte("custom unit"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			base := release(t, fakeBinary, goodSum)
+			content, err := os.ReadFile("up-system.service")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(strings.TrimPrefix(base, "file://"), "up-system.service"), content, 0644); err != nil {
+				t.Fatal(err)
+			}
+			code, out, errOut := install(t, base, dir, "--system")
+			if code != 0 || errOut != "" {
+				t.Fatalf("got %d %q %q", code, out, errOut)
+			}
+			got, err := os.ReadFile(unit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "existing unit" {
+				if string(got) != "custom unit" || !strings.Contains(out, "Kept existing "+unit+" (delete it and rerun to replace it)") {
+					t.Fatalf("replaced unit: %s %s", got, out)
+				}
+			} else if !strings.Contains(string(got), "ExecStart="+dir+"/up serve --db /var/lib/up/up.db") {
+				t.Fatalf("unit: %s", got)
+			}
+			info, err := os.Stat(unit)
+			if err != nil || info.Mode().Perm() != 0644 {
+				t.Fatalf("unit mode: %v %v", info, err)
+			}
+			for _, want := range []string{"Service up is running", "journalctl -u up -f", "Database: /var/lib/up/up.db", "To use the TUI in this shell, run: newgrp up", "or log out and back in. Until then: sudo -u up up tui", "system database now takes precedence for up tui"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing %q: %s", want, out)
+				}
+			}
+			if scenario != "root" {
+				want := "sudo cp '" + oldDB + "' /var/lib/up/up.db && sudo chown up:up /var/lib/up/up.db && sudo chmod 660 /var/lib/up/up.db && sudo systemctl restart up"
+				if !strings.Contains(out, want) {
+					t.Errorf("missing copy hint %q: %s", want, out)
+				}
+			}
+			data, _ := os.ReadFile(oldDB)
+			if string(data) != "human data" {
+				t.Fatal("changed source database")
+			}
+			calls, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"systemctl daemon-reload\n", "systemctl enable up\n", "systemctl restart up\n"} {
+				if !strings.Contains(string(calls), want) {
+					t.Errorf("missing %q: %s", want, calls)
+				}
+			}
+			adds := strings.Count(string(calls), "\nuseradd ")
+			if strings.HasPrefix(string(calls), "useradd ") {
+				adds++
+			}
+			wantAdds := 1
+			if scenario == "existing user" {
+				wantAdds = 0
+			}
+			if adds != wantAdds {
+				t.Fatalf("useradd count %d: %s", adds, calls)
+			}
+			if scenario == "root" {
+				if strings.Contains(string(calls), "usermod") || !strings.Contains(out, "Skipped group membership") {
+					t.Fatalf("root membership: %s %s", calls, out)
+				}
+			} else if !strings.Contains(string(calls), "usermod -aG up installer\n") {
+				t.Fatalf("membership: %s", calls)
+			}
+		})
+	}
+}
+
+func TestSharedDirectoryInheritsGroup(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires Linux setgid directories")
+	}
+	dir := t.TempDir()
+	groups, err := os.Getgroups()
+	if err != nil || len(groups) == 0 {
+		t.Skipf("no available groups: %v", err)
+	}
+	gid := os.Getegid()
+	for _, candidate := range groups {
+		if candidate != os.Getegid() {
+			gid = candidate
+			break
+		}
+	}
+	if err := os.Chown(dir, -1, gid); err != nil {
+		t.Skipf("cannot set directory group: %v", err)
+	}
+	if err := os.Chmod(dir, os.ModeSetgid|0770); err != nil {
+		t.Skipf("cannot set setgid: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil || info.Mode()&os.ModeSetgid == 0 {
+		t.Skipf("filesystem does not support setgid: %v", err)
+	}
+	path := filepath.Join(dir, "child")
+	if out, err := exec.Command("sh", "-c", ": >\"$1\"", "sh", path).CombinedOutput(); err != nil {
+		t.Fatalf("child create: %v %s", err, out)
+	}
+	info, err = os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Skip("group stat unavailable")
+	}
+	if int(stat.Gid) != gid {
+		t.Fatalf("child group %d, want directory group %d", stat.Gid, gid)
+	}
+	t.Logf("child inherited group %d (process primary group %d)", gid, os.Getegid())
+}
+
+func TestInstallServiceModesMutuallyExclusive(t *testing.T) {
+	dir := t.TempDir()
+	code, out, errOut := install(t, "file://"+dir, dir, "--system", "--service")
+	if code != 1 || out != "" || errOut != "install.sh: --system and --service are mutually exclusive\n" {
+		t.Fatalf("got %d %q %q", code, out, errOut)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 0 {
+		t.Fatal("rejected options created files")
+	}
 }
 
 func TestInstallPlacesVerifiedBinary(t *testing.T) {
@@ -121,7 +309,7 @@ func TestInstallHelp(t *testing.T) {
 	if code != 0 || errOut != "" {
 		t.Fatalf("got %d, %q", code, errOut)
 	}
-	for _, want := range []string{"--service", "--version", "--uninstall", "UP_INSTALL_DIR"} {
+	for _, want := range []string{"--service", "--system", "--version", "--uninstall", "UP_INSTALL_DIR", "UP_SYSTEM_UNIT_PATH"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help missing %q: %s", want, out)
 		}
@@ -189,7 +377,7 @@ func TestUninstallUserAndLegacyUnits(t *testing.T) {
 			t.Errorf("missing %q: %s", want, calls)
 		}
 	}
-	for _, want := range []string{"Kept ~/.config/up", "Kept /var/lib/up", "up user", "sudo cp /var/lib/up/up.db ~/.config/up/up.db && sudo chown $USER ~/.config/up/up.db"} {
+	for _, want := range []string{"Kept ~/.config/up", "Kept /var/lib/up", "up user", "up group", "system service", "sudo cp /var/lib/up/up.db ~/.config/up/up.db && sudo chown $USER ~/.config/up/up.db"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q: %s", want, out)
 		}

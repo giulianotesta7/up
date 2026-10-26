@@ -1,0 +1,23 @@
+[Unit]
+Description=up HTTP uptime monitor
+Documentation=https://github.com/giulianotesta7/up
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=up
+Group=up
+ExecStart=/usr/local/bin/up serve --db /var/lib/up/up.db
+StateDirectory=up
+StateDirectoryMode=2770
+UMask=0007
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
