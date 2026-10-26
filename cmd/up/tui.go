@@ -46,7 +46,7 @@ func runTUI(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	defer s.Close()
 
-	if err := runTUIProgram(ctx, s); err != nil {
+	if err := runTUIProgram(ctx, s, tui.Options{DatabasePath: *dbPath}); err != nil {
 		fmt.Fprintf(stderr, "up: %v\n", err)
 		return 1
 	}

@@ -9,24 +9,109 @@ import (
 	"time"
 
 	"github.com/giulianotesta7/up/internal/store"
+	"github.com/giulianotesta7/up/internal/tui"
 )
 
 func isolateDefaultDatabase(t *testing.T) {
 	t.Helper()
+	t.Setenv("UP_DB", "")
+	previous := systemDatabasePath
+	systemDatabasePath = filepath.Join(t.TempDir(), "system.db")
+	t.Cleanup(func() { systemDatabasePath = previous })
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
+}
+
+func TestDatabaseResolutionPrecedence(t *testing.T) {
+	for _, command := range []string{"serve", "tui"} {
+		for _, branch := range []string{"explicit", "environment", "system", "directory", "missing", "environment missing parent"} {
+			t.Run(command+"/"+branch, func(t *testing.T) {
+				isolateDefaultDatabase(t)
+				config := os.Getenv("XDG_CONFIG_HOME")
+				systemDatabasePath = filepath.Join(t.TempDir(), "system.db")
+				if branch == "directory" {
+					if err := os.Mkdir(systemDatabasePath, 0700); err != nil {
+						t.Fatal(err)
+					}
+				} else if branch != "missing" {
+					if err := os.WriteFile(systemDatabasePath, nil, 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				want := filepath.Join(config, "up", "up.db")
+				args := []string{command}
+				switch branch {
+				case "explicit", "environment", "environment missing parent":
+					env := filepath.Join(t.TempDir(), "env.db")
+					if branch == "environment missing parent" {
+						env = filepath.Join(t.TempDir(), "missing", "up.db")
+					}
+					t.Setenv("UP_DB", env)
+					want = env
+					if branch == "explicit" {
+						want = filepath.Join(t.TempDir(), "explicit.db")
+						args = append(args, "--db", want)
+					}
+				case "system":
+					want = systemDatabasePath
+				}
+				previous := runTUIProgram
+				t.Cleanup(func() { runTUIProgram = previous })
+				runTUIProgram = func(_ context.Context, _ *store.Store, options ...tui.Options) error {
+					if len(options) != 1 || options[0].DatabasePath != want {
+						t.Fatalf("TUI database options: %+v", options)
+					}
+					return nil
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+				defer cancel()
+				code, out, errOut := runCmd(ctx, args...)
+				if branch == "environment missing parent" {
+					if code != 1 || out != "" || errOut != "up: store: open "+want+": unable to open database file (14)\n" {
+						t.Fatalf("got %d %q %q", code, out, errOut)
+					}
+					if _, err := os.Stat(filepath.Dir(want)); !os.IsNotExist(err) {
+						t.Fatal("created environment parent")
+					}
+				} else {
+					if code != 0 || out != "" || (command == "tui" && errOut != "") {
+						t.Fatalf("got %d %q %q", code, out, errOut)
+					}
+					s, err := store.OpenReadOnly(want)
+					if err != nil {
+						t.Fatal(err)
+					}
+					s.Close()
+				}
+				if branch != "directory" && branch != "missing" {
+					if _, err := os.Stat(filepath.Join(config, "up")); !os.IsNotExist(err) {
+						t.Fatal("created fallback directory")
+					}
+				}
+				helpPath := want
+				if branch == "explicit" {
+					helpPath = os.Getenv("UP_DB")
+				}
+				code, out, errOut = runCmd(context.Background(), command, "-h")
+				if code != 0 || errOut != "" || !strings.Contains(out, "(default \""+helpPath+"\")") {
+					t.Fatalf("help: %d %q %q", code, out, errOut)
+				}
+			})
+		}
+	}
 }
 
 func TestDatabaseDefaults(t *testing.T) {
 	for _, command := range []string{"serve", "tui"} {
 		t.Run(command, func(t *testing.T) {
+			isolateDefaultDatabase(t)
 			config := t.TempDir()
 			t.Setenv("XDG_CONFIG_HOME", config)
 			t.Setenv("HOME", t.TempDir())
 			t.Chdir(t.TempDir())
 			previous := runTUIProgram
 			t.Cleanup(func() { runTUIProgram = previous })
-			runTUIProgram = func(context.Context, *store.Store) error { return nil }
+			runTUIProgram = func(context.Context, *store.Store, ...tui.Options) error { return nil }
 			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 			defer cancel()
 			code, out, errOut := runCmd(ctx, command)
@@ -55,6 +140,7 @@ func TestDatabaseDefaults(t *testing.T) {
 }
 
 func TestExplicitDatabaseDoesNotCreateParent(t *testing.T) {
+	isolateDefaultDatabase(t)
 	for _, command := range []string{"serve", "tui"} {
 		t.Run(command, func(t *testing.T) {
 			t.Setenv("HOME", "")
@@ -72,6 +158,7 @@ func TestExplicitDatabaseDoesNotCreateParent(t *testing.T) {
 }
 
 func TestDatabaseConfigDirectoryFailure(t *testing.T) {
+	isolateDefaultDatabase(t)
 	for _, command := range []string{"serve", "tui"} {
 		t.Run(command, func(t *testing.T) {
 			t.Setenv("HOME", "")
@@ -85,7 +172,7 @@ func TestDatabaseConfigDirectoryFailure(t *testing.T) {
 			defer cancel()
 			previous := runTUIProgram
 			t.Cleanup(func() { runTUIProgram = previous })
-			runTUIProgram = func(context.Context, *store.Store) error { return nil }
+			runTUIProgram = func(context.Context, *store.Store, ...tui.Options) error { return nil }
 			code, out, errOut := runCmd(ctx, command)
 			want := "up: cannot find the config directory (set --db): " + err.Error() + "\n"
 			if code != 1 || out != "" || errOut != want {

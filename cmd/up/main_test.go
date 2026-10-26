@@ -12,6 +12,7 @@ import (
 
 	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/store"
+	"github.com/giulianotesta7/up/internal/tui"
 )
 
 func runCmd(ctx context.Context, args ...string) (code int, stdout, stderr string) {
@@ -66,6 +67,7 @@ func TestServeRejectsBadFlag(t *testing.T) {
 }
 
 func TestServeRecordsResultsUntilCanceled(t *testing.T) {
+	isolateDefaultDatabase(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -147,12 +149,13 @@ func TestTUIRejectsBadFlag(t *testing.T) {
 }
 
 func TestTUIMissingDatabaseCreatesIt(t *testing.T) {
+	isolateDefaultDatabase(t)
 	t.Chdir(t.TempDir())
 	dbPath := filepath.Join(t.TempDir(), "up.db")
 	previous := runTUIProgram
 	t.Cleanup(func() { runTUIProgram = previous })
 	started := false
-	runTUIProgram = func(ctx context.Context, s *store.Store) error {
+	runTUIProgram = func(ctx context.Context, s *store.Store, _ ...tui.Options) error {
 		started = true
 		checks, err := s.Checks(ctx)
 		if err != nil || len(checks) != 0 {

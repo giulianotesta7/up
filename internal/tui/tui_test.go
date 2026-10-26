@@ -165,6 +165,27 @@ var (
 	keyCtrlC = tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 )
 
+func TestDatabaseFooterAllViews(t *testing.T) {
+	m := New(nil, func() time.Time { return now }, Options{DatabasePath: "/shared/up.db"})
+	next, _ := m.Update(snapshotMsg{snap: seededSnapshot(t, now)})
+	m = next.(Model)
+	for _, name := range []string{"list", "detail", "form"} {
+		t.Run(name, func(t *testing.T) {
+			current := m
+			if name == "detail" {
+				current, _ = press(t, current, keyEnter)
+			}
+			if name == "form" {
+				current, _ = press(t, current, keyN)
+			}
+			out := view(current)
+			if !strings.HasSuffix(out, "\ndatabase: /shared/up.db") || strings.Count(out, "database: ") != 1 {
+				t.Fatalf("missing single footer below key help:\n%s", out)
+			}
+		})
+	}
+}
+
 func TestListView(t *testing.T) {
 	out := view(modelWith(seededSnapshot(t, now.Add(-5*time.Second))))
 
