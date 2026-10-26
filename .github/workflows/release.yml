@@ -39,6 +39,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          sed "s/{{TAG}}/$GITHUB_REF_NAME/g" .github/release-notes.md > dist/release-notes.md
           gh release create "$GITHUB_REF_NAME" \
             dist/up_linux_amd64.tar.gz dist/up_linux_arm64.tar.gz dist/checksums.txt dist/up.service \
-            --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+            --title "$GITHUB_REF_NAME" --notes-file dist/release-notes.md --verify-tag
