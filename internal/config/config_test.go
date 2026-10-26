@@ -122,3 +122,13 @@ func TestLoadMissingFile(t *testing.T) {
 		t.Fatalf("Load() error = %q, want it to contain %q", err, want)
 	}
 }
+
+func TestExampleConfigIsValid(t *testing.T) {
+	cfg, err := Load(filepath.Join("..", "..", "up.example.yaml"))
+	if err != nil {
+		t.Fatalf("up.example.yaml is invalid: %v", err)
+	}
+	if len(cfg.Checks) == 0 {
+		t.Fatal("up.example.yaml has no checks")
+	}
+}
