@@ -245,3 +245,64 @@ func TestReopenKeepsData(t *testing.T) {
 		t.Fatalf("Latest() after reopen = %v, %v, want the stored result", ok, err)
 	}
 }
+
+func TestPruneDeletesOldResultsButKeepsBoundaryAndRecent(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	record(t, s,
+		result("api", 0, check.StatusUp),
+		result("api", 1, check.StatusDown),
+		result("api", 2, check.StatusDown),
+		result("api", 10, check.StatusDown),
+		result("web", 0, check.StatusUp),
+		result("web", 1, check.StatusUp),
+		result("web", 20, check.StatusUp),
+	)
+	n, err := s.Prune(ctx, t0.Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("Prune() deleted %d, want 3", n)
+	}
+	api, _ := s.Recent(ctx, "api", 10)
+	if len(api) != 2 || !api[1].At.Equal(t0.Add(2*time.Minute)) || !api[0].At.Equal(t0.Add(10*time.Minute)) {
+		t.Fatalf("api after prune = %+v, want boundary (minute 2) and minute 10", api)
+	}
+	web, _ := s.Recent(ctx, "web", 10)
+	if len(web) != 2 || !web[1].At.Equal(t0.Add(1*time.Minute)) {
+		t.Fatalf("web after prune = %+v, want boundary (minute 1) and minute 20", web)
+	}
+}
+
+func TestPruneKeepsLatestResultOfIdleCheck(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	record(t, s, result("old", 0, check.StatusDown), result("old", 1, check.StatusDown))
+	if _, err := s.Prune(ctx, t0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	r, ok, err := s.Latest(ctx, "old")
+	if err != nil || !ok || !r.At.Equal(t0.Add(time.Minute)) || r.Status != check.StatusDown {
+		t.Fatalf("Latest() = %+v, %v, %v; want the minute 1 down result", r, ok, err)
+	}
+}
+
+func TestPruneLeavesChecksAndHeartbeat(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	if err := s.AddCheck(ctx, config.Check{Name: "api", URL: "http://x", Interval: time.Second, Timeout: time.Second, ExpectedStatus: 200}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Beat(ctx, t0); err != nil {
+		t.Fatal(err)
+	}
+	record(t, s, result("api", 0, check.StatusUp), result("api", 1, check.StatusUp))
+	if _, err := s.Prune(ctx, t0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	checks, _ := s.Checks(ctx)
+	if _, ok, _ := s.LastBeat(ctx); len(checks) != 1 || !ok {
+		t.Fatalf("Prune touched checks or heartbeat: %v, beat ok=%v", checks, ok)
+	}
+}

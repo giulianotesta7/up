@@ -17,6 +17,9 @@ const DefaultHeartbeatInterval = 10 * time.Second
 // DefaultDiscoveryInterval bounds how long a newly added check waits to start.
 const DefaultDiscoveryInterval = 2 * time.Second
 
+// DefaultPruneInterval is how often results older than the retention are removed.
+const DefaultPruneInterval = time.Hour
+
 // writeTimeout bounds each database write, so a locked database cannot
 // stall a check loop forever.
 const writeTimeout = 10 * time.Second
@@ -35,6 +38,12 @@ type Storage interface {
 	Beat(context.Context, time.Time) error
 }
 
+// Pruner is the optional storage API that removes results older than a
+// cutoff. *store.Store implements it.
+type Pruner interface {
+	Prune(context.Context, time.Time) (int64, error)
+}
+
 // Options configures Run.
 type Options struct {
 	// Checks is an optional additive import, not the scheduling source.
@@ -44,7 +53,12 @@ type Options struct {
 	HeartbeatInterval time.Duration
 	// DiscoveryInterval defaults to DefaultDiscoveryInterval when nonpositive.
 	DiscoveryInterval time.Duration
-	Logger            *slog.Logger
+	// Retention is how long results are kept; zero keeps them forever. It
+	// only applies when Store also implements Pruner.
+	Retention time.Duration
+	// PruneInterval defaults to DefaultPruneInterval when nonpositive.
+	PruneInterval time.Duration
+	Logger        *slog.Logger
 }
 
 // Run imports optional Checks, reads SQLite definitions, then starts each check
@@ -64,6 +78,9 @@ func Run(ctx context.Context, opts Options) error {
 	if opts.DiscoveryInterval <= 0 {
 		opts.DiscoveryInterval = DefaultDiscoveryInterval
 	}
+	if opts.PruneInterval <= 0 {
+		opts.PruneInterval = DefaultPruneInterval
+	}
 	opts.Logger.Info("monitoring started", "checks", len(checks))
 
 	var wg sync.WaitGroup
@@ -72,6 +89,13 @@ func Run(ctx context.Context, opts Options) error {
 		defer wg.Done()
 		heartbeat(ctx, opts)
 	}()
+	if pruner, ok := opts.Store.(Pruner); ok && opts.Retention > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			prune(ctx, opts, pruner)
+		}()
+	}
 	started := make(map[string]bool)
 	start := func(checks []config.Check) {
 		for _, c := range checks {
@@ -108,6 +132,27 @@ discovery:
 	wg.Wait()
 	opts.Logger.Info("monitoring stopped")
 	return nil
+}
+
+func prune(ctx context.Context, opts Options, pruner Pruner) {
+	ticker := time.NewTicker(opts.PruneInterval)
+	defer ticker.Stop()
+	for {
+		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+		n, err := pruner.Prune(wctx, time.Now().Add(-opts.Retention))
+		cancel()
+		switch {
+		case err != nil:
+			opts.Logger.Error("pruning results failed", "error", err)
+		case n > 0:
+			opts.Logger.Info("pruned old results", "deleted", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func heartbeat(ctx context.Context, opts Options) {

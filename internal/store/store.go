@@ -277,6 +277,28 @@ func (s *Store) Record(ctx context.Context, r check.Result) error {
 	return nil
 }
 
+// Prune deletes results older than before and returns how many it removed.
+// For each check it keeps the newest result older than before, so the status
+// history that remains still starts from the state in force at the cutoff
+// (an ongoing outage keeps its start, a check silent for longer than the
+// window keeps its last result). Definitions and the heartbeat are untouched.
+func (s *Store) Prune(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+DELETE FROM results
+ WHERE at_ns < ?1
+   AND id NOT IN (SELECT id FROM (
+         SELECT id, ROW_NUMBER() OVER (PARTITION BY check_name ORDER BY at_ns DESC, id DESC) AS rn
+           FROM results WHERE at_ns < ?1) WHERE rn = 1)`, before.UnixNano())
+	if err != nil {
+		return 0, fmt.Errorf("store: prune: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: prune: %w", err)
+	}
+	return n, nil
+}
+
 // Latest returns the newest result of a check; ok is false when it has none.
 func (s *Store) Latest(ctx context.Context, name string) (r check.Result, ok bool, err error) {
 	results, err := s.Recent(ctx, name, 1)
