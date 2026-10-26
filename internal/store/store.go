@@ -154,10 +154,7 @@ func (s *Store) SetChecks(ctx context.Context, checks []config.Check) error {
 		return fmt.Errorf("store: set checks: %w", err)
 	}
 	for i, c := range checks {
-		_, err := tx.ExecContext(ctx,
-			"INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status) VALUES (?, ?, ?, ?, ?, ?)",
-			i, c.Name, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus)
-		if err != nil {
+		if err := insertCheck(ctx, tx, i, c); err != nil {
 			return fmt.Errorf("store: set checks: %w", err)
 		}
 	}
@@ -167,9 +164,84 @@ func (s *Store) SetChecks(ctx context.Context, checks []config.Check) error {
 	return nil
 }
 
+// AddCheck appends a validated definition. An existing name is always rejected,
+// even if its definition is identical. History and heartbeat are untouched.
+func (s *Store) AddCheck(ctx context.Context, c config.Check) error {
+	return s.appendChecks(ctx, []config.Check{c}, false)
+}
+
+// ImportChecks atomically appends validated definitions in input order without
+// replacing existing definitions. Identical existing entries are no-ops; any
+// conflicting existing name or repeated input name rejects the entire batch.
+// Empty imports are no-ops. History and heartbeat are untouched.
+func (s *Store) ImportChecks(ctx context.Context, checks []config.Check) error {
+	return s.appendChecks(ctx, checks, true)
+}
+
+func (s *Store) appendChecks(ctx context.Context, checks []config.Check, importing bool) error {
+	op := "add check"
+	if importing {
+		op = "import checks"
+	}
+	if err := config.ValidateChecks(checks); err != nil {
+		return fmt.Errorf("store: %s: %w", op, err)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: %s: %w", op, err)
+	}
+	defer tx.Rollback()
+	existing, err := readChecks(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("store: %s: %w", op, err)
+	}
+	byName := make(map[string]config.Check, len(existing))
+	for _, c := range existing {
+		byName[c.Name] = c
+	}
+	var next int
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(position), -1) + 1 FROM checks").Scan(&next); err != nil {
+		return fmt.Errorf("store: %s: %w", op, err)
+	}
+	for _, c := range checks {
+		if old, ok := byName[c.Name]; ok {
+			if !importing {
+				return fmt.Errorf("store: %s: name %q already exists", op, c.Name)
+			}
+			if old != c {
+				return fmt.Errorf("store: %s: name %q conflicts with existing definition", op, c.Name)
+			}
+			continue
+		}
+		if err := insertCheck(ctx, tx, next, c); err != nil {
+			return fmt.Errorf("store: %s: %w", op, err)
+		}
+		next++
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: %s: %w", op, err)
+	}
+	return nil
+}
+
+func insertCheck(ctx context.Context, tx *sql.Tx, position int, c config.Check) error {
+	_, err := tx.ExecContext(ctx,
+		"INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status) VALUES (?, ?, ?, ?, ?, ?)",
+		position, c.Name, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus)
+	return err
+}
+
 // Checks returns the configured checks in configuration order.
 func (s *Store) Checks(ctx context.Context) ([]config.Check, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT name, url, interval_ns, timeout_ns, expected_status FROM checks ORDER BY position")
+	return readChecks(ctx, s.db)
+}
+
+type checkReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func readChecks(ctx context.Context, reader checkReader) ([]config.Check, error) {
+	rows, err := reader.QueryContext(ctx, "SELECT name, url, interval_ns, timeout_ns, expected_status FROM checks ORDER BY position")
 	if err != nil {
 		return nil, fmt.Errorf("store: checks: %w", err)
 	}

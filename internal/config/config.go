@@ -1,4 +1,4 @@
-// Package config loads and validates the up YAML configuration.
+// Package config loads YAML and validates HTTP check definitions.
 package config
 
 import (
@@ -64,10 +64,40 @@ func Parse(data []byte) (Config, error) {
 		return Config{}, errors.New("config: at least one check is required")
 	}
 
+	return validateRawChecks(raw.Checks)
+}
+
+// ValidateCheck validates a programmatic definition using the YAML check rules.
+// All fields are required; durations must be positive, timeout must not exceed
+// interval, and the expected HTTP status must be between 100 and 599.
+func ValidateCheck(c Check) error {
+	_, errs := parseCheck(rawFromCheck(c))
+	return errors.Join(errs...)
+}
+
+// ValidateChecks validates a batch, including unique names. An empty batch is
+// valid for an optional import; Parse still requires at least one YAML check.
+func ValidateChecks(checks []Check) error {
+	raw := make([]rawCheck, len(checks))
+	for i, c := range checks {
+		raw[i] = rawFromCheck(c)
+	}
+	_, err := validateRawChecks(raw)
+	return err
+}
+
+func rawFromCheck(c Check) rawCheck {
+	return rawCheck{
+		Name: c.Name, URL: c.URL, Interval: c.Interval.String(),
+		Timeout: c.Timeout.String(), ExpectedStatus: &c.ExpectedStatus,
+	}
+}
+
+func validateRawChecks(checks []rawCheck) (Config, error) {
 	var errs []error
-	cfg := Config{Checks: make([]Check, 0, len(raw.Checks))}
+	cfg := Config{Checks: make([]Check, 0, len(checks))}
 	firstUse := make(map[string]int)
-	for i, rc := range raw.Checks {
+	for i, rc := range checks {
 		check, checkErrs := parseCheck(rc)
 		label := fmt.Sprintf("checks[%d]", i)
 		if rc.Name != "" {
