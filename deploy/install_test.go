@@ -45,7 +45,11 @@ func goodSum(archive []byte) string { return fmt.Sprintf("%x", sha256.Sum256(arc
 
 func install(t *testing.T, baseURL string, installDir string, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
-	cmd := exec.Command("sh", append([]string{"../install.sh"}, args...)...)
+	shell := os.Getenv("UP_TEST_SHELL")
+	if shell == "" {
+		shell = "sh"
+	}
+	cmd := exec.Command(shell, append([]string{"../install.sh"}, args...)...)
 	unit := os.Getenv("UP_UNIT_PATH")
 	if unit == "" {
 		unit = filepath.Join(t.TempDir(), "up.service")
@@ -72,6 +76,9 @@ func install(t *testing.T, baseURL string, installDir string, args ...string) (c
 		code = ee.ExitCode()
 	} else if err != nil {
 		t.Fatal(err)
+	}
+	if strings.ContainsAny(out.String()+errOut.String(), "\x1b✓") {
+		t.Errorf("non-TTY output contains ANSI escapes or Unicode checkmarks: %q %q", out.String(), errOut.String())
 	}
 	return code, out.String(), errOut.String()
 }
@@ -156,10 +163,20 @@ func TestInstallSystemService(t *testing.T) {
 			if err != nil || info.Mode().Perm() != 0644 {
 				t.Fatalf("unit mode: %v %v", info, err)
 			}
-			for _, want := range []string{"Service up is running", "journalctl -u up -f", "Database: /var/lib/up/up.db", "To use the TUI in this shell, run: newgrp up", "or log out and back in. Until then: sudo -u up up tui", "system database now takes precedence for up tui"} {
+			for _, want := range []string{"+ Service started", "\nNext steps\n", "journalctl -u up -f", "Database  /var/lib/up/up.db", "1. newgrp up", "2. up tui", "or log out and back in", "Until then: sudo -u up up tui", "system database now takes precedence for up tui"} {
 				if !strings.Contains(out, want) {
 					t.Errorf("missing %q: %s", want, out)
 				}
+			}
+			wantNotices := 1
+			if scenario == "root" {
+				wantNotices = 0
+			}
+			if got := strings.Count(out, "> Using sudo for:"); got != wantNotices {
+				t.Errorf("sudo notices: got %d, want %d: %s", got, wantNotices, out)
+			}
+			if scenario == "new" {
+				t.Logf("system output:\n%s", out)
 			}
 			if scenario != "root" {
 				want := "sudo cp '" + oldDB + "' /var/lib/up/up.db && sudo chown up:up /var/lib/up/up.db && sudo chmod 660 /var/lib/up/up.db && sudo systemctl restart up"
@@ -249,7 +266,7 @@ func TestSharedDirectoryInheritsGroup(t *testing.T) {
 func TestInstallServiceModesMutuallyExclusive(t *testing.T) {
 	dir := t.TempDir()
 	code, out, errOut := install(t, "file://"+dir, dir, "--system", "--service")
-	if code != 1 || out != "" || errOut != "install.sh: --system and --service are mutually exclusive\n" {
+	if code != 1 || out != "" || errOut != "x install.sh: --system and --service are mutually exclusive\n" {
 		t.Fatalf("got %d %q %q", code, out, errOut)
 	}
 	entries, _ := os.ReadDir(dir)
@@ -264,6 +281,15 @@ func TestInstallPlacesVerifiedBinary(t *testing.T) {
 	if code != 0 || errOut != "" || !strings.Contains(out, "Installed "+dir+"/up") {
 		t.Fatalf("got %d, %q, %q", code, out, errOut)
 	}
+	for _, want := range []string{"> Installing up (latest, linux/" + runtime.GOARCH + ") to " + dir, "+ Downloaded up_linux_" + runtime.GOARCH + ".tar.gz", "+ Verified checksum", "\nNext steps\n", "1. up serve", "2. up tui", "--service", "--system"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "Using sudo") {
+		t.Errorf("writable plain install should not use sudo: %s", out)
+	}
+	t.Logf("plain output:\n%s", out)
 	info, err := os.Stat(filepath.Join(dir, "up"))
 	if err != nil || info.Mode().Perm() != 0o755 {
 		t.Fatalf("binary missing or wrong mode: %v, %v", info, err)
@@ -277,8 +303,14 @@ func TestInstallPlacesVerifiedBinary(t *testing.T) {
 func TestInstallRejectsChecksumMismatch(t *testing.T) {
 	dir := t.TempDir()
 	bad := func([]byte) string { return strings.Repeat("0", 64) }
-	code, _, errOut := install(t, release(t, fakeBinary, bad), dir)
-	if code != 1 || !strings.Contains(errOut, "checksum mismatch") {
+	base := release(t, fakeBinary, bad)
+	code, out, errOut := install(t, base, dir)
+	wantOut := fmt.Sprintf("> Installing up (latest, linux/%s) to %s\n  Source: %s\n+ Downloaded up_linux_%s.tar.gz\n", runtime.GOARCH, dir, base, runtime.GOARCH)
+	if out != wantOut {
+		t.Errorf("stdout: got %q, want %q", out, wantOut)
+	}
+	want := "x install.sh: checksum mismatch for up_linux_" + runtime.GOARCH + ".tar.gz; nothing was installed\n"
+	if code != 1 || errOut != want {
 		t.Fatalf("got %d, %q", code, errOut)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "up")); !os.IsNotExist(err) {
@@ -288,8 +320,14 @@ func TestInstallRejectsChecksumMismatch(t *testing.T) {
 
 func TestInstallFailsCleanlyWhenReleaseIsMissing(t *testing.T) {
 	dir := t.TempDir()
-	code, _, errOut := install(t, "file://"+t.TempDir(), dir)
-	if code != 1 || !strings.Contains(errOut, "could not download") {
+	base := "file://" + t.TempDir()
+	code, out, errOut := install(t, base, dir)
+	wantOut := fmt.Sprintf("> Installing up (latest, linux/%s) to %s\n  Source: %s\n", runtime.GOARCH, dir, base)
+	if out != wantOut {
+		t.Errorf("stdout: got %q, want %q", out, wantOut)
+	}
+	want := "x install.sh: could not download " + base + "/up_linux_" + runtime.GOARCH + ".tar.gz\n"
+	if code != 1 || errOut != want {
 		t.Fatalf("got %d, %q", code, errOut)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
@@ -343,6 +381,7 @@ func TestUninstallUserAndLegacyUnits(t *testing.T) {
 	t.Setenv("CALL_LOG", log)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for name, body := range map[string]string{
+		"id":        "#!/bin/sh\necho 1000\n",
 		"systemctl": "#!/bin/sh\nprintf 'systemctl %s\\n' \"$*\" >>\"$CALL_LOG\"\n",
 		"sudo":      "#!/bin/sh\nprintf 'sudo %s\\n' \"$*\" >>\"$CALL_LOG\"\nexec \"$@\"\n",
 		"loginctl":  "#!/bin/sh\nexit 99\n",
@@ -362,6 +401,10 @@ func TestUninstallUserAndLegacyUnits(t *testing.T) {
 	code, out, errOut := install(t, "file://"+dir, dir, "--uninstall")
 	if code != 0 || errOut != "" {
 		t.Fatalf("got %d %q %q", code, out, errOut)
+	}
+	notice := "> Using sudo for: systemctl disable --now up; you may be asked for your password.\n"
+	if strings.Count(out, "> Using sudo for:") != 1 || !strings.Contains(out, notice) {
+		t.Errorf("expected one notice before the first (silenced) sudo command: %s", out)
 	}
 	for _, path := range []string{unit, legacy} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -443,7 +486,10 @@ func TestInstallUserService(t *testing.T) {
 				} else if !strings.Contains(string(got), "ExecStart="+dir+"/up serve\n") {
 					t.Fatalf("unit: %s", got)
 				}
-				for _, want := range []string{"Service up is running", "journalctl --user -u up -f", "~/.config/up/up.db", "up tui", "no flags"} {
+				if strings.Count(out, "> Using sudo for:") != 1 {
+					t.Errorf("expected one sudo notice: %s", out)
+				}
+				for _, want := range []string{"+ Service started", "\nNext steps\n", "1. up tui", "journalctl --user -u up -f", "~/.config/up/up.db"} {
 					if !strings.Contains(out, want) {
 						t.Errorf("missing %q: %s", want, out)
 					}
@@ -476,6 +522,39 @@ func TestServiceRefusesRootBeforeDownload(t *testing.T) {
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 0 {
 		t.Fatal("root service installed files")
+	}
+}
+
+func TestInstallPinnedVersionSummary(t *testing.T) {
+	dir := t.TempDir()
+	base := release(t, fakeBinary, goodSum)
+	code, out, errOut := install(t, base, dir, "--version", "v1.2.0")
+	want := fmt.Sprintf("> Installing up (v1.2.0, linux/%s) to %s\n  Source: %s\n", runtime.GOARCH, dir, base)
+	if code != 0 || errOut != "" || !strings.HasPrefix(out, want) {
+		t.Fatalf("got %d %q %q", code, out, errOut)
+	}
+	got, err := exec.Command(filepath.Join(dir, "up")).Output()
+	if err != nil || string(got) != "fake up\n" {
+		t.Fatalf("installed binary ran as %q, %v", got, err)
+	}
+}
+
+func TestInstallUnexpectedFailurePreservesExitCode(t *testing.T) {
+	dir := t.TempDir()
+	stubs := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stubs, "install"), []byte("#!/bin/sh\nexit 23\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
+	base := release(t, fakeBinary, goodSum)
+	code, out, errOut := install(t, base, dir)
+	wantOut := fmt.Sprintf("> Installing up (latest, linux/%s) to %s\n  Source: %s\n+ Downloaded up_linux_%s.tar.gz\n+ Verified checksum\n", runtime.GOARCH, dir, base, runtime.GOARCH)
+	wantErr := "x install.sh failed. Nothing was left half-installed except what is listed above.\n"
+	if code != 23 || out != wantOut || errOut != wantErr {
+		t.Fatalf("got %d %q %q", code, out, errOut)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("failed install changed destination: %v", entries)
 	}
 }
 
