@@ -1,0 +1,18 @@
+/bin/
+/up
+*.db
+*.db-wal
+*.db-shm
+.env
+
+# Go coverage artifacts
+coverage.out
+coverage.html
+
+# Local AI runtime state
+.atl/
+.pi/
+.codegraph/
+
+# Local ODD task artifacts
+odd/
