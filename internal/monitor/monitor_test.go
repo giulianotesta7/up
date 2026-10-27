@@ -301,3 +301,78 @@ func TestRunDownWithoutChannelDoesNotAlert(t *testing.T) {
 		t.Fatalf("alerts = %v %v, want one DOWN alert for with-channel", a.names, a.statuses)
 	}
 }
+
+func alertingCheck(t *testing.T, s *store.Store, alertAfter, recoverAfter int) config.Check {
+	t.Helper()
+	bg := context.Background()
+	if err := s.AddSMTPServer(bg, config.SMTPServer{Name: "smtp", Host: "example.com", Port: 25, TLS: config.TLSNone, Sender: "a@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddChannel(bg, config.Channel{Name: "mail", Kind: config.KindEmail, SMTPServer: "smtp", Recipients: []string{"a@example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	c := config.Check{Name: "api", URL: "http://example.com", Interval: 10 * time.Millisecond, Timeout: time.Millisecond, ExpectedStatus: 200, Channel: "mail", AlertAfter: alertAfter, RecoverAfter: recoverAfter}
+	if err := s.AddCheck(bg, c); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// feed runs the monitor until every status was recorded, then stops it.
+func feed(t *testing.T, s *store.Store, a *recordingAlerter, already int, statuses ...check.Status) {
+	t.Helper()
+	bg := context.Background()
+	runner := &sequenceRunner{values: make(chan check.Status, len(statuses))}
+	ctx, cancel := context.WithCancel(bg)
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{Store: s, Runner: runner, Alerter: a, HeartbeatInterval: time.Hour, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	}()
+	for i, status := range statuses {
+		runner.values <- status
+		want := already + i + 1
+		waitFor(t, "recorded result", func() bool { rows, _ := s.Recent(bg, "api", 100); return len(rows) >= want })
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunAlertsAfterConsecutiveFailuresAndRecoveries(t *testing.T) {
+	s := openStore(t)
+	alertingCheck(t, s, 3, 2)
+	a := &recordingAlerter{}
+	D, U := check.StatusDown, check.StatusUp
+	// Isolated failures and a failure streak of 2 never alert.
+	feed(t, s, a, 0, D, U, D, D, U)
+	if got := a.snapshot(); len(got) != 0 {
+		t.Fatalf("alerts before threshold: %v", got)
+	}
+	// Three in a row alert once; one success is not yet a recovery.
+	feed(t, s, a, 5, D, D, D, D, U, D)
+	if got := a.snapshot(); !reflect.DeepEqual(got, []check.Status{D}) {
+		t.Fatalf("alerts after outage: %v, want one down alert", got)
+	}
+	// Two successes in a row recover.
+	feed(t, s, a, 11, U, U)
+	if got := a.snapshot(); !reflect.DeepEqual(got, []check.Status{D, U}) {
+		t.Fatalf("alerts after recovery: %v", got)
+	}
+}
+
+func TestRunRestartKeepsFailureStreak(t *testing.T) {
+	s := openStore(t)
+	alertingCheck(t, s, 3, 1)
+	a := &recordingAlerter{}
+	D := check.StatusDown
+	feed(t, s, a, 0, D, D) // daemon stops mid-streak
+	feed(t, s, a, 2, D)    // the third failure after the restart alerts
+	if got := a.snapshot(); !reflect.DeepEqual(got, []check.Status{D}) {
+		t.Fatalf("alerts: %v, want one down alert", got)
+	}
+	feed(t, s, a, 3, D, D) // restart while alerting does not resend
+	if got := a.snapshot(); len(got) != 1 {
+		t.Fatalf("alert resent after restart: %v", got)
+	}
+}

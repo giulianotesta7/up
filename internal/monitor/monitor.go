@@ -60,6 +60,16 @@ type LatestReader interface {
 	Latest(context.Context, string) (check.Result, bool, error)
 }
 
+// RecentReader is the optional API that replays stored results, newest first,
+// to rebuild the failure streak after a restart. *store.Store implements it.
+type RecentReader interface {
+	Recent(context.Context, string, int) ([]check.Result, error)
+}
+
+// replayLimit bounds how much history rebuilds a streak: enough for the
+// largest thresholds with room to spare.
+const replayLimit = 100
+
 // Options configures Run.
 type Options struct {
 	Alerter           Alerter
@@ -230,16 +240,9 @@ func heartbeat(ctx context.Context, opts Options) {
 func loop(ctx context.Context, opts Options, c config.Check, last check.Status) check.Status {
 	ticker := time.NewTicker(c.Interval)
 	defer ticker.Stop()
-	var baseline check.Status
-	if reader, ok := opts.Store.(LatestReader); opts.Alerter != nil && ok {
-		readCtx, cancel := context.WithTimeout(ctx, writeTimeout)
-		result, found, err := reader.Latest(readCtx, c.Name)
-		cancel()
-		if err != nil {
-			opts.Logger.Error("reading last status failed", "check", c.Name, "error", err)
-		} else if found {
-			baseline = result.Status
-		}
+	var streak check.Streak
+	if opts.Alerter != nil {
+		streak = initialStreak(ctx, opts, c)
 	}
 	for {
 		res := opts.Runner.Run(ctx, c)
@@ -261,10 +264,9 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 			return last
 		}
 		if opts.Alerter != nil {
-			if c.Channel != "" && ((baseline == "" && res.Status == check.StatusDown) || (baseline != "" && res.Status != baseline)) {
+			if streak.Observe(res.Status, c.AlertAfter, c.RecoverAfter) != check.NoChange && c.Channel != "" {
 				opts.Alerter.Notify(c, res)
 			}
-			baseline = res.Status
 		}
 		if res.Status != last {
 			logTransition(opts.Logger, c, res)
@@ -276,6 +278,30 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 		case <-ticker.C:
 		}
 	}
+}
+
+// initialStreak rebuilds the alert state from stored results so a restart
+// neither resends an alert nor forgets a failure streak in progress.
+func initialStreak(ctx context.Context, opts Options, c config.Check) check.Streak {
+	readCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+	defer cancel()
+	if reader, ok := opts.Store.(RecentReader); ok {
+		results, err := reader.Recent(readCtx, c.Name, replayLimit)
+		if err != nil {
+			opts.Logger.Error("reading recent results failed", "check", c.Name, "error", err)
+			return check.Streak{}
+		}
+		return check.Replay(results, c.AlertAfter, c.RecoverAfter)
+	}
+	if reader, ok := opts.Store.(LatestReader); ok {
+		result, found, err := reader.Latest(readCtx, c.Name)
+		if err != nil {
+			opts.Logger.Error("reading last status failed", "check", c.Name, "error", err)
+		} else if found && result.Status == check.StatusDown {
+			return check.Streak{Alerting: true, Failures: 1}
+		}
+	}
+	return check.Streak{}
 }
 
 func logTransition(logger *slog.Logger, c config.Check, res check.Result) {
