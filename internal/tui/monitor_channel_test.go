@@ -42,7 +42,7 @@ func TestMonitorChannelSelectorAndDetail(t *testing.T) {
 	if !strings.Contains(view(m), "Expected status: 200\nChannel: ops-team") {
 		t.Fatal("channel line not after interval")
 	}
-	m, _ = press(t, m, keyE, keyShiftTab)
+	m, _ = press(t, m, keyE, keyShiftTab, keyShiftTab, keyShiftTab)
 	requireText(t, m, "Channel: ‹ ops-team ›")
 	m, _ = press(t, m, keyRight)
 	requireText(t, m, "Channel: ‹ none ›")
@@ -53,7 +53,7 @@ func TestMonitorChannelSelectorAndDetail(t *testing.T) {
 		t.Fatalf("clear: %v %v", checks, err)
 	}
 	requireText(t, m, "Channel: none")
-	m, _ = press(t, m, keyE, keyShiftTab, keyRight)
+	m, _ = press(t, m, keyE, keyShiftTab, keyShiftTab, keyShiftTab, keyRight)
 	requireText(t, m, "Channel: ‹ infra ›")
 	m, cmd = press(t, m, keyEnter)
 	m = finishCommand(t, m, cmd)

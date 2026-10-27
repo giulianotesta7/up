@@ -80,11 +80,11 @@ func TestEditPrefillSaveOriginAndFixedName(t *testing.T) {
 			m, _ = press(t, m, keyE)
 			requireText(t, m, "Edit monitor", "Name: api", "https://api.example.com/health", "30s", "5s", "200", "enter save", "esc cancel", "database: /shared/up.db")
 			// Focus wraps among editable fields only, including backwards from URL.
-			m, _ = press(t, m, keyShiftTab, keyShiftTab)
+			m, _ = press(t, m, keyShiftTab, keyShiftTab, keyShiftTab, keyShiftTab)
 			m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyHome})
 			m = typeText(t, m, "2")
 			requireText(t, m, "Name: api", "2│200")
-			m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDelete}, keyTab, keyTab)
+			m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDelete}, keyTab, keyTab, keyTab, keyTab)
 			m = replaceEditURL(t, m, "https://changed.example.com")
 			m, _ = press(t, m, keyTab)
 			m = replaceField(t, m, "30s", "1m")
@@ -101,7 +101,7 @@ func TestEditPrefillSaveOriginAndFixedName(t *testing.T) {
 				t.Fatal("double submit or cancel during save")
 			}
 			m = finishCommand(t, busy, cmd)
-			want := config.Check{Name: "api", URL: "https://changed.example.com", Interval: time.Minute, Timeout: 10 * time.Second, ExpectedStatus: 204}
+			want := config.Check{Name: "api", URL: "https://changed.example.com", Interval: time.Minute, Timeout: 10 * time.Second, ExpectedStatus: 204, AlertAfter: 1, RecoverAfter: 1}
 			if s.updates != 1 || s.updated != want {
 				t.Fatalf("updates=%d definition=%+v", s.updates, s.updated)
 			}
