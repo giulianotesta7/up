@@ -19,7 +19,7 @@ New monitors require a name and HTTP/HTTPS URL. Defaults: interval 30s,
 timeout 5s, expected status 200. An edit cannot rename a monitor;
 a confirmed delete removes history and cannot be undone.
 
-Keys: ↑/↓ or k/j select · enter details · n new monitor · e edit · d delete · esc back · q/ctrl+c quit
+Keys: ↑/↓ or k/j select · enter details · n new monitor · e edit · d delete · a toggle animation · esc back · q/ctrl+c quit
 Form: tab/shift+tab focus · enter save · esc cancel · ctrl+c quit
 Delete: y delete · n cancel · esc cancel · ctrl+c quit
 

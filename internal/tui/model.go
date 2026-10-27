@@ -59,6 +59,7 @@ type Model struct {
 	deletion        *deletePrompt
 	generation      uint64
 	selectName      string
+	animationOff    bool
 	sweeping        bool
 	sweepPosition   int
 	sweepGeneration uint64
@@ -105,7 +106,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A failed read keeps the last good snapshot on screen.
 		m.err = msg.err
 		if msg.err == nil {
-			if shouldSweep(m.snap, msg.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
+			if !m.animationOff && shouldSweep(m.snap, msg.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
 				m.sweeping, m.sweepPosition = true, 0
 				// A restart supersedes any pending frame. Only this generation
 				// can continue the chain; old frames never schedule successors.
@@ -213,6 +214,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
 		return m, tea.Quit
+	case "a":
+		m.animationOff = !m.animationOff
+		if m.animationOff {
+			m.sweeping = false
+			m.sweepGeneration++
+		}
 	case "n":
 		m.form = newMonitorForm()
 	case "e", "d":

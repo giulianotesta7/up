@@ -118,8 +118,8 @@ the matching database with no flags unless you override it. The TUI footer shows
 
 | Where | Keys |
 | --- | --- |
-| List | `↑`/`↓` or `k`/`j` select · `enter` details · `n` new monitor · `e` edit · `d` delete · `q` quit |
-| Details | `esc` back · `n` new monitor · `e` edit · `d` delete · `q` quit |
+| List | `↑`/`↓` or `k`/`j` select · `enter` details · `n` new monitor · `e` edit · `d` delete · `a` toggle animation · `q` quit |
+| Details | `esc` back · `n` new monitor · `e` edit · `d` delete · `a` toggle animation · `q` quit |
 | New or edit monitor | `tab`/`shift+tab` change field · `enter` save · `esc` cancel |
 | Delete confirmation | `y` delete · `n`/`esc` cancel |
 
