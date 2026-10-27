@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,8 +15,78 @@ import (
 
 	"github.com/giulianotesta7/up/internal/check"
 	"github.com/giulianotesta7/up/internal/config"
+	"github.com/giulianotesta7/up/internal/secret"
 	"github.com/giulianotesta7/up/internal/store"
 )
+
+func TestServeCreatesKey(t *testing.T) {
+	isolateDefaultDatabase(t)
+	path := filepath.Join(t.TempDir(), "up.db")
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if code, _, errOut := runCmd(ctx, "serve", "--db", path); code != 0 {
+		t.Fatalf("%d %s", code, errOut)
+	}
+	info, err := os.Stat(path + ".key")
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("key stat %v %v", info, err)
+	}
+	key, created, err := secret.LoadOrCreate(path + ".key")
+	if err != nil || created {
+		t.Fatalf("key %v %v", created, err)
+	}
+	s, err := store.OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	public, ok, err := s.PublicKey(context.Background())
+	if err != nil || !ok || !bytes.Equal(public, key.PublicKey()) {
+		t.Fatalf("public key mismatch: %v %v", ok, err)
+	}
+}
+func TestServeRefusesInsecureKey(t *testing.T) {
+	isolateDefaultDatabase(t)
+	path := filepath.Join(t.TempDir(), "up.db")
+	keyPath := path + ".key"
+	original := []byte("unchanged")
+	if err := os.WriteFile(keyPath, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(keyPath, 0644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := runCmd(context.Background(), "serve", "--db", path)
+	want := fmt.Sprintf("up: key file %s is accessible by group or others (run: chmod 600 %s)\n", keyPath, keyPath)
+	if code != 1 || out != "" || errOut != want {
+		t.Fatalf("%d %q %q", code, out, errOut)
+	}
+	data, err := os.ReadFile(keyPath)
+	if err != nil || !bytes.Equal(data, original) {
+		t.Fatalf("key changed: %q %v", data, err)
+	}
+	s, err := store.OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	results, err := s.Recent(context.Background(), "api", 10)
+	if err != nil || len(results) != 0 {
+		t.Fatalf("results %v %v", results, err)
+	}
+}
+func TestServeAlertHelp(t *testing.T) {
+	isolateDefaultDatabase(t)
+	code, out, errOut := runCmd(context.Background(), "serve", "-h")
+	if code != 0 || errOut != "" {
+		t.Fatalf("%d %q", code, errOut)
+	}
+	for _, text := range []string{"DOWN", "recovers", "SMTP servers", "<db>.key", "0600", "back it up", "group or others"} {
+		if !strings.Contains(out, text) {
+			t.Errorf("missing %q", text)
+		}
+	}
+}
 
 func TestServeRunsSQLiteDefinitionsAndPreservesHistory(t *testing.T) {
 	isolateDefaultDatabase(t)
