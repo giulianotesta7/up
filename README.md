@@ -12,6 +12,8 @@ A self-hosted HTTP uptime monitor with a terminal UI.
 Uptime monitoring that lives in your terminal.
 A single Go binary that never stops watching. Close the TUI, walk away, SSH back in hours later, and catch up on everything you missed. No database server, no agents, no YAML.
 
+![up TUI: monitors, latency trends and a detail chart](docs/images/demo.gif)
+
 ## Capabilities
 
 - **HTTP checks.** Each monitor has a URL, an interval, a timeout and an expected status
@@ -145,6 +147,8 @@ not longer than the interval.
 
 Issues and pull requests are welcome. Run `go vet ./...` and `go test -race ./...` before
 sending changes.
+
+Regenerate the demo GIF with `sh docs/demo/record.sh` (needs vhs, ttyd and ffmpeg).
 
 ## License
 
