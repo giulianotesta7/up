@@ -49,10 +49,30 @@ func renderHelp(text string) string {
 	return strings.Join(words, " ")
 }
 
-func renderHeader(snap Snapshot, width int) string {
+func ruleWidth(width int) int {
 	if width <= 0 {
 		width = 60
 	}
-	width = min(80, max(20, width))
-	return renderTitle(snap) + "\n" + accentStyle.Render(logoStem) + helpStyle.Render(strings.Repeat("─", width-1)) + "\n"
+	return min(80, max(20, width))
+}
+
+// A negative position renders the original, byte-identical idle rule.
+// The pulse replaces cells rather than adding them, clipping at the edge.
+func renderRule(width, position int) string {
+	length := ruleWidth(width) - 1
+	stem := accentStyle.Render(logoStem)
+	if position < 0 || position >= length {
+		return stem + helpStyle.Render(strings.Repeat("─", length))
+	}
+	pulse := []rune("╱╲╱")[:min(3, length-position)]
+	return stem + helpStyle.Render(strings.Repeat("─", position)) +
+		accentStyle.Render(string(pulse)) + helpStyle.Render(strings.Repeat("─", length-position-len(pulse)))
+}
+
+func renderHeader(snap Snapshot, width int) string {
+	return renderSweepHeader(snap, width, -1)
+}
+
+func renderSweepHeader(snap Snapshot, width, position int) string {
+	return renderTitle(snap) + "\n" + renderRule(width, position) + "\n"
 }
