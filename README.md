@@ -71,7 +71,7 @@ New monitors default to a 30s interval, 5s timeout and expected status 200.
 
 `j`/`k` move · `enter` details · `n` new · `e` edit · `d` delete · `s` SMTP servers · `c` channels · `a` toggle animation · `esc` back · `q` quit
 
-In forms: `tab`/`shift+tab` switch fields · `enter` save · `esc` cancel.
+In forms: `tab`/`shift+tab` switch fields · `←`/`→` choose an option · `enter` save · `esc` cancel.
 
 ### Alerts
 
