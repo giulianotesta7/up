@@ -17,7 +17,7 @@ func TestSMTPDetailNavigationAndEmptyList(t *testing.T) {
 	next, _ := m.Update(m.Init()())
 	m = next.(Model)
 	m, _ = press(t, m, keyEnter, keyS)
-	requireText(t, m, "SMTP servers", "No SMTP servers configured.", "n new · e edit · d delete · esc back · q quit · ctrl+c quit")
+	requireText(t, m, "SMTP servers", "No SMTP servers configured.", "↑/↓ select (k/j) · n new · e edit · d delete · esc back · q quit · ctrl+c quit")
 	m, _ = press(t, m, keyEsc)
 	requireText(t, m, "MONITOR")
 	m, _ = press(t, m, keyEnter)

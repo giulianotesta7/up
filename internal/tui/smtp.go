@@ -216,7 +216,7 @@ func renderSMTPList(snap Snapshot, selected int, now time.Time, loadErr error) s
 			b.WriteString(line(marker, cols, password) + "\n")
 		}
 	}
-	b.WriteString("\n" + renderHelp("n new · e edit · d delete · esc back · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · n new · e edit · d delete · esc back · q quit · ctrl+c quit"))
 	return b.String()
 }
 func renderSMTPForm(f smtpForm, snap Snapshot, now time.Time, loadErr error) string {

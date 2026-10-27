@@ -217,7 +217,7 @@ func renderChannelList(snap Snapshot, selected int, now time.Time, loadErr error
 			b.WriteString(line(marker, row, strconv.Itoa(counts[i])) + "\n")
 		}
 	}
-	b.WriteString("\n" + renderHelp("n new · e edit · d delete · esc back · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · n new · e edit · d delete · esc back · q quit · ctrl+c quit"))
 	return b.String()
 }
 func renderChannelForm(f channelForm, snap Snapshot, now time.Time, loadErr error) string {
