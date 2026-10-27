@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/store"
 )
 
@@ -58,6 +59,11 @@ type Model struct {
 	detail          bool
 	form            *monitorForm
 	deletion        *deletePrompt
+	smtpScreen      bool
+	smtpSelected    int
+	smtpSelectName  string
+	smtpForm        *smtpForm
+	smtpDelete      *deletePrompt
 	generation      uint64
 	selectName      string
 	animationOff    bool
@@ -117,6 +123,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				frame = m.sweepTick()
 			}
 			m.snap = msg.snap
+			if !m.snap.HasKey && m.smtpForm != nil && !m.smtpForm.saving {
+				f := *m.smtpForm
+				f.values[5] = ""
+				if f.focus == 5 {
+					f.focus = 6
+					f.cursor = len([]rune(f.values[6]))
+				}
+				m.smtpForm = &f
+			}
+			if m.smtpSelectName != "" {
+				for i, server := range m.snap.SMTPServers {
+					if server.Name == m.smtpSelectName {
+						m.smtpSelected = i
+						m.smtpSelectName = ""
+						break
+					}
+				}
+			}
+			m.smtpSelected = min(m.smtpSelected, max(0, len(m.snap.SMTPServers)-1))
 			if !sweepEnabled(m.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
 				m.sweeping = false
 			}
@@ -191,8 +216,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.deletion, m.detail, m.selectName = nil, false, ""
 		}
 		return m, m.load
+	case smtpSaveMsg:
+		if msg.generation != m.generation || m.smtpForm == nil || !m.smtpForm.saving {
+			return m, nil
+		}
+		if msg.err != nil {
+			f := *m.smtpForm
+			f.saving, f.err = false, msg.err
+			m.smtpForm = &f
+		} else {
+			m.smtpForm = nil
+			m.smtpSelectName = msg.name
+		}
+		return m, m.load
+	case smtpDeleteMsg:
+		if msg.generation != m.generation || m.smtpDelete == nil || !m.smtpDelete.saving {
+			return m, nil
+		}
+		if msg.err != nil {
+			p := *m.smtpDelete
+			p.saving, p.err = false, msg.err
+			m.smtpDelete = &p
+		} else {
+			servers := make([]config.SMTPServer, 0, len(m.snap.SMTPServers))
+			for _, s := range m.snap.SMTPServers {
+				if s.Name != m.smtpDelete.name {
+					servers = append(servers, s)
+				}
+			}
+			m.snap.SMTPServers = servers
+			m.smtpSelected = min(m.smtpSelected, max(0, len(servers)-1))
+			m.smtpDelete = nil
+		}
+		return m, m.load
 	case tea.PasteMsg:
-		if m.form != nil && !m.form.saving {
+		if m.smtpForm != nil && !m.smtpForm.saving && (m.smtpForm.focus != 5 || m.snap.HasKey) {
+			f := *m.smtpForm
+			f.insert(msg.Content)
+			m.smtpForm = &f
+		} else if m.form != nil && !m.form.saving {
 			f := *m.form
 			f.insert(msg.Content)
 			m.form = &f
@@ -208,6 +270,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
+	if m.smtpScreen {
+		return m.handleSMTPKey(msg)
+	}
 	if m.form != nil {
 		return m.handleFormKey(msg)
 	}
@@ -217,6 +282,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
 		return m, tea.Quit
+	case "s":
+		m.smtpScreen = true
+		m.smtpSelected = 0
 	case "a":
 		m.animationOff = !m.animationOff
 		if m.animationOff {
@@ -264,6 +332,15 @@ func (m Model) View() tea.View {
 	}
 	if m.deletion != nil {
 		content = renderDelete(*m.deletion, m.snap, now, m.err)
+	}
+	if m.smtpScreen {
+		content = renderSMTPList(m.snap, m.smtpSelected, now, m.err)
+		if m.smtpForm != nil {
+			content = renderSMTPForm(*m.smtpForm, m.snap, now, m.err)
+		}
+		if m.smtpDelete != nil {
+			content = renderSMTPDelete(*m.smtpDelete, m.snap, now, m.err)
+		}
 	}
 	position := -1
 	if m.sweeping && sweepEnabled(m.snap, now, os.Getenv("NO_COLOR"), os.Getenv("TERM")) {

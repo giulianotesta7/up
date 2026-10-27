@@ -40,7 +40,7 @@ var (
 )
 
 func renderHelp(text string) string {
-	keys := map[string]bool{"↑/↓": true, "(k/j)": true, "enter": true, "n": true, "e": true, "d": true, "a": true, "q": true, "ctrl+c": true, "esc": true, "tab/shift+tab": true, "y": true}
+	keys := map[string]bool{"↑/↓": true, "(k/j)": true, "enter": true, "n": true, "e": true, "d": true, "a": true, "q": true, "ctrl+c": true, "esc": true, "tab/shift+tab": true, "←/→": true, "y": true}
 	words := strings.Split(text, " ")
 	for i, word := range words {
 		if keys[word] {
