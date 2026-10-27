@@ -2,8 +2,8 @@ Output docs/images/demo.gif
 Set Shell bash
 Set FontFamily "JetBrains Mono"
 Set FontSize 16
-Set Width 1200
-Set Height 640
+Set Width 1130
+Set Height 524
 Set Padding 16
 Set Framerate 20
 Set Theme {"name":"up demo","black":"#0d1117","red":"#f85149","green":"#3fb950","yellow":"#d29922","blue":"#58a6ff","magenta":"#bc8cff","cyan":"#39c5cf","white":"#c9d1d9","brightBlack":"#8b949e","brightRed":"#ff7b72","brightGreen":"#56d364","brightYellow":"#e3b341","brightBlue":"#79c0ff","brightMagenta":"#d2a8ff","brightCyan":"#56d4dd","brightWhite":"#f0f6fc","background":"#0d1117","foreground":"#c9d1d9","selectionBackground":"#30363d","cursor":"#c9d1d9"}

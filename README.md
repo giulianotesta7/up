@@ -8,7 +8,7 @@
   </picture>
 </h1>
 
-A self-hosted HTTP uptime monitor with a terminal UI.
+A self-hosted HTTP uptime monitor TUI.
 
 [![Go quality](https://github.com/giulianotesta7/up/actions/workflows/quality.yml/badge.svg)](https://github.com/giulianotesta7/up/actions/workflows/quality.yml)
 [![Go security](https://github.com/giulianotesta7/up/actions/workflows/security.yml/badge.svg)](https://github.com/giulianotesta7/up/actions/workflows/security.yml)
@@ -17,7 +17,7 @@ A self-hosted HTTP uptime monitor with a terminal UI.
 
 Close the TUI, walk away, SSH back in hours later, and catch up on everything you missed. No database server, no agents, no YAML.
 
-![up TUI: monitors, latency trends and a detail chart](docs/images/demo.gif)
+<img src="docs/images/demo.gif" alt="up TUI: monitors, latency trends and a detail chart" width="760">
 
 ## Capabilities
 

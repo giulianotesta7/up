@@ -58,6 +58,10 @@ func seed(path string) error {
 		{"payments", "http://127.0.0.1:8099/payments"},
 		{"docs", "http://127.0.0.1:8099/docs"},
 		{"github", "https://github.com"},
+		{"auth", "http://127.0.0.1:8099/auth"},
+		{"cdn", "http://127.0.0.1:8099/cdn"},
+		{"mail", "http://127.0.0.1:8099/mail"},
+		{"queue", "http://127.0.0.1:8099/queue"},
 	}
 	for _, m := range monitors {
 		c := config.Check{Name: m.name, URL: m.url, Interval: 5 * time.Second, Timeout: 3 * time.Second, ExpectedStatus: 200}
@@ -77,6 +81,14 @@ func seed(path string) error {
 				ms = 400
 			case "web", "github":
 				ms = 60 + rng.Intn(141)
+			case "auth":
+				ms = 38 + rng.Intn(25)
+			case "cdn":
+				ms = 18 + rng.Intn(17)
+			case "mail":
+				ms = 180 + rng.Intn(81)
+			case "queue":
+				ms = 92 + rng.Intn(9)
 			}
 			r := check.Result{CheckName: m.name, At: now.Add(-3*time.Second - time.Duration(27-i)*c.Interval), Status: check.StatusUp, Latency: time.Duration(ms) * time.Millisecond, StatusCode: 200}
 			if m.name == "payments" && ((i >= 8 && i <= 10) || i >= 22) {

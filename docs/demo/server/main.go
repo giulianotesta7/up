@@ -33,7 +33,7 @@ func main() {
 	var mu sync.Mutex
 	searchRequests := 0
 	mux := http.NewServeMux()
-	for _, path := range []string{"/api", "/search", "/docs", "/payments"} {
+	for _, path := range []string{"/api", "/search", "/docs", "/payments", "/auth", "/cdn", "/mail", "/queue"} {
 		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
 			delay := time.Duration(75+rng.Intn(11)) * time.Millisecond
@@ -46,6 +46,14 @@ func main() {
 				}
 			case "/docs":
 				delay = 400 * time.Millisecond
+			case "/auth":
+				delay = time.Duration(38+rng.Intn(25)) * time.Millisecond
+			case "/cdn":
+				delay = time.Duration(18+rng.Intn(17)) * time.Millisecond
+			case "/mail":
+				delay = time.Duration(180+rng.Intn(81)) * time.Millisecond
+			case "/queue":
+				delay = time.Duration(92+rng.Intn(9)) * time.Millisecond
 			}
 			mu.Unlock()
 			timer := time.NewTimer(delay)
