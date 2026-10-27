@@ -1,6 +1,12 @@
 <div align="center">
 
-# up
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/banner-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/banner-light.svg">
+    <img alt="up" src="docs/images/banner-light.svg" width="640">
+  </picture>
+</h1>
 
 A self-hosted HTTP uptime monitor with a terminal UI.
 
@@ -9,7 +15,6 @@ A self-hosted HTTP uptime monitor with a terminal UI.
 
 </div>
 
-Uptime monitoring that lives in your terminal.
 A single Go binary that never stops watching. Close the TUI, walk away, SSH back in hours later, and catch up on everything you missed. No database server, no agents, no YAML.
 
 ## Capabilities
