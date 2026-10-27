@@ -1,6 +1,8 @@
 package config
 
 import (
+	"github.com/giulianotesta7/up/internal/secret"
+
 	"reflect"
 	"testing"
 )
@@ -52,5 +54,16 @@ func TestAlertValidation(t *testing.T) {
 	}
 	if got := ParseRecipients(" , "); got != nil {
 		t.Fatal(got)
+	}
+}
+
+func TestValidateSMTPServerRejectsPasswordWithoutUsername(t *testing.T) {
+	s := SMTPServer{Name: "relay", Host: "localhost", Port: 25, TLS: TLSNone, Sender: "up@example.com", Password: secret.Sealed{Key: []byte{1}, Data: []byte{2}}}
+	if err := ValidateSMTPServer(s); err == nil || err.Error() != "password requires a username" {
+		t.Fatalf("ValidateSMTPServer() error = %v, want password requires a username", err)
+	}
+	s.Password = secret.Sealed{}
+	if err := ValidateSMTPServer(s); err != nil {
+		t.Fatalf("ValidateSMTPServer() without username or password error = %v", err)
 	}
 }

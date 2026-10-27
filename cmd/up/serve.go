@@ -54,22 +54,35 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	logger := slog.New(slog.NewTextHandler(stderr, nil))
+	keyPath := *dbPath + ".key"
+	var key *secret.Key
+	loadKey := func() bool {
+		k, created, err := secret.LoadOrCreate(keyPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "up: %v\n", err)
+			return false
+		}
+		if created {
+			logger.Info("created encryption key", "path", keyPath)
+		}
+		key = k
+		return true
+	}
+	// Check an existing key before opening the database, so a refused start
+	// never migrates or otherwise changes it. A missing key is created after
+	// the database opens, so database errors keep coming first.
+	if _, err := os.Lstat(keyPath); err == nil && !loadKey() {
+		return 1
+	}
 	s, err := store.Open(*dbPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "up: %v\n", err)
 		return 1
 	}
 	defer s.Close()
-
-	logger := slog.New(slog.NewTextHandler(stderr, nil))
-	keyPath := *dbPath + ".key"
-	key, created, err := secret.LoadOrCreate(keyPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "up: %v\n", err)
+	if key == nil && !loadKey() {
 		return 1
-	}
-	if created {
-		logger.Info("created encryption key", "path", keyPath)
 	}
 	publicKey, _, err := s.PublicKey(ctx)
 	if err == nil && !bytes.Equal(publicKey, key.PublicKey()) {

@@ -51,7 +51,8 @@ type Channel struct {
 }
 
 // ValidateSMTPServer validates an SMTP server definition. A server without
-// TLS cannot have a username, so a password never travels in plain text.
+// TLS cannot have a username, so a password never travels in plain text,
+// and a password without a username is refused instead of being dropped.
 func ValidateSMTPServer(s SMTPServer) error {
 	var errs []error
 	if s.Name == "" {
@@ -74,6 +75,9 @@ func ValidateSMTPServer(s SMTPServer) error {
 		}
 	default:
 		errs = append(errs, fmt.Errorf("TLS %q must be starttls, tls or none", s.TLS))
+	}
+	if s.Username == "" && !s.Password.Empty() {
+		errs = append(errs, errors.New("password requires a username"))
 	}
 	if s.Sender == "" {
 		errs = append(errs, errors.New("sender is required"))

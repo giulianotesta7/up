@@ -81,7 +81,7 @@ func TestAlertStore(t *testing.T) {
 	if !reflect.DeepEqual(got.Password, v.Password) {
 		t.Fatal(got.Password)
 	}
-	v.Username = ""
+	v.Username, v.Password = "", secret.Sealed{}
 	if err := s.UpdateSMTPServer(ctx, v); err != nil {
 		t.Fatal(err)
 	}
@@ -195,4 +195,15 @@ func TestAlertStore(t *testing.T) {
 	if err := s.DeleteSMTPServer(ctx, "s"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestUpdateSMTPServerRejectsPasswordWithoutUsername(t *testing.T) {
+	s, path := seeded(t)
+	v := smtp("relay")
+	v.Username, v.Password = "", secret.Sealed{}
+	if err := s.AddSMTPServer(ctx, v); err != nil {
+		t.Fatal(err)
+	}
+	v.Password = secret.Sealed{Data: []byte{1, 2}, Key: []byte{3, 4}}
+	unchanged(t, path, func() error { return s.UpdateSMTPServer(ctx, v) }, `store: update SMTP server: password requires a username`)
 }
