@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 2
+const schemaVersion = 3
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -73,6 +73,12 @@ CREATE TABLE secret_key (
 	id         INTEGER PRIMARY KEY CHECK (id = 1),
 	public_key BLOB    NOT NULL
 );
+`,
+	// v2 -> v3: consecutive failures before the down alert and consecutive
+	// successes before the recovery alert. 0 means 1 (the previous behavior).
+	`
+ALTER TABLE checks ADD COLUMN alert_after   INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE checks ADD COLUMN recover_after INTEGER NOT NULL DEFAULT 0;
 `,
 }
 
@@ -241,8 +247,8 @@ func insertCheck(ctx context.Context, tx *sql.Tx, position int, c config.Check) 
 		return err
 	}
 	_, err := tx.ExecContext(ctx,
-		"INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, channel) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		position, c.Name, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel)
+		"INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		position, c.Name, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter)
 	return err
 }
 
@@ -256,7 +262,7 @@ type checkReader interface {
 }
 
 func readChecks(ctx context.Context, reader checkReader) ([]config.Check, error) {
-	rows, err := reader.QueryContext(ctx, "SELECT name, url, interval_ns, timeout_ns, expected_status, channel FROM checks ORDER BY position")
+	rows, err := reader.QueryContext(ctx, "SELECT name, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after FROM checks ORDER BY position")
 	if err != nil {
 		return nil, fmt.Errorf("store: checks: %w", err)
 	}
@@ -265,7 +271,7 @@ func readChecks(ctx context.Context, reader checkReader) ([]config.Check, error)
 	for rows.Next() {
 		var c config.Check
 		var interval, timeout int64
-		if err := rows.Scan(&c.Name, &c.URL, &interval, &timeout, &c.ExpectedStatus, &c.Channel); err != nil {
+		if err := rows.Scan(&c.Name, &c.URL, &interval, &timeout, &c.ExpectedStatus, &c.Channel, &c.AlertAfter, &c.RecoverAfter); err != nil {
 			return nil, fmt.Errorf("store: checks: %w", err)
 		}
 		c.Interval, c.Timeout = time.Duration(interval), time.Duration(timeout)

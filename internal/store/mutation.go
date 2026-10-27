@@ -23,8 +23,8 @@ func (s *Store) UpdateCheck(ctx context.Context, c config.Check) error {
 		return fmt.Errorf("store: update check: %w", err)
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE checks
-SET url = ?, interval_ns = ?, timeout_ns = ?, expected_status = ?, channel = ? WHERE name = ?`,
-		c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.Name)
+SET url = ?, interval_ns = ?, timeout_ns = ?, expected_status = ?, channel = ?, alert_after = ?, recover_after = ? WHERE name = ?`,
+		c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter, c.Name)
 	if err != nil {
 		return fmt.Errorf("store: update check: %w", err)
 	}

@@ -18,7 +18,21 @@ type Check struct {
 	// Channel is the name of the channel that receives this check's alerts;
 	// empty means no alerts.
 	Channel string
+	// AlertAfter is how many failed checks in a row send the down alert, and
+	// RecoverAfter how many successful ones send the recovery alert. Zero
+	// means 1; use FailuresToAlert and SuccessesToRecover.
+	AlertAfter   int
+	RecoverAfter int
 }
+
+// MaxAlertThreshold is the largest AlertAfter and RecoverAfter.
+const MaxAlertThreshold = 10
+
+// FailuresToAlert is AlertAfter with the default applied.
+func (c Check) FailuresToAlert() int { return max(c.AlertAfter, 1) }
+
+// SuccessesToRecover is RecoverAfter with the default applied.
+func (c Check) SuccessesToRecover() int { return max(c.RecoverAfter, 1) }
 
 // rawCheck keeps durations as strings and the status as a pointer so that
 // missing and malformed values get their own error messages.
@@ -35,6 +49,12 @@ type rawCheck struct {
 // interval, and the expected HTTP status must be between 100 and 599.
 func ValidateCheck(c Check) error {
 	_, errs := parseCheck(rawFromCheck(c))
+	if c.AlertAfter < 0 || c.AlertAfter > MaxAlertThreshold {
+		errs = append(errs, fmt.Errorf("alert after %d must be between 1 and %d", c.AlertAfter, MaxAlertThreshold))
+	}
+	if c.RecoverAfter < 0 || c.RecoverAfter > MaxAlertThreshold {
+		errs = append(errs, fmt.Errorf("recover after %d must be between 1 and %d", c.RecoverAfter, MaxAlertThreshold))
+	}
 	return errors.Join(errs...)
 }
 
