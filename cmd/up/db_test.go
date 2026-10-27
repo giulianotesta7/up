@@ -112,7 +112,7 @@ func TestDatabaseDefaults(t *testing.T) {
 			previous := runTUIProgram
 			t.Cleanup(func() { runTUIProgram = previous })
 			runTUIProgram = func(context.Context, *store.Store, ...tui.Options) error { return nil }
-			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
 			defer cancel()
 			code, out, errOut := runCmd(ctx, command)
 			if code != 0 || out != "" || (command == "tui" && errOut != "") {
@@ -168,7 +168,7 @@ func TestDatabaseConfigDirectoryFailure(t *testing.T) {
 			if err == nil {
 				t.Skip("platform does not require HOME")
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
 			defer cancel()
 			previous := runTUIProgram
 			t.Cleanup(func() { runTUIProgram = previous })

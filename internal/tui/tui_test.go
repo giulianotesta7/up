@@ -77,7 +77,7 @@ func seededSnapshot(t *testing.T, beat time.Time) Snapshot {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	snap, err := Load(ctx, r)
+	snap, err := Load(ctx, r, now)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -196,7 +196,7 @@ func TestListView(t *testing.T) {
 	out := view(modelWith(seededSnapshot(t, now.Add(-5*time.Second))))
 
 	for _, want := range []string{
-		"SERVICE", "STATUS", "LATENCY", "LAST CHECK",
+		"MONITOR", "STATUS", "LATENCY", "LAST CHECK",
 		"api", "UP", "84ms", "30s ago",
 		"payments", "DOWN", "1m ago", reason,
 		"new", "PENDING",
@@ -241,7 +241,7 @@ func TestDetailView(t *testing.T) {
 		"payments", "https://pay.example.com",
 		"Interval: 1m0s", "Timeout: 10s", "Expected status: 204",
 		"Status: DOWN", "Last error: " + reason, "Down since: Oct 25 03:44:00 (1m ago)",
-		"Recent checks (oldest → newest): █▁▁█▁",
+		"84ms│", "0│", "older", "avg 84ms · p95 84ms · max 84ms · 3 failed of 5",
 		"Oct 25 03:44:00 → ongoing",
 		"Oct 25 03:12:00 → Oct 25 03:40:00 (28m0s)",
 		"esc back",
@@ -335,7 +335,7 @@ func TestEmptyConfigMessage(t *testing.T) {
 
 func lineWith(out, name string) string {
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(strings.TrimLeft(line, " >"), name+" ") {
+		if strings.HasPrefix(strings.TrimLeft(line, " >▌●"), name+" ") {
 			return line
 		}
 	}

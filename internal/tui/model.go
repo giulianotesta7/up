@@ -3,9 +3,11 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/giulianotesta7/up/internal/store"
 )
@@ -24,24 +26,50 @@ type snapshotMsg struct {
 
 type tickMsg struct{ generation uint64 }
 
+const sweepFrameInterval = 40 * time.Millisecond
+
+type sweepFrameMsg struct{ generation uint64 }
+
+func sweepEnabled(snap Snapshot, now time.Time, noColor, term string) bool {
+	return !snap.Stale(now) && noColor == "" && term != "dumb"
+}
+
+func shouldSweep(previous, next Snapshot, now time.Time, noColor, term string) bool {
+	return previous.HasBeat && next.LastBeat.After(previous.LastBeat) && sweepEnabled(next, now, noColor, term)
+}
+
+func (m Model) sweepTick() tea.Cmd {
+	generation := m.sweepGeneration
+	return tea.Tick(sweepFrameInterval, func(time.Time) tea.Msg {
+		return sweepFrameMsg{generation: generation}
+	})
+}
+
 // Model is the Bubble Tea model of the TUI.
 type Model struct {
-	databasePath string
-	store        Store
-	now          func() time.Time
-	snap         Snapshot
-	err          error
-	selected     int
-	detail       bool
-	form         *monitorForm
-	deletion     *deletePrompt
-	generation   uint64
-	selectName   string
+	hostname        string
+	databasePath    string
+	store           Store
+	now             func() time.Time
+	snap            Snapshot
+	err             error
+	width           int
+	selected        int
+	detail          bool
+	form            *monitorForm
+	deletion        *deletePrompt
+	generation      uint64
+	selectName      string
+	animationOff    bool
+	sweeping        bool
+	sweepPosition   int
+	sweepGeneration uint64
 }
 
 // Options supplies display metadata for the open store.
 type Options struct {
 	DatabasePath string
+	Hostname     string
 }
 
 // New returns a model reading from s; now is the clock used for ages and
@@ -50,6 +78,7 @@ func New(s Store, now func() time.Time, options ...Options) Model {
 	m := Model{store: s, now: now}
 	if len(options) > 0 {
 		m.databasePath = options[0].DatabasePath
+		m.hostname = options[0].Hostname
 	}
 	return m
 }
@@ -62,21 +91,35 @@ func (m Model) Init() tea.Cmd {
 func (m Model) load() tea.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
-	snap, err := Load(ctx, m.store)
+	snap, err := Load(ctx, m.store, m.now())
 	return snapshotMsg{snap: snap, err: err, generation: m.generation}
 }
 
 // Update handles snapshots, poll ticks and keys.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		return m, nil
 	case snapshotMsg:
 		if msg.generation != m.generation {
 			return m, nil
 		}
+		var frame tea.Cmd
 		// A failed read keeps the last good snapshot on screen.
 		m.err = msg.err
 		if msg.err == nil {
+			if !m.animationOff && shouldSweep(m.snap, msg.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
+				m.sweeping, m.sweepPosition = true, 0
+				// A restart supersedes any pending frame. Only this generation
+				// can continue the chain; old frames never schedule successors.
+				m.sweepGeneration++
+				frame = m.sweepTick()
+			}
 			m.snap = msg.snap
+			if !sweepEnabled(m.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
+				m.sweeping = false
+			}
 			if m.selectName != "" {
 				for i, svc := range m.snap.Services {
 					if svc.Check.Name == m.selectName {
@@ -93,7 +136,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.detail = false
 			}
 		}
-		return m, tea.Tick(pollInterval, func(time.Time) tea.Msg { return tickMsg{generation: m.generation} })
+		poll := tea.Tick(pollInterval, func(time.Time) tea.Msg { return tickMsg{generation: m.generation} })
+		if frame != nil {
+			return m, tea.Batch(poll, frame)
+		}
+		return m, poll
+	case sweepFrameMsg:
+		if !m.sweeping || msg.generation != m.sweepGeneration {
+			return m, nil
+		}
+		m.sweepPosition++
+		if m.sweepPosition >= ruleWidth(m.width)-1 || !sweepEnabled(m.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
+			m.sweeping = false
+			return m, nil
+		}
+		return m, m.sweepTick()
 	case tickMsg:
 		if msg.generation != m.generation {
 			return m, nil
@@ -160,6 +217,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
 		return m, tea.Quit
+	case "a":
+		m.animationOff = !m.animationOff
+		if m.animationOff {
+			m.sweeping = false
+			m.sweepGeneration++
+		}
 	case "n":
 		m.form = newMonitorForm()
 	case "e", "d":
@@ -192,9 +255,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // View renders the list, or the detail of the selected service.
 func (m Model) View() tea.View {
 	now := m.now()
-	content := renderList(m.snap, m.selected, now, m.err)
+	content := renderList(m.snap, m.selected, now, m.err, m.width)
 	if m.detail && m.selected < len(m.snap.Services) {
-		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err)
+		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width)
 	}
 	if m.form != nil {
 		content = renderForm(*m.form, m.snap, now, m.err)
@@ -202,7 +265,17 @@ func (m Model) View() tea.View {
 	if m.deletion != nil {
 		content = renderDelete(*m.deletion, m.snap, now, m.err)
 	}
+	position := -1
+	if m.sweeping && sweepEnabled(m.snap, now, os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
+		position = m.sweepPosition
+	}
+	content = renderTitleWidth(m.snap, m.width) + "\n" + renderHostRule(m.snap, m.hostname, now, m.width, position) + "\n" + content
 	content += "\n" + helpStyle.Render("database: "+m.databasePath)
+	// Lipgloss v2 emits truecolor styles; colorprofile only recognizes boolean
+	// NO_COLOR values. Honor every nonempty value, including in direct renders.
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		content = ansi.Strip(content)
+	}
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v

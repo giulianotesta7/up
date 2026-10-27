@@ -2,67 +2,69 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2"
-
-	"github.com/giulianotesta7/up/internal/check"
-)
-
-var (
-	titleStyle   = lipgloss.NewStyle().Bold(true)
-	headerStyle  = lipgloss.NewStyle().Bold(true).Faint(true)
-	upStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	downStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-	pendingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	warnStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Bold(true)
-	helpStyle    = lipgloss.NewStyle().Faint(true)
+	"github.com/charmbracelet/x/ansi"
 )
 
 const timeLayout = "Jan 02 15:04:05"
 
-func renderList(snap Snapshot, selected int, now time.Time, loadErr error) string {
+func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width int) string {
 	var b strings.Builder
-	b.WriteString(renderTitle(snap) + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
-	b.WriteString("\n")
 
 	if len(snap.Services) == 0 {
-		b.WriteString("No checks configured.\n")
+		b.WriteString(helpStyle.Render("No checks configured.") + "\n")
 	} else {
-		nameWidth := len("SERVICE")
+		nameWidth := ansi.StringWidth("MONITOR")
 		for _, s := range snap.Services {
-			nameWidth = max(nameWidth, len(s.Check.Name))
+			nameWidth = max(nameWidth, ansi.StringWidth(s.Check.Name))
 		}
-		row := func(marker, name, status, latency, last, reason string) string {
-			return strings.TrimRight(fmt.Sprintf("%s %-*s  %-7s  %8s  %-10s  %s", marker, nameWidth, name, status, latency, last, reason), " ")
+		// Drop the trend before it crowds the existing columns. Long names
+		// also consume terminal cells, including double-width characters.
+		showTrend := width <= 0 || width >= max(78, nameWidth+62)
+		row := func(marker, dot, name, status, latency, trend, last, reason string) string {
+			padding := strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name)))
+			middle := ""
+			if showTrend {
+				middle = "  " + trend + strings.Repeat(" ", max(0, 16-ansi.StringWidth(trend)))
+			}
+			prefix := marker + " " + dot + " " + name + padding + "  " + status + fmt.Sprintf("  %8s", latency) + middle
+			if showTrend {
+				return prefix + "  " + strings.TrimRight(fmt.Sprintf("%-10s  %s", last, reason), " ")
+			}
+			return strings.TrimRight(prefix+fmt.Sprintf("  %-10s  %s", last, reason), " ")
 		}
-		b.WriteString(headerStyle.Render(row(" ", "SERVICE", "STATUS", "LATENCY", "LAST CHECK", "")) + "\n")
+		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", "STATUS ", "LATENCY", "TREND (16)", "LAST CHECK", "")) + "\n")
 		for i, s := range snap.Services {
 			marker := " "
 			if i == selected {
-				marker = ">"
+				marker = accentStyle.Render("▌")
 			}
 			latency, last, reason := "", "", ""
 			if s.HasResult {
 				latency, last = formatLatency(s.Latest.Latency), ago(now, s.Latest.At)
 				reason = s.Latest.Error
 			}
-			line := row(marker, s.Check.Name, "\x00", latency, last, reason)
-			b.WriteString(strings.Replace(line, "\x00", styledLabel(s, 7), 1) + "\n")
+			name := s.Check.Name
+			if i == selected {
+				name = selectedNameStyle.Render(name)
+			}
+			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, 7), latency, sparkline(s.Recent, 16), last, reason) + "\n")
 		}
 	}
 
-	b.WriteString("\n" + helpStyle.Render("↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · a animation · q quit · ctrl+c quit"))
 	return b.String()
 }
 
-func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error) string {
+func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width int) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + s.Check.URL + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
-	b.WriteString("\n")
 
 	fmt.Fprintf(&b, "Interval: %s   Timeout: %s   Expected status: %d\n", s.Check.Interval, s.Check.Timeout, s.Check.ExpectedStatus)
 	fmt.Fprintf(&b, "Status: %s", styledLabel(s, 0))
@@ -80,15 +82,18 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error) string
 	if len(s.Recent) == 0 {
 		b.WriteString("No checks yet.\n")
 	} else {
-		var strip strings.Builder
-		for i := len(s.Recent) - 1; i >= 0; i-- {
-			if s.Recent[i].Status == check.StatusUp {
-				strip.WriteString(upStyle.Render("█"))
-			} else {
-				strip.WriteString(downStyle.Render("▁"))
-			}
+		chartWidth := recentLimit
+		if width > 0 {
+			chartWidth = min(chartWidth, max(8, width-graphLabelWidth-1))
 		}
-		fmt.Fprintf(&b, "Recent checks (oldest → newest): %s\n", strip.String())
+		window := graphWindow(s.Recent, chartWidth)
+		b.WriteString(strings.Join(chart(window, chartWidth, 4), "\n") + "\n")
+		avg, p95, maximum, failed, total := latencyStats(window)
+		if failed == total {
+			fmt.Fprintf(&b, "no successful checks · %d failed of %d\n", failed, total)
+		} else {
+			fmt.Fprintf(&b, "avg %s · p95 %s · max %s · %d failed of %d\n", formatLatency(avg), formatLatency(p95), formatLatency(maximum), failed, total)
+		}
 	}
 
 	b.WriteString("\nRecent outages:\n")
@@ -103,23 +108,39 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error) string
 		fmt.Fprintf(&b, "  %s → %s (%s)   %s\n", formatTime(o.Start, now), formatTime(o.End, now), o.End.Sub(o.Start), o.Error)
 	}
 
-	b.WriteString("\n" + helpStyle.Render("esc back · n new monitor · e edit · d delete · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("esc back · n new monitor · e edit · d delete · a animation · q quit · ctrl+c quit"))
 	return b.String()
 }
 
-func renderTitle(snap Snapshot) string {
-	var nUp, nDown, nPending int
-	for _, s := range snap.Services {
-		switch s.Label() {
-		case "UP":
-			nUp++
-		case "DOWN":
-			nDown++
-		default:
-			nPending++
+func renderTitle(snap Snapshot) string { return renderTitleWidth(snap, 0) }
+
+func renderTitleWidth(snap Snapshot, width int) string {
+	line := titleStyle.Render(logoMark + " " + productName)
+	if !snap.HasUptime {
+		return line
+	}
+	percent := "100%"
+	if snap.Uptime < 100 {
+		percent = fmt.Sprintf("%.1f%%", math.Floor(snap.Uptime*10)/10)
+	}
+	style := downStyle
+	if snap.Uptime >= 99.9 {
+		style = upStyle
+	} else if snap.Uptime >= 99 {
+		style = slowStyle
+	}
+	line += "  " + style.Render(percent+" uptime today")
+	if snap.Incidents > 0 {
+		noun := "incidents"
+		if snap.Incidents == 1 {
+			noun = "incident"
+		}
+		extra := helpStyle.Render(fmt.Sprintf(" · %d %s", snap.Incidents, noun))
+		if ansi.StringWidth(line+extra) <= ruleWidth(width) {
+			line += extra
 		}
 	}
-	return titleStyle.Render("up") + fmt.Sprintf(" · %d services · %d up · %d down · %d pending", len(snap.Services), nUp, nDown, nPending)
+	return line
 }
 
 func renderBanners(snap Snapshot, now time.Time, loadErr error) string {
@@ -140,14 +161,17 @@ func renderBanners(snap Snapshot, now time.Time, loadErr error) string {
 // styledLabel colors the status label, padded to width before styling so
 // that columns stay aligned.
 func styledLabel(s Service, width int) string {
-	label := fmt.Sprintf("%-*s", width, s.Label())
+	return statusStyle(s).Render(fmt.Sprintf("%-*s", width, s.Label()))
+}
+
+func statusStyle(s Service) lipgloss.Style {
 	switch s.Label() {
 	case "UP":
-		return upStyle.Render(label)
+		return upStyle
 	case "DOWN":
-		return downStyle.Render(label)
+		return downStyle
 	default:
-		return pendingStyle.Render(label)
+		return pendingStyle
 	}
 }
 

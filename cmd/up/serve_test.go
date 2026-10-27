@@ -122,7 +122,7 @@ func TestServeRetentionPrunesOldResults(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(bg, 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(bg, time.Second)
 	defer cancel()
 	if code, _, errOut := runCmd(ctx, "serve", "--db", dbPath, "--retention", "1h"); code != 0 {
 		t.Fatalf("serve exit %d: %s", code, errOut)

@@ -16,7 +16,7 @@ import (
 const StaleAfter = 3 * monitor.DefaultHeartbeatInterval
 
 const (
-	recentLimit = 20
+	recentLimit = 28
 	outageLimit = 5
 )
 
@@ -49,6 +49,10 @@ type Snapshot struct {
 	Services []Service
 	LastBeat time.Time
 	HasBeat  bool
+	// Uptime is the mean percentage over monitors with observed time.
+	Uptime    float64
+	HasUptime bool
+	Incidents int
 }
 
 // Stale reports whether the daemon stopped writing heartbeats. Service
@@ -63,6 +67,7 @@ type Store interface {
 	Recent(context.Context, string, int) ([]check.Result, error)
 	Outages(context.Context, string, int) ([]store.Outage, error)
 	LastBeat(context.Context) (time.Time, bool, error)
+	UptimeWindow(context.Context, string, time.Time, time.Time) (time.Duration, time.Duration, int, error)
 	AddCheck(context.Context, config.Check) error
 	UpdateCheck(context.Context, config.Check) error
 	DeleteCheck(context.Context, string) error
@@ -71,8 +76,22 @@ type Store interface {
 var _ Store = (*store.Store)(nil)
 
 // Load reads a snapshot from the store.
-func Load(ctx context.Context, s Store) (Snapshot, error) {
+func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 	var snap Snapshot
+	now := time.Now()
+	if len(clock) > 0 {
+		now = clock[0]
+	}
+	var err error
+	if snap.LastBeat, snap.HasBeat, err = s.LastBeat(ctx); err != nil {
+		return Snapshot{}, err
+	}
+	until := now
+	if snap.HasBeat && snap.Stale(now) {
+		until = snap.LastBeat
+	}
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	var observedMonitors int
 	checks, err := s.Checks(ctx)
 	if err != nil {
 		return Snapshot{}, err
@@ -91,10 +110,20 @@ func Load(ctx context.Context, s Store) (Snapshot, error) {
 		if len(svc.Outages) > 0 && svc.Outages[0].Ongoing {
 			svc.DownSince = svc.Outages[0].Start
 		}
+		up, observed, incidents, err := s.UptimeWindow(ctx, c.Name, start, until)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if snap.HasBeat && observed > 0 {
+			snap.Uptime += float64(up) / float64(observed) * 100
+			observedMonitors++
+		}
+		snap.Incidents += incidents
 		snap.Services = append(snap.Services, svc)
 	}
-	if snap.LastBeat, snap.HasBeat, err = s.LastBeat(ctx); err != nil {
-		return Snapshot{}, err
+	if observedMonitors > 0 {
+		snap.Uptime /= float64(observedMonitors)
+		snap.HasUptime = true
 	}
 	return snap, nil
 }

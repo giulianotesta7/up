@@ -26,6 +26,7 @@ func TestTUICreationHelp(t *testing.T) {
 		"n new monitor", "tab/shift+tab", "enter save", "esc cancel", "ctrl+c quit",
 		"30s", "5s", "200", "created if missing", "edit cannot rename", "delete removes history",
 		"e edit", "d delete", "y delete", "n cancel",
+		"Keys: ↑/↓ or k/j select · enter details · n new monitor · e edit · d delete · a toggle animation · esc back · q/ctrl+c quit",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help missing %q: %s", want, out)

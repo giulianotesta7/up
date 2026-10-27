@@ -41,15 +41,15 @@ func (m Model) handleDeleteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func renderDelete(p deletePrompt, snap Snapshot, now time.Time, loadErr error) string {
-	content := titleStyle.Render("Delete monitor") + "\n" + renderBanners(snap, now, loadErr) + "\n"
+	content := titleStyle.Render("Delete monitor") + "\n" + renderBanners(snap, now, loadErr)
 	content += fmt.Sprintf("Delete monitor %q and all its history? This cannot be undone.\n", p.name)
 	if p.err != nil {
 		content += "\n" + warnStyle.Render("Cannot delete monitor: "+p.err.Error()) + "\n"
 	}
 	if p.saving {
-		content += "\n" + helpStyle.Render("Deleting monitor… · ctrl+c quit")
+		content += "\n" + renderHelp("Deleting monitor… · ctrl+c quit")
 	} else {
-		content += "\n" + helpStyle.Render("y delete · n cancel")
+		content += "\n" + renderHelp("y delete · n cancel")
 	}
 	return content
 }
