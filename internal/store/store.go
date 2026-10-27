@@ -17,9 +17,14 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 1
+const schemaVersion = 2
 
-const schema = `
+// migrations[v] upgrades a database from schema version v to v+1. A new
+// database runs all of them in one transaction. Never edit a released entry:
+// append a new one instead.
+var migrations = []string{
+	// v0 -> v1: checks, results and the daemon heartbeat.
+	`
 CREATE TABLE checks (
 	position        INTEGER NOT NULL,
 	name            TEXT    NOT NULL PRIMARY KEY,
@@ -42,7 +47,34 @@ CREATE TABLE daemon (
 	id         INTEGER PRIMARY KEY CHECK (id = 1),
 	last_beat_ns INTEGER NOT NULL
 );
-`
+`,
+	// v1 -> v2: SMTP servers, alert channels, the monitor's channel and the
+	// public key that encrypts SMTP passwords. Kinds and TLS modes are
+	// validated in Go, so new values need no table rebuild.
+	`
+ALTER TABLE checks ADD COLUMN channel TEXT NOT NULL DEFAULT '';
+CREATE TABLE smtp_servers (
+	name         TEXT    NOT NULL PRIMARY KEY,
+	host         TEXT    NOT NULL,
+	port         INTEGER NOT NULL,
+	tls          TEXT    NOT NULL,
+	username     TEXT    NOT NULL,
+	password     BLOB    NOT NULL,
+	password_key BLOB    NOT NULL,
+	sender       TEXT    NOT NULL
+);
+CREATE TABLE channels (
+	name        TEXT NOT NULL PRIMARY KEY,
+	kind        TEXT NOT NULL,
+	smtp_server TEXT NOT NULL,
+	recipients  TEXT NOT NULL
+);
+CREATE TABLE secret_key (
+	id         INTEGER PRIMARY KEY CHECK (id = 1),
+	public_key BLOB    NOT NULL
+);
+`,
+}
 
 // Outage is a period during which a check was down. Ongoing outages have a
 // zero End.
@@ -92,9 +124,13 @@ func OpenReadOnly(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version < schemaVersion {
+	if version == 0 {
 		db.Close()
 		return nil, fmt.Errorf("store: open %s: database is not initialized (start `up serve` first)", path)
+	}
+	if version < schemaVersion {
+		db.Close()
+		return nil, fmt.Errorf("store: open %s: database schema version %d is older than this up (%d); open it with `up serve` or `up tui` to upgrade it", path, version, schemaVersion)
 	}
 	return &Store{db: db}, nil
 }
@@ -133,8 +169,13 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(schema); err != nil {
-		return fmt.Errorf("create schema: %w", err)
+	for v := version; v < schemaVersion; v++ {
+		if _, err := tx.Exec(migrations[v]); err != nil {
+			if v == 0 {
+				return fmt.Errorf("create schema: %w", err)
+			}
+			return fmt.Errorf("migrate schema %d to %d: %w", v, v+1, err)
+		}
 	}
 	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
 		return err
