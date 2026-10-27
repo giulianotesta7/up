@@ -170,7 +170,7 @@ func TestUptimeHeader(t *testing.T) {
 	if line := strings.Split(view(modelWith(Snapshot{})), "\n")[0]; line != "▲ up" {
 		t.Fatal(line)
 	}
-	if sweepFrameInterval != 50*time.Millisecond {
+	if sweepFrameInterval != 40*time.Millisecond {
 		t.Fatal(sweepFrameInterval)
 	}
 }

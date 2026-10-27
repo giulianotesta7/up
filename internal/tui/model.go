@@ -26,7 +26,7 @@ type snapshotMsg struct {
 
 type tickMsg struct{ generation uint64 }
 
-const sweepFrameInterval = 50 * time.Millisecond
+const sweepFrameInterval = 40 * time.Millisecond
 
 type sweepFrameMsg struct{ generation uint64 }
 
