@@ -2,7 +2,6 @@ package tui
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -34,7 +33,7 @@ func TestIdentityViews(t *testing.T) {
 			}
 			out := view(current)
 			lines := strings.Split(out, "\n")
-			if lines[0] != "▲ up · 3 monitors · 1 up · 1 down · 1 pending" {
+			if lines[0] != "▲ up  58.5% uptime today · 2 incidents" {
 				t.Errorf("header: %q", lines[0])
 			}
 			if lines[1] != "└"+strings.Repeat("─", 59) {
@@ -56,11 +55,7 @@ func TestIdentitySummaryAndWidth(t *testing.T) {
 		current := snap
 		current.Services = current.Services[:count]
 		m := modelWith(current)
-		noun := "monitors"
-		if count == 1 {
-			noun = "monitor"
-		}
-		if !strings.Contains(strings.Split(view(m), "\n")[0], fmt.Sprintf("%d %s ·", count, noun)) {
+		if strings.Contains(strings.Split(view(m), "\n")[0], "monitor") {
 			t.Fatal(view(m))
 		}
 		for _, tc := range []struct{ width, want int }{{0, 60}, {10, 20}, {42, 42}, {200, 80}} {

@@ -3,6 +3,9 @@ package tui
 import (
 	"image/color"
 	"strings"
+	"time"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"charm.land/lipgloss/v2"
 )
@@ -67,6 +70,58 @@ func renderRule(width, position int) string {
 	pulse := []rune("╱╲╱")[:min(3, length-position)]
 	return stem + helpStyle.Render(strings.Repeat("─", position)) +
 		accentStyle.Render(string(pulse)) + helpStyle.Render(strings.Repeat("─", length-position-len(pulse)))
+}
+
+// renderHostRule keeps every label cell intact while the pulse lights it.
+// Positions are relative to the first cell after the stem, as in renderRule.
+func renderHostRule(snap Snapshot, hostname string, now time.Time, width, position int) string {
+	cells := ruleWidth(width)
+	hostname = ansi.Truncate(ansi.Strip(strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return -1
+		}
+		return r
+	}, hostname)), 24, "…")
+	if snap.Stale(now) {
+		position = -1
+	}
+	label := ""
+	if hostname != "" {
+		label = " " + hostname + " "
+	}
+	if 2+ansi.StringWidth(label)+3 > cells {
+		label = ""
+	}
+	if label == "" {
+		return renderRule(width, position)
+	}
+	var b strings.Builder
+	b.WriteString(accentStyle.Render(logoStem))
+	cell := 1
+	write := func(text string, style lipgloss.Style, rule bool) {
+		if position < 0 {
+			b.WriteString(style.Render(text))
+			cell += ansi.StringWidth(text)
+			return
+		}
+		for _, r := range text {
+			glyph := string(r)
+			w := ansi.StringWidth(glyph)
+			s := style
+			if position >= 0 && cell < position+4 && cell+w > position+1 {
+				s = accentStyle
+				if rule {
+					glyph = string([]rune("╱╲╱")[cell-position-1])
+				}
+			}
+			b.WriteString(s.Render(glyph))
+			cell += w
+		}
+	}
+	write("─", helpStyle, true)
+	write(label, helpStyle, false)
+	write(strings.Repeat("─", max(0, cells-cell)), helpStyle, true)
+	return b.String()
 }
 
 func renderHeader(snap Snapshot, width int) string {

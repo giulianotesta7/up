@@ -77,7 +77,7 @@ func seededSnapshot(t *testing.T, beat time.Time) Snapshot {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	snap, err := Load(ctx, r)
+	snap, err := Load(ctx, r, now)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}

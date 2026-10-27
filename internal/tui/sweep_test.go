@@ -95,7 +95,7 @@ func TestSweepFramesAndRestart(t *testing.T) {
 	old := m.sweepGeneration
 	next, cmd := m.Update(sweepFrameMsg{generation: old})
 	m = next.(Model)
-	if m.sweepPosition != 2 || cmd == nil {
+	if m.sweepPosition != 1 || cmd == nil {
 		t.Fatal("frame did not advance and schedule")
 	}
 	next, cmd = m.Update(snapshotMsg{snap: Snapshot{HasBeat: true, LastBeat: now.Add(time.Second)}})
@@ -109,7 +109,7 @@ func TestSweepFramesAndRestart(t *testing.T) {
 	if !reflect.DeepEqual(m.snap, before.snap) || m.sweepPosition != 0 || cmd != nil {
 		t.Fatal("old frame not ignored")
 	}
-	for pos := 2; pos <= 60; pos += 2 {
+	for pos := 1; pos <= 59; pos++ {
 		next, cmd = m.Update(sweepFrameMsg{generation: m.sweepGeneration})
 		m = next.(Model)
 		if pos < 59 {

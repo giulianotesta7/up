@@ -26,7 +26,7 @@ type snapshotMsg struct {
 
 type tickMsg struct{ generation uint64 }
 
-const sweepFrameInterval = 40 * time.Millisecond
+const sweepFrameInterval = 50 * time.Millisecond
 
 type sweepFrameMsg struct{ generation uint64 }
 
@@ -47,6 +47,7 @@ func (m Model) sweepTick() tea.Cmd {
 
 // Model is the Bubble Tea model of the TUI.
 type Model struct {
+	hostname        string
 	databasePath    string
 	store           Store
 	now             func() time.Time
@@ -68,6 +69,7 @@ type Model struct {
 // Options supplies display metadata for the open store.
 type Options struct {
 	DatabasePath string
+	Hostname     string
 }
 
 // New returns a model reading from s; now is the clock used for ages and
@@ -76,6 +78,7 @@ func New(s Store, now func() time.Time, options ...Options) Model {
 	m := Model{store: s, now: now}
 	if len(options) > 0 {
 		m.databasePath = options[0].DatabasePath
+		m.hostname = options[0].Hostname
 	}
 	return m
 }
@@ -88,7 +91,7 @@ func (m Model) Init() tea.Cmd {
 func (m Model) load() tea.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
-	snap, err := Load(ctx, m.store)
+	snap, err := Load(ctx, m.store, m.now())
 	return snapshotMsg{snap: snap, err: err, generation: m.generation}
 }
 
@@ -142,7 +145,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.sweeping || msg.generation != m.sweepGeneration {
 			return m, nil
 		}
-		m.sweepPosition += 2
+		m.sweepPosition++
 		if m.sweepPosition >= ruleWidth(m.width)-1 || !sweepEnabled(m.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
 			m.sweeping = false
 			return m, nil
@@ -266,7 +269,7 @@ func (m Model) View() tea.View {
 	if m.sweeping && sweepEnabled(m.snap, now, os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
 		position = m.sweepPosition
 	}
-	content = renderSweepHeader(m.snap, m.width, position) + content
+	content = renderTitleWidth(m.snap, m.width) + "\n" + renderHostRule(m.snap, m.hostname, now, m.width, position) + "\n" + content
 	content += "\n" + helpStyle.Render("database: "+m.databasePath)
 	// Lipgloss v2 emits truecolor styles; colorprofile only recognizes boolean
 	// NO_COLOR values. Honor every nonempty value, including in direct renders.

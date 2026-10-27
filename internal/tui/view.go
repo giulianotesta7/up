@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -111,23 +112,35 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 	return b.String()
 }
 
-func renderTitle(snap Snapshot) string {
-	var nUp, nDown, nPending int
-	for _, s := range snap.Services {
-		switch s.Label() {
-		case "UP":
-			nUp++
-		case "DOWN":
-			nDown++
-		default:
-			nPending++
+func renderTitle(snap Snapshot) string { return renderTitleWidth(snap, 0) }
+
+func renderTitleWidth(snap Snapshot, width int) string {
+	line := titleStyle.Render(logoMark + " " + productName)
+	if !snap.HasUptime {
+		return line
+	}
+	percent := "100%"
+	if snap.Uptime < 100 {
+		percent = fmt.Sprintf("%.1f%%", math.Floor(snap.Uptime*10)/10)
+	}
+	style := downStyle
+	if snap.Uptime >= 99.9 {
+		style = upStyle
+	} else if snap.Uptime >= 99 {
+		style = slowStyle
+	}
+	line += "  " + style.Render(percent+" uptime today")
+	if snap.Incidents > 0 {
+		noun := "incidents"
+		if snap.Incidents == 1 {
+			noun = "incident"
+		}
+		extra := helpStyle.Render(fmt.Sprintf(" · %d %s", snap.Incidents, noun))
+		if ansi.StringWidth(line+extra) <= ruleWidth(width) {
+			line += extra
 		}
 	}
-	noun := "monitors"
-	if len(snap.Services) == 1 {
-		noun = "monitor"
-	}
-	return titleStyle.Render(logoMark+" "+productName) + helpStyle.Render(fmt.Sprintf(" · %d %s · ", len(snap.Services), noun)) + upStyle.Render(fmt.Sprintf("%d up", nUp)) + helpStyle.Render(" · ") + downStyle.Render(fmt.Sprintf("%d down", nDown)) + helpStyle.Render(fmt.Sprintf(" · %d pending", nPending))
+	return line
 }
 
 func renderBanners(snap Snapshot, now time.Time, loadErr error) string {

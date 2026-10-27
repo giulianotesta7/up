@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/giulianotesta7/up/internal/store"
 	"github.com/giulianotesta7/up/internal/tui"
@@ -48,7 +49,11 @@ func runTUI(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	defer s.Close()
 
-	if err := runTUIProgram(ctx, s, tui.Options{DatabasePath: *dbPath}); err != nil {
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = ""
+	}
+	if err := runTUIProgram(ctx, s, tui.Options{DatabasePath: *dbPath, Hostname: hostname}); err != nil {
 		fmt.Fprintf(stderr, "up: %v\n", err)
 		return 1
 	}
