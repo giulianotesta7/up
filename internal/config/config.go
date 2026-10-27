@@ -15,6 +15,9 @@ type Check struct {
 	Interval       time.Duration
 	Timeout        time.Duration
 	ExpectedStatus int
+	// Channel is the name of the channel that receives this check's alerts;
+	// empty means no alerts.
+	Channel string
 }
 
 // rawCheck keeps durations as strings and the status as a pointer so that

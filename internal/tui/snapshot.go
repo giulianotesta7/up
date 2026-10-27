@@ -46,9 +46,13 @@ func (s Service) Label() string {
 
 // Snapshot is everything the TUI shows, read at one moment.
 type Snapshot struct {
-	Services []Service
-	LastBeat time.Time
-	HasBeat  bool
+	Services    []Service
+	SMTPServers []config.SMTPServer
+	Channels    []config.Channel
+	PublicKey   []byte
+	HasKey      bool
+	LastBeat    time.Time
+	HasBeat     bool
 	// Uptime is the mean percentage over monitors with observed time.
 	Uptime    float64
 	HasUptime bool
@@ -71,6 +75,15 @@ type Store interface {
 	AddCheck(context.Context, config.Check) error
 	UpdateCheck(context.Context, config.Check) error
 	DeleteCheck(context.Context, string) error
+	SMTPServers(context.Context) ([]config.SMTPServer, error)
+	AddSMTPServer(context.Context, config.SMTPServer) error
+	UpdateSMTPServer(context.Context, config.SMTPServer) error
+	DeleteSMTPServer(context.Context, string) error
+	Channels(context.Context) ([]config.Channel, error)
+	AddChannel(context.Context, config.Channel) error
+	UpdateChannel(context.Context, config.Channel) error
+	DeleteChannel(context.Context, string) error
+	PublicKey(context.Context) ([]byte, bool, error)
 }
 
 var _ Store = (*store.Store)(nil)
@@ -83,6 +96,15 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 		now = clock[0]
 	}
 	var err error
+	if snap.SMTPServers, err = s.SMTPServers(ctx); err != nil {
+		return Snapshot{}, err
+	}
+	if snap.Channels, err = s.Channels(ctx); err != nil {
+		return Snapshot{}, err
+	}
+	if snap.PublicKey, snap.HasKey, err = s.PublicKey(ctx); err != nil {
+		return Snapshot{}, err
+	}
 	if snap.LastBeat, snap.HasBeat, err = s.LastBeat(ctx); err != nil {
 		return Snapshot{}, err
 	}

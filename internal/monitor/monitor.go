@@ -50,8 +50,19 @@ type DefinedRecorder interface {
 	RecordDefined(context.Context, config.Check, check.Result) (bool, error)
 }
 
+// Alerter receives transitions; Notify must not block.
+type Alerter interface {
+	Notify(config.Check, check.Result)
+}
+
+// LatestReader provides the most recent recorded status.
+type LatestReader interface {
+	Latest(context.Context, string) (check.Result, bool, error)
+}
+
 // Options configures Run.
 type Options struct {
+	Alerter           Alerter
 	Store             Storage
 	Runner            Runner
 	HeartbeatInterval time.Duration
@@ -219,6 +230,17 @@ func heartbeat(ctx context.Context, opts Options) {
 func loop(ctx context.Context, opts Options, c config.Check, last check.Status) check.Status {
 	ticker := time.NewTicker(c.Interval)
 	defer ticker.Stop()
+	var baseline check.Status
+	if reader, ok := opts.Store.(LatestReader); opts.Alerter != nil && ok {
+		readCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+		result, found, err := reader.Latest(readCtx, c.Name)
+		cancel()
+		if err != nil {
+			opts.Logger.Error("reading last status failed", "check", c.Name, "error", err)
+		} else if found {
+			baseline = result.Status
+		}
+	}
 	for {
 		res := opts.Runner.Run(ctx, c)
 		if res.Status == check.StatusCanceled || ctx.Err() != nil {
@@ -237,6 +259,12 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 			opts.Logger.Error("storing result failed", "check", c.Name, "error", err)
 		} else if !stored {
 			return last
+		}
+		if opts.Alerter != nil {
+			if c.Channel != "" && ((baseline == "" && res.Status == check.StatusDown) || (baseline != "" && res.Status != baseline)) {
+				opts.Alerter.Notify(c, res)
+			}
+			baseline = res.Status
 		}
 		if res.Status != last {
 			logTransition(opts.Logger, c, res)

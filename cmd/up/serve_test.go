@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,8 +17,73 @@ import (
 
 	"github.com/giulianotesta7/up/internal/check"
 	"github.com/giulianotesta7/up/internal/config"
+	"github.com/giulianotesta7/up/internal/secret"
 	"github.com/giulianotesta7/up/internal/store"
 )
+
+func TestServeCreatesKey(t *testing.T) {
+	isolateDefaultDatabase(t)
+	path := filepath.Join(t.TempDir(), "up.db")
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if code, _, errOut := runCmd(ctx, "serve", "--db", path); code != 0 {
+		t.Fatalf("%d %s", code, errOut)
+	}
+	info, err := os.Stat(path + ".key")
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("key stat %v %v", info, err)
+	}
+	key, created, err := secret.LoadOrCreate(path + ".key")
+	if err != nil || created {
+		t.Fatalf("key %v %v", created, err)
+	}
+	s, err := store.OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	public, ok, err := s.PublicKey(context.Background())
+	if err != nil || !ok || !bytes.Equal(public, key.PublicKey()) {
+		t.Fatalf("public key mismatch: %v %v", ok, err)
+	}
+}
+func TestServeRefusesInsecureKey(t *testing.T) {
+	isolateDefaultDatabase(t)
+	path := filepath.Join(t.TempDir(), "up.db")
+	keyPath := path + ".key"
+	original := []byte("unchanged")
+	if err := os.WriteFile(keyPath, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(keyPath, 0644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := runCmd(context.Background(), "serve", "--db", path)
+	want := fmt.Sprintf("up: key file %s is accessible by group or others (run: chmod 600 %s)\n", keyPath, keyPath)
+	if code != 1 || out != "" || errOut != want {
+		t.Fatalf("%d %q %q", code, out, errOut)
+	}
+	data, err := os.ReadFile(keyPath)
+	if err != nil || !bytes.Equal(data, original) {
+		t.Fatalf("key changed: %q %v", data, err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("refused start created the database: %v", err)
+	}
+}
+
+func TestServeAlertHelp(t *testing.T) {
+	isolateDefaultDatabase(t)
+	code, out, errOut := runCmd(context.Background(), "serve", "-h")
+	if code != 0 || errOut != "" {
+		t.Fatalf("%d %q", code, errOut)
+	}
+	for _, text := range []string{"DOWN", "recovers", "SMTP servers", "<db>.key", "0600", "back it up", "group or others"} {
+		if !strings.Contains(out, text) {
+			t.Errorf("missing %q", text)
+		}
+	}
+}
 
 func TestServeRunsSQLiteDefinitionsAndPreservesHistory(t *testing.T) {
 	isolateDefaultDatabase(t)
@@ -170,5 +239,51 @@ func TestServeNoLongerAcceptsConfig(t *testing.T) {
 	_, help, _ := runCmd(context.Background(), "serve", "--help")
 	if strings.Contains(strings.ToLower(help), "yaml") {
 		t.Fatalf("help still mentions YAML: %s", help)
+	}
+}
+
+func TestServeInsecureKeyLeavesV1DatabaseUntouched(t *testing.T) {
+	isolateDefaultDatabase(t)
+	path := filepath.Join(t.TempDir(), "up.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+CREATE TABLE checks (position INTEGER NOT NULL, name TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL, interval_ns INTEGER NOT NULL, timeout_ns INTEGER NOT NULL, expected_status INTEGER NOT NULL);
+CREATE TABLE results (id INTEGER PRIMARY KEY, check_name TEXT NOT NULL, at_ns INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('up', 'down')), latency_ns INTEGER NOT NULL, status_code INTEGER NOT NULL, error TEXT NOT NULL);
+CREATE INDEX results_by_check_time ON results (check_name, at_ns);
+CREATE TABLE daemon (id INTEGER PRIMARY KEY CHECK (id = 1), last_beat_ns INTEGER NOT NULL);
+INSERT INTO checks VALUES (0, 'api', 'https://api.example.com', 30000000000, 5000000000, 200);
+PRAGMA user_version = 1;`)
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := path + ".key"
+	if err := os.WriteFile(keyPath, []byte("unchanged"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(keyPath, 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errOut := runCmd(context.Background(), "serve", "--db", path)
+	want := fmt.Sprintf("up: key file %s is accessible by group or others (run: chmod 600 %s)\n", keyPath, keyPath)
+	if code != 1 || out != "" || errOut != want {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("rejected start changed the v1 database (err %v)", err)
+	}
+	for _, sidecar := range []string{path + "-wal", path + "-shm"} {
+		if _, err := os.Stat(sidecar); err == nil {
+			t.Fatalf("rejected start created %s", sidecar)
+		}
 	}
 }

@@ -3,6 +3,7 @@
 *.db
 *.db-wal
 *.db-shm
+*.db.key
 .env
 
 # Go coverage artifacts
@@ -16,3 +17,4 @@ coverage.html
 
 # Local ODD task artifacts
 odd/
+design/

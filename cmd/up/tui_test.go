@@ -26,7 +26,9 @@ func TestTUICreationHelp(t *testing.T) {
 		"n new monitor", "tab/shift+tab", "enter save", "esc cancel", "ctrl+c quit",
 		"30s", "5s", "200", "created if missing", "edit cannot rename", "delete removes history",
 		"e edit", "d delete", "y delete", "n cancel",
-		"Keys: ↑/↓ or k/j select · enter details · n new monitor · e edit · d delete · a toggle animation · esc back · q/ctrl+c quit",
+		"Keys: ↑/↓ or k/j select · enter details · n new monitor · e edit · d delete · s SMTP servers · c channels · a toggle animation · esc back · q/ctrl+c quit",
+		"Manage SMTP servers and channels for email alerts with s and c; choose a monitor's channel in its form.",
+		"SMTP passwords are encrypted with the key that 'up serve' keeps in <db>.key; run it once before entering a password, and back up that file with the database.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help missing %q: %s", want, out)

@@ -57,7 +57,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		}
 	}
 
-	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · a animation · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"))
 	return b.String()
 }
 
@@ -67,6 +67,22 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 	b.WriteString(renderBanners(snap, now, loadErr))
 
 	fmt.Fprintf(&b, "Interval: %s   Timeout: %s   Expected status: %d\n", s.Check.Interval, s.Check.Timeout, s.Check.ExpectedStatus)
+	channelName := s.Check.Channel
+	if channelName == "" {
+		channelName = "none"
+	}
+	fmt.Fprintf(&b, "Channel: %s", channelName)
+	for _, c := range snap.Channels {
+		if c.Name == s.Check.Channel && s.Check.Channel != "" {
+			noun := "recipients"
+			if len(c.Recipients) == 1 {
+				noun = "recipient"
+			}
+			fmt.Fprint(&b, " "+helpStyle.Render(fmt.Sprintf("(%s via %s → %d %s)", c.Kind, c.SMTPServer, len(c.Recipients), noun)))
+			break
+		}
+	}
+	b.WriteString("\n")
 	fmt.Fprintf(&b, "Status: %s", styledLabel(s, 0))
 	if s.HasResult {
 		fmt.Fprintf(&b, "   Last check: %s (%s)", ago(now, s.Latest.At), formatLatency(s.Latest.Latency))
@@ -108,7 +124,7 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 		fmt.Fprintf(&b, "  %s → %s (%s)   %s\n", formatTime(o.Start, now), formatTime(o.End, now), o.End.Sub(o.Start), o.Error)
 	}
 
-	b.WriteString("\n" + renderHelp("esc back · n new monitor · e edit · d delete · a animation · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("esc back · n new monitor · e edit · d delete · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"))
 	return b.String()
 }
 
