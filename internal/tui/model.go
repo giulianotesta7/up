@@ -48,28 +48,33 @@ func (m Model) sweepTick() tea.Cmd {
 
 // Model is the Bubble Tea model of the TUI.
 type Model struct {
-	hostname        string
-	databasePath    string
-	store           Store
-	now             func() time.Time
-	snap            Snapshot
-	err             error
-	width           int
-	selected        int
-	detail          bool
-	form            *monitorForm
-	deletion        *deletePrompt
-	smtpScreen      bool
-	smtpSelected    int
-	smtpSelectName  string
-	smtpForm        *smtpForm
-	smtpDelete      *deletePrompt
-	generation      uint64
-	selectName      string
-	animationOff    bool
-	sweeping        bool
-	sweepPosition   int
-	sweepGeneration uint64
+	hostname          string
+	databasePath      string
+	store             Store
+	now               func() time.Time
+	snap              Snapshot
+	err               error
+	width             int
+	selected          int
+	detail            bool
+	form              *monitorForm
+	deletion          *deletePrompt
+	smtpScreen        bool
+	smtpSelected      int
+	smtpSelectName    string
+	smtpForm          *smtpForm
+	smtpDelete        *deletePrompt
+	channelScreen     bool
+	channelSelected   int
+	channelSelectName string
+	channelForm       *channelForm
+	channelDelete     *deletePrompt
+	generation        uint64
+	selectName        string
+	animationOff      bool
+	sweeping          bool
+	sweepPosition     int
+	sweepGeneration   uint64
 }
 
 // Options supplies display metadata for the open store.
@@ -142,6 +147,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.smtpSelected = min(m.smtpSelected, max(0, len(m.snap.SMTPServers)-1))
+			if m.channelSelectName != "" {
+				for i, c := range m.snap.Channels {
+					if c.Name == m.channelSelectName {
+						m.channelSelected = i
+						m.channelSelectName = ""
+						break
+					}
+				}
+			}
+			m.channelSelected = min(m.channelSelected, max(0, len(m.snap.Channels)-1))
 			if !sweepEnabled(m.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
 				m.sweeping = false
 			}
@@ -249,8 +264,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.smtpDelete = nil
 		}
 		return m, m.load
+	case channelSaveMsg:
+		if msg.generation != m.generation || m.channelForm == nil || !m.channelForm.saving {
+			return m, nil
+		}
+		if msg.err != nil {
+			f := *m.channelForm
+			f.saving, f.err = false, msg.err
+			m.channelForm = &f
+		} else {
+			m.channelForm = nil
+			m.channelSelectName = msg.name
+		}
+		return m, m.load
+	case channelDeleteMsg:
+		if msg.generation != m.generation || m.channelDelete == nil || !m.channelDelete.saving {
+			return m, nil
+		}
+		if msg.err != nil {
+			p := *m.channelDelete
+			p.saving, p.err = false, msg.err
+			m.channelDelete = &p
+		} else {
+			channels := make([]config.Channel, 0, len(m.snap.Channels))
+			for _, c := range m.snap.Channels {
+				if c.Name != m.channelDelete.name {
+					channels = append(channels, c)
+				}
+			}
+			m.snap.Channels = channels
+			m.channelSelected = min(m.channelSelected, max(0, len(channels)-1))
+			m.channelDelete = nil
+		}
+		return m, m.load
 	case tea.PasteMsg:
-		if m.smtpForm != nil && !m.smtpForm.saving && (m.smtpForm.focus != 5 || m.snap.HasKey) {
+		if m.channelForm != nil && !m.channelForm.saving {
+			f := *m.channelForm
+			f.insert(msg.Content)
+			m.channelForm = &f
+		} else if m.smtpForm != nil && !m.smtpForm.saving && (m.smtpForm.focus != 5 || m.snap.HasKey) {
 			f := *m.smtpForm
 			f.insert(msg.Content)
 			m.smtpForm = &f
@@ -270,6 +322,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
+	if m.channelScreen {
+		return m.handleChannelKey(msg)
+	}
 	if m.smtpScreen {
 		return m.handleSMTPKey(msg)
 	}
@@ -282,6 +337,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
 		return m, tea.Quit
+	case "c":
+		m.channelScreen = true
+		m.channelSelected = 0
 	case "s":
 		m.smtpScreen = true
 		m.smtpSelected = 0
@@ -340,6 +398,15 @@ func (m Model) View() tea.View {
 		}
 		if m.smtpDelete != nil {
 			content = renderSMTPDelete(*m.smtpDelete, m.snap, now, m.err)
+		}
+	}
+	if m.channelScreen {
+		content = renderChannelList(m.snap, m.channelSelected, now, m.err)
+		if m.channelForm != nil {
+			content = renderChannelForm(*m.channelForm, m.snap, now, m.err)
+		}
+		if m.channelDelete != nil {
+			content = renderChannelDelete(*m.channelDelete, m.snap, now, m.err)
 		}
 	}
 	position := -1
