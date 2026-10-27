@@ -14,9 +14,17 @@ func (s *Store) UpdateCheck(ctx context.Context, c config.Check) error {
 	if err := config.ValidateCheck(c); err != nil {
 		return fmt.Errorf("store: update check: %w", err)
 	}
-	res, err := s.db.ExecContext(ctx, `UPDATE checks
-SET url = ?, interval_ns = ?, timeout_ns = ?, expected_status = ? WHERE name = ?`,
-		c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Name)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: update check: %w", err)
+	}
+	defer tx.Rollback()
+	if err := requireChannel(ctx, tx, c.Channel); err != nil {
+		return fmt.Errorf("store: update check: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE checks
+SET url = ?, interval_ns = ?, timeout_ns = ?, expected_status = ?, channel = ? WHERE name = ?`,
+		c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.Name)
 	if err != nil {
 		return fmt.Errorf("store: update check: %w", err)
 	}
@@ -26,6 +34,9 @@ SET url = ?, interval_ns = ?, timeout_ns = ?, expected_status = ? WHERE name = ?
 	}
 	if n == 0 {
 		return fmt.Errorf("store: update check: name %q not found", c.Name)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: update check: %w", err)
 	}
 	return nil
 }

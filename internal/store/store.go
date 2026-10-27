@@ -237,9 +237,12 @@ func (s *Store) AddCheck(ctx context.Context, c config.Check) error {
 }
 
 func insertCheck(ctx context.Context, tx *sql.Tx, position int, c config.Check) error {
+	if err := requireChannel(ctx, tx, c.Channel); err != nil {
+		return err
+	}
 	_, err := tx.ExecContext(ctx,
-		"INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status) VALUES (?, ?, ?, ?, ?, ?)",
-		position, c.Name, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus)
+		"INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, channel) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		position, c.Name, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel)
 	return err
 }
 
@@ -253,7 +256,7 @@ type checkReader interface {
 }
 
 func readChecks(ctx context.Context, reader checkReader) ([]config.Check, error) {
-	rows, err := reader.QueryContext(ctx, "SELECT name, url, interval_ns, timeout_ns, expected_status FROM checks ORDER BY position")
+	rows, err := reader.QueryContext(ctx, "SELECT name, url, interval_ns, timeout_ns, expected_status, channel FROM checks ORDER BY position")
 	if err != nil {
 		return nil, fmt.Errorf("store: checks: %w", err)
 	}
@@ -262,7 +265,7 @@ func readChecks(ctx context.Context, reader checkReader) ([]config.Check, error)
 	for rows.Next() {
 		var c config.Check
 		var interval, timeout int64
-		if err := rows.Scan(&c.Name, &c.URL, &interval, &timeout, &c.ExpectedStatus); err != nil {
+		if err := rows.Scan(&c.Name, &c.URL, &interval, &timeout, &c.ExpectedStatus, &c.Channel); err != nil {
 			return nil, fmt.Errorf("store: checks: %w", err)
 		}
 		c.Interval, c.Timeout = time.Duration(interval), time.Duration(timeout)
