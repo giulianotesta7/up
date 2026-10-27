@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ var fieldLabels = [...]string{"Name", "HTTP/HTTPS URL", "Interval", "Timeout", "
 
 type monitorForm struct {
 	values       [5]string
+	channel      string
 	focus        int
 	cursor       int // rune offset in the focused field
 	err          error
@@ -31,14 +33,15 @@ func newMonitorForm() *monitorForm {
 
 func editMonitorForm(c config.Check, detail bool) *monitorForm {
 	return &monitorForm{
-		values: [5]string{c.Name, c.URL, c.Interval.String(), c.Timeout.String(), strconv.Itoa(c.ExpectedStatus)},
-		focus:  1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail,
+		values:  [5]string{c.Name, c.URL, c.Interval.String(), c.Timeout.String(), strconv.Itoa(c.ExpectedStatus)},
+		channel: c.Channel,
+		focus:   1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail,
 	}
 }
 
 // check converts text only; all semantic rules belong to config.ValidateCheck.
 func (f monitorForm) check() (config.Check, error) {
-	c := config.Check{Name: f.values[0], URL: f.values[1]}
+	c := config.Check{Name: f.values[0], URL: f.values[1], Channel: f.channel}
 	var err error
 	if c.Interval, err = time.ParseDuration(f.values[2]); err != nil {
 		return c, fmt.Errorf("interval: %w", err)
@@ -92,9 +95,13 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if f.editing {
 			first = 1 // The stored name is displayed, never focused or editable.
 		}
-		count := len(f.values) - first
+		count := len(f.values) + 1 - first
 		f.focus = first + (f.focus-first+delta+count)%count
-		f.cursor = len([]rune(f.values[f.focus]))
+		if f.focus < len(f.values) {
+			f.cursor = len([]rune(f.values[f.focus]))
+		} else {
+			f.cursor = 0
+		}
 	case "enter":
 		c, err := f.check()
 		f.err = err
@@ -106,12 +113,37 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.generation++
 		return m, m.save(c)
 	default:
-		f.edit(msg)
+		if f.focus == len(f.values) {
+			delta := 0
+			switch msg.String() {
+			case "left":
+				delta = -1
+			case "right":
+				delta = 1
+			}
+			if delta != 0 {
+				f.channel = cycleChoice(channelChoices(m.snap), f.channel, delta)
+			}
+		} else {
+			f.edit(msg)
+		}
 	}
 	return m, nil
 }
 
+func channelChoices(snap Snapshot) []string {
+	choices := make([]string, 0, len(snap.Channels)+1)
+	for _, c := range snap.Channels {
+		choices = append(choices, c.Name)
+	}
+	sort.Strings(choices)
+	return append([]string{""}, choices...)
+}
+
 func (f *monitorForm) insert(text string) {
+	if f.focus >= len(f.values) {
+		return
+	}
 	// Paste is single-line too. Ignore terminal controls, not Unicode text.
 	text = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
@@ -174,11 +206,25 @@ func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) stri
 		}
 		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, value)
 	}
+	choices := channelChoices(snap)
+	choices[0] = "none"
+	selected := f.channel
+	if selected == "" {
+		selected = "none"
+	}
+	focused := f.focus == len(f.values)
+	marker, label := " ", "Channel"
+	if focused {
+		marker, label = accentStyle.Render(">"), accentStyle.Render(label)
+	}
+	fmt.Fprintf(&b, "%s %s: %s\n", marker, label, renderChoice(selected, choices, focused))
 	if f.err != nil {
 		b.WriteString("\n" + warnStyle.Render("Cannot save monitor: "+f.err.Error()) + "\n")
 	}
 	if f.saving {
 		b.WriteString("\n" + renderHelp("Saving monitor… · ctrl+c quit"))
+	} else if focused {
+		b.WriteString("\n" + renderHelp("←/→ choose · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
 	} else {
 		b.WriteString("\n" + renderHelp("tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
 	}

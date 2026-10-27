@@ -34,7 +34,6 @@ func (s notifierSender) Send(_ context.Context, _ config.SMTPServer, _ string, m
 }
 
 type customStore struct {
-	notifierStore
 	channel config.Channel
 	server  config.SMTPServer
 	outages []store.Outage

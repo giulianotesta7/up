@@ -58,7 +58,7 @@ func TestSMTPPortErrorAndNoKeySave(t *testing.T) {
 	m, _ = press(t, m, keyTab, keyRight, keyRight, keyTab, keyTab)
 	m = typeText(t, m, "up@example.com")
 	m, cmd = press(t, m, keyEnter)
-	m = finishCommand(t, m, cmd)
+	finishCommand(t, m, cmd)
 	servers, err = s.SMTPServers(context.Background())
 	if err != nil || len(servers) != 1 || !servers[0].Password.Empty() || servers[0].TLS != config.TLSNone {
 		t.Fatalf("no-key save %v %v", servers, err)
