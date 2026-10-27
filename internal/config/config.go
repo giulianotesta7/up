@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+// Mute records when alert delivery resumes and the recipients' prior state.
+type Mute struct {
+	Check       string
+	Until       time.Time
+	WasAlerting bool
+}
+
 // Check is one validated HTTP check.
 type Check struct {
 	Name           string

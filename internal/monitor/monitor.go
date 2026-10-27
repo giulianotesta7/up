@@ -50,6 +50,12 @@ type DefinedRecorder interface {
 	RecordDefined(context.Context, config.Check, check.Result) (bool, error)
 }
 
+// MuteStore is the optional API for holding and reconciling alerts.
+type MuteStore interface {
+	Mute(context.Context, string) (config.Mute, bool, error)
+	ClearMute(context.Context, string, time.Time) error
+}
+
 // Alerter receives transitions; Notify must not block.
 type Alerter interface {
 	Notify(config.Check, check.Result)
@@ -241,8 +247,27 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 	ticker := time.NewTicker(c.Interval)
 	defer ticker.Stop()
 	var streak check.Streak
+	var notified bool
+	muteStore, hasMutes := opts.Store.(MuteStore)
+	readMute := func() (config.Mute, bool) {
+		if !hasMutes {
+			return config.Mute{}, false
+		}
+		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+		defer cancel()
+		m, found, err := muteStore.Mute(readCtx, c.Name)
+		if err != nil {
+			opts.Logger.Error("reading mute failed", "check", c.Name, "error", err)
+			return config.Mute{}, false
+		}
+		return m, found
+	}
 	if opts.Alerter != nil {
 		streak = initialStreak(ctx, opts, c)
+		notified = streak.Alerting
+		if m, found := readMute(); found {
+			notified = m.WasAlerting
+		}
 	}
 	for {
 		res := opts.Runner.Run(ctx, c)
@@ -264,8 +289,23 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 			return last
 		}
 		if opts.Alerter != nil {
-			if streak.Observe(res.Status, c.AlertAfter, c.RecoverAfter) != check.NoChange && c.Channel != "" {
-				opts.Alerter.Notify(c, res)
+			streak.Observe(res.Status, c.AlertAfter, c.RecoverAfter)
+			m, found := readMute()
+			active := found && m.Until.After(time.Now())
+			if c.Channel == "" {
+				notified = streak.Alerting
+			} else if !active {
+				if streak.Alerting != notified {
+					notified = streak.Alerting
+					opts.Alerter.Notify(c, res)
+				}
+			}
+			if found && !active {
+				clearCtx, clearCancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+				if err := muteStore.ClearMute(clearCtx, c.Name, m.Until); err != nil {
+					opts.Logger.Error("clearing mute failed", "check", c.Name, "error", err)
+				}
+				clearCancel()
 			}
 		}
 		if res.Status != last {

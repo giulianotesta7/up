@@ -124,6 +124,9 @@ func (n *Notifier) send(ctx context.Context, e event) {
 	at := r.At.In(n.opts.Location).Format("Jan 02 15:04:05 (MST)")
 	msg := Message{From: server.Sender, To: ch.Recipients, Date: r.At}
 	if r.Status == check.StatusDown {
+		if outages, err := n.opts.Store.Outages(ctx, c.Name, 1); err == nil && len(outages) > 0 && outages[0].Ongoing {
+			at = outages[0].Start.In(n.opts.Location).Format("Jan 02 15:04:05 (MST)")
+		}
 		msg.Subject = fmt.Sprintf("[up] %s is DOWN", c.Name)
 		msg.Body = fmt.Sprintf("%s is DOWN since %s.\nURL:    %s\nError:  %s\nHost:   %s\n", c.Name, at, c.URL, r.Error, n.opts.Hostname)
 	} else {
