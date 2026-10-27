@@ -91,8 +91,12 @@ func ValidateSMTPServer(s SMTPServer) error {
 // exists is checked by the store.
 func ValidateChannel(c Channel) error {
 	var errs []error
-	if c.Name == "" {
+	switch c.Name {
+	case "":
 		errs = append(errs, errors.New("name is required"))
+	case "none":
+		// The monitor form offers "none" for no channel.
+		errs = append(errs, errors.New(`name "none" is reserved (it means no channel)`))
 	}
 	if c.Kind != KindEmail {
 		errs = append(errs, fmt.Errorf("kind %q is not supported (use email)", c.Kind))

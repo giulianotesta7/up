@@ -150,7 +150,6 @@ func (m Model) handleSMTPKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc":
 		m.smtpScreen = false
-		m.detail = false
 	case "up", "k":
 		if m.smtpSelected > 0 {
 			m.smtpSelected--
@@ -248,7 +247,13 @@ func renderSMTPForm(f smtpForm, snap Snapshot, now time.Time, loadErr error) str
 				value = string(shown[:f.cursor]) + accentStyle.Render("│") + string(shown[f.cursor:])
 			}
 			if i == 5 && f.editing && f.hadPassword && len(runes) == 0 {
-				value += " " + helpStyle.Render("(leave empty to keep the current password)")
+				// Without a username there is no AUTH, so the store drops the
+				// password; say so instead of promising to keep it.
+				hint := "(leave empty to keep the current password)"
+				if f.values[4] == "" {
+					hint = "(the current password is removed because Username is empty)"
+				}
+				value += " " + helpStyle.Render(hint)
 			}
 		}
 		if focused {

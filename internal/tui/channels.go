@@ -152,7 +152,6 @@ func (m Model) handleChannelKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc":
 		m.channelScreen = false
-		m.detail = false
 	case "up", "k":
 		if m.channelSelected > 0 {
 			m.channelSelected--
@@ -236,7 +235,7 @@ func renderChannelForm(f channelForm, snap Snapshot, now time.Time, loadErr erro
 		} else if i == 2 {
 			names := smtpNames(snap)
 			if len(names) == 0 {
-				value = helpStyle.Render("(none — press esc, then s to add one)")
+				value = helpStyle.Render("(none — press esc twice, then s to add one)")
 			} else {
 				value = renderChoice(value, names, focused)
 			}

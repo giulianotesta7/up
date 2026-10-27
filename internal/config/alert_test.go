@@ -67,3 +67,10 @@ func TestValidateSMTPServerRejectsPasswordWithoutUsername(t *testing.T) {
 		t.Fatalf("ValidateSMTPServer() without username or password error = %v", err)
 	}
 }
+
+func TestValidateChannelReservesNone(t *testing.T) {
+	c := Channel{Name: "none", Kind: KindEmail, SMTPServer: "gmail", Recipients: []string{"a@example.com"}}
+	if err := ValidateChannel(c); err == nil || err.Error() != `name "none" is reserved (it means no channel)` {
+		t.Fatalf("ValidateChannel() error = %v, want reserved-name error", err)
+	}
+}

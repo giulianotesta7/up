@@ -65,12 +65,12 @@ func TestChannelsNavigationAndMissingServer(t *testing.T) {
 	m, _ = press(t, m, keyEnter, keyC)
 	requireText(t, m, "Channels", "No channels configured.", "↑/↓ select (k/j) · n new · e edit · d delete · esc back · q quit · ctrl+c quit")
 	m, _ = press(t, m, keyN)
-	requireText(t, m, "(none — press esc, then s to add one)")
+	requireText(t, m, "(none — press esc twice, then s to add one)")
 	m = typeText(t, m, "ops")
 	m, _ = press(t, m, keyTab, keyTab)
 	next, _ = m.Update(tea.PasteMsg{Content: "gmail"})
 	m = next.(Model)
-	requireText(t, m, "(none — press esc, then s to add one)")
+	requireText(t, m, "(none — press esc twice, then s to add one)")
 	m, _ = press(t, m, keyTab)
 	m = typeText(t, m, "ops@example.com")
 	m, cmd := press(t, m, keyEnter)
@@ -81,6 +81,8 @@ func TestChannelsNavigationAndMissingServer(t *testing.T) {
 		t.Fatalf("invalid save %v %v", channels, err)
 	}
 	m, _ = press(t, m, keyEsc, keyEsc)
+	requireText(t, m, "Recent outages:")
+	m, _ = press(t, m, keyEsc)
 	requireText(t, m, "MONITOR")
 }
 func TestChannelsListAndDeletion(t *testing.T) {
