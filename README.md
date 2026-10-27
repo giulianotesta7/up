@@ -24,6 +24,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 - **Full history.** Every check is stored and outages are derived from it, so you can SSH back in hours later and see what you missed.
 - **Stale-daemon detection.** If the daemon stops, the TUI says so and keeps the last known statuses instead of marking everything DOWN.
 - **Retention.** Results older than 30 days are pruned. Monitor definitions are kept.
+- **Email alerts.** One email when a monitor goes down and one when it recovers, sent over SMTP and configured from the TUI.
 
 ## Install
 
@@ -68,9 +69,26 @@ New monitors default to a 30s interval, 5s timeout and expected status 200.
 
 ### Keys
 
-`j`/`k` move · `enter` details · `n` new · `e` edit · `d` delete · `a` toggle animation · `esc` back · `q` quit
+`j`/`k` move · `enter` details · `n` new · `e` edit · `d` delete · `s` SMTP servers · `c` channels · `a` toggle animation · `esc` back · `q` quit
 
 In forms: `tab`/`shift+tab` switch fields · `enter` save · `esc` cancel.
+
+### Alerts
+
+Alerts go from a monitor to a **channel**, and from the channel to an **SMTP server**:
+
+1. Press `s` and add an SMTP server: host, port, TLS mode, username, password and sender address.
+2. Press `c` and add a channel: pick the SMTP server and list one or more recipients, separated by commas.
+3. Edit a monitor (`e`) and choose the channel. Monitors without a channel never alert.
+
+`up serve` sends one email when a monitor goes down and one when it recovers, never one per failed check. Restarting the daemon does not resend.
+
+TLS modes: `starttls` (default, usually port 587), `tls` (usually 465) and `none` for local relays. `none` cannot be combined with a username, so a password never travels in plain text.
+
+SMTP passwords are never stored in plain text. The first `up serve` run creates a private key next to the database (`up.db.key`, mode `0600`, readable only by the daemon) and stores the matching public key in the database. The TUI encrypts passwords with the public key, and only the daemon can decrypt them. Run `up serve` once before entering a password.
+
+- **Back up `up.db.key` together with `up.db`.** Without it, stored passwords cannot be decrypted: the daemon creates a new key and the TUI marks those passwords as `needs re-entry`.
+- `up serve` refuses to start if the key file is readable or writable by group or others. Fix it with `chmod 600`.
 
 ## Contributing
 
