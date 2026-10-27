@@ -29,20 +29,27 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		for _, s := range snap.Services {
 			statusWidth = max(statusWidth, ansi.StringWidth(s.Label()))
 		}
+		anyMuted := false
+		for _, s := range snap.Services {
+			anyMuted = anyMuted || s.Muted(now)
+		}
 		showTrend := width <= 0 || width >= max(78, nameWidth+55+statusWidth)
-		row := func(marker, dot, name, status, latency, trend, last, reason string) string {
+		row := func(marker, dot, name, status, latency, trend, last, muted, reason string) string {
 			padding := strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name)))
 			middle := ""
 			if showTrend {
 				middle = "  " + trend + strings.Repeat(" ", max(0, 16-ansi.StringWidth(trend)))
 			}
 			prefix := marker + " " + dot + " " + name + padding + "  " + status + fmt.Sprintf("  %8s", latency) + middle
+			if anyMuted {
+				last = fmt.Sprintf("%-10s  %s", last, muted+strings.Repeat(" ", max(0, 13-ansi.StringWidth(muted))))
+			}
 			if showTrend {
 				return prefix + "  " + strings.TrimRight(fmt.Sprintf("%-10s  %s", last, reason), " ")
 			}
 			return strings.TrimRight(prefix+fmt.Sprintf("  %-10s  %s", last, reason), " ")
 		}
-		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", fmt.Sprintf("%-*s", statusWidth, "STATUS"), "LATENCY", "TREND (16)", "LAST CHECK", "")) + "\n")
+		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", fmt.Sprintf("%-*s", statusWidth, "STATUS"), "LATENCY", "TREND (16)", "LAST CHECK", "MUTED", "")) + "\n")
 		for i, s := range snap.Services {
 			marker := " "
 			if i == selected {
@@ -57,11 +64,15 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			if i == selected {
 				name = selectedNameStyle.Render(name)
 			}
-			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, statusWidth), latency, sparkline(s.Recent, 16), last, reason) + "\n")
+			muted := ""
+			if s.Muted(now) {
+				muted = warnStyle.Render("⏸ " + timeLeft(s.Mute.Until.Sub(now)) + " left")
+			}
+			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, statusWidth), latency, sparkline(s.Recent, 16), last, muted, reason) + "\n")
 		}
 	}
 
-	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"))
 	return b.String()
 }
 
@@ -87,6 +98,16 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 		}
 	}
 	b.WriteString("\n")
+	if s.Muted(now) {
+		held := "nothing pending"
+		switch s.Pending() {
+		case "down":
+			held = "1 email pending (down since " + formatTime(s.DownSince, now) + ")"
+		case "recovery":
+			held = "1 email pending (recovery)"
+		}
+		fmt.Fprintf(&b, "Muted: %s\n", warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))+" · "+held)
+	}
 	if !s.thresholdsDefault() {
 		fmt.Fprintf(&b, "Alerting: after %s · recovers after %s\n", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success"))
 	}
@@ -134,7 +155,7 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 		fmt.Fprintf(&b, "  %s → %s (%s)   %s\n", formatTime(o.Start, now), formatTime(o.End, now), o.End.Sub(o.Start), o.Error)
 	}
 
-	b.WriteString("\n" + renderHelp("esc back · n new monitor · e edit · d delete · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("esc back · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"))
 	return b.String()
 }
 

@@ -122,7 +122,7 @@ func TestAnimationHelp(t *testing.T) {
 		if detail {
 			prefix = "esc back"
 		}
-		want := prefix + " · n new monitor · e edit · d delete · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"
+		want := prefix + " · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"
 		if !strings.Contains(view(m), want) {
 			t.Fatalf("missing complete help: %s", view(m))
 		}

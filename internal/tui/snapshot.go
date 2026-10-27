@@ -34,6 +34,26 @@ type Service struct {
 	// Streak is the alert state rebuilt from Recent with the monitor's
 	// thresholds.
 	Streak check.Streak
+	// Mute is the stored mute, if any; it may already be over but not yet
+	// reconciled by the daemon. Use Muted.
+	Mute    config.Mute
+	HasMute bool
+}
+
+// Muted reports whether the service's alerts are being held at now.
+func (s Service) Muted(now time.Time) bool { return s.HasMute && s.Mute.Until.After(now) }
+
+// Pending describes the email held by an active mute: what the recipients
+// do not know yet. It is empty when nothing would be sent.
+func (s Service) Pending() string {
+	switch {
+	case s.Streak.Alerting == s.Mute.WasAlerting:
+		return ""
+	case s.Streak.Alerting:
+		return "down"
+	default:
+		return "recovery"
+	}
 }
 
 // thresholdsDefault reports the one-failure, one-success rule that alerts on
@@ -94,6 +114,9 @@ type Store interface {
 	Outages(context.Context, string, int) ([]store.Outage, error)
 	LastBeat(context.Context) (time.Time, bool, error)
 	UptimeWindow(context.Context, string, time.Time, time.Time) (time.Duration, time.Duration, int, error)
+	Mutes(context.Context) ([]config.Mute, error)
+	SetMute(context.Context, string, time.Time, bool) error
+	Unmute(context.Context, string, time.Time) error
 	AddCheck(context.Context, config.Check) error
 	UpdateCheck(context.Context, config.Check) error
 	DeleteCheck(context.Context, string) error
@@ -135,6 +158,10 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 		until = snap.LastBeat
 	}
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	mutes, err := s.Mutes(ctx)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	var observedMonitors int
 	checks, err := s.Checks(ctx)
 	if err != nil {
@@ -142,6 +169,11 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 	}
 	for _, c := range checks {
 		svc := Service{Check: c}
+		for _, mute := range mutes {
+			if mute.Check == c.Name {
+				svc.Mute, svc.HasMute = mute, true
+			}
+		}
 		if svc.Recent, err = s.Recent(ctx, c.Name, recentLimit); err != nil {
 			return Snapshot{}, err
 		}
