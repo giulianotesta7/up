@@ -20,12 +20,21 @@ func cycleChoice(options []string, value string, delta int) string {
 }
 
 func renderChoice(value string, options []string, focused bool) string {
+	return renderChoiceUnit(value, "", options, focused)
+}
+
+// renderChoiceUnit is renderChoice with a unit after the selected value, as
+// in "‹ 3 › failures in a row".
+func renderChoiceUnit(value, unit string, options []string, focused bool) string {
 	left, right := "‹", "›"
 	if focused {
 		left = accentStyle.Render(left)
 		right = accentStyle.Render(right)
 	}
 	text := left + " " + value + " " + right
+	if unit != "" {
+		text += " " + unit
+	}
 	if len(options) > 0 {
 		text += "   " + helpStyle.Render(strings.Join(options, " · "))
 	}

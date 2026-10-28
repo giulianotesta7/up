@@ -16,9 +16,22 @@ import (
 
 var fieldLabels = [...]string{"Name", "HTTP/HTTPS URL", "Interval", "Timeout", "Expected status"}
 
+// thresholdChoices are the values offered for Alert after and Recover after.
+var thresholdChoices = []string{"1", "2", "3", "5", "10"}
+
+// Focus positions after the text fields: the channel, then the thresholds.
+const (
+	focusChannel = len(fieldLabels) + iota
+	focusAlertAfter
+	focusRecoverAfter
+	focusCount
+)
+
 type monitorForm struct {
 	values       [5]string
 	channel      string
+	alertAfter   string
+	recoverAfter string
 	focus        int
 	cursor       int // rune offset in the focused field
 	err          error
@@ -28,14 +41,14 @@ type monitorForm struct {
 }
 
 func newMonitorForm() *monitorForm {
-	return &monitorForm{values: [5]string{"", "", "30s", "5s", "200"}}
+	return &monitorForm{values: [5]string{"", "", "30s", "5s", "200"}, alertAfter: "1", recoverAfter: "1"}
 }
 
 func editMonitorForm(c config.Check, detail bool) *monitorForm {
 	return &monitorForm{
 		values:  [5]string{c.Name, c.URL, c.Interval.String(), c.Timeout.String(), strconv.Itoa(c.ExpectedStatus)},
-		channel: c.Channel,
-		focus:   1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail,
+		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()),
+		focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail,
 	}
 }
 
@@ -51,6 +64,12 @@ func (f monitorForm) check() (config.Check, error) {
 	}
 	if c.ExpectedStatus, err = strconv.Atoi(f.values[4]); err != nil {
 		return c, fmt.Errorf("expected status: %w", err)
+	}
+	if c.AlertAfter, err = strconv.Atoi(f.alertAfter); err != nil {
+		return c, fmt.Errorf("alert after: %w", err)
+	}
+	if c.RecoverAfter, err = strconv.Atoi(f.recoverAfter); err != nil {
+		return c, fmt.Errorf("recover after: %w", err)
 	}
 	return c, config.ValidateCheck(c)
 }
@@ -95,7 +114,7 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if f.editing {
 			first = 1 // The stored name is displayed, never focused or editable.
 		}
-		count := len(f.values) + 1 - first
+		count := focusCount - first
 		f.focus = first + (f.focus-first+delta+count)%count
 		if f.focus < len(f.values) {
 			f.cursor = len([]rune(f.values[f.focus]))
@@ -113,7 +132,7 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.generation++
 		return m, m.save(c)
 	default:
-		if f.focus == len(f.values) {
+		if f.focus >= focusChannel {
 			delta := 0
 			switch msg.String() {
 			case "left":
@@ -121,8 +140,14 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			case "right":
 				delta = 1
 			}
-			if delta != 0 {
+			switch {
+			case delta == 0:
+			case f.focus == focusChannel:
 				f.channel = cycleChoice(channelChoices(m.snap), f.channel, delta)
+			case f.focus == focusAlertAfter:
+				f.alertAfter = cycleChoice(thresholdChoices, f.alertAfter, delta)
+			default:
+				f.recoverAfter = cycleChoice(thresholdChoices, f.recoverAfter, delta)
 			}
 		} else {
 			f.edit(msg)
@@ -138,6 +163,16 @@ func channelChoices(snap Snapshot) []string {
 	}
 	sort.Strings(choices)
 	return append([]string{""}, choices...)
+}
+
+// detectionHint says how long a real outage takes to reach the first email.
+func detectionHint(f monitorForm) string {
+	n, err := strconv.Atoi(f.alertAfter)
+	interval, ierr := time.ParseDuration(f.values[2])
+	if err != nil || ierr != nil || n < 2 || interval <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("Detection time ≈ %d × %s = %s before the first email", n, interval, time.Duration(n)*interval)
 }
 
 func (f *monitorForm) insert(text string) {
@@ -212,12 +247,20 @@ func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) stri
 	if selected == "" {
 		selected = "none"
 	}
-	focused := f.focus == len(f.values)
-	marker, label := " ", "Channel"
-	if focused {
-		marker, label = accentStyle.Render(">"), accentStyle.Render(label)
+	focused := f.focus >= focusChannel
+	choiceLine := func(position int, label, rendered string) {
+		marker := " "
+		if f.focus == position {
+			marker, label = accentStyle.Render(">"), accentStyle.Render(label)
+		}
+		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, rendered)
 	}
-	fmt.Fprintf(&b, "%s %s: %s\n", marker, label, renderChoice(selected, choices, focused))
+	choiceLine(focusChannel, "Channel", renderChoice(selected, choices, f.focus == focusChannel))
+	choiceLine(focusAlertAfter, "Alert after", renderChoiceUnit(f.alertAfter, "failures in a row", thresholdChoices, f.focus == focusAlertAfter))
+	choiceLine(focusRecoverAfter, "Recover after", renderChoiceUnit(f.recoverAfter, "successes in a row", thresholdChoices, f.focus == focusRecoverAfter))
+	if hint := detectionHint(f); hint != "" {
+		b.WriteString("\n" + helpStyle.Render(hint) + "\n")
+	}
 	if f.err != nil {
 		b.WriteString("\n" + warnStyle.Render("Cannot save monitor: "+f.err.Error()) + "\n")
 	}

@@ -25,6 +25,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 - **Stale-daemon detection.** If the daemon stops, the TUI says so and keeps the last known statuses instead of marking everything DOWN.
 - **Retention.** Results older than 30 days are pruned. Monitor definitions are kept.
 - **Email alerts.** One email when a monitor goes down and one when it recovers, sent over SMTP and configured from the TUI.
+- **Quieter alerts.** Optionally wait for several failures in a row before the first email, so one timeout does not wake anyone up.
 
 ## Install
 
@@ -82,6 +83,15 @@ Alerts go from a monitor to a **channel**, and from the channel to an **SMTP ser
 3. Edit a monitor (`e`) and choose the channel. Monitors without a channel never alert.
 
 `up serve` sends one email when a monitor goes down and one when it recovers, never one per failed check. Restarting the daemon does not resend.
+
+#### Fewer false alarms
+
+Two monitor fields control when those emails go out. Both default to 1, which alerts on the first change.
+
+- **Alert after**: failed checks in a row before the down email (1, 2, 3, 5 or 10).
+- **Recover after**: successful checks in a row before the recovery email.
+
+Every check is still stored; only the email waits. While the streak is short of the threshold the list shows `FAILING 2/3` (or `RECOVERING 1/2`), and the form shows how long a real outage takes to reach you (for example `3 × 30s = 1m30s`). A daemon restart keeps the streak in progress. Databases created by an earlier version are upgraded by `up serve`.
 
 TLS modes: `starttls` (default, usually port 587), `tls` (usually 465) and `none` for local relays. `none` cannot be combined with a username, so a password never travels in plain text.
 

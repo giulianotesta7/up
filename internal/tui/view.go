@@ -25,7 +25,11 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		}
 		// Drop the trend before it crowds the existing columns. Long names
 		// also consume terminal cells, including double-width characters.
-		showTrend := width <= 0 || width >= max(78, nameWidth+62)
+		statusWidth := 7
+		for _, s := range snap.Services {
+			statusWidth = max(statusWidth, ansi.StringWidth(s.Label()))
+		}
+		showTrend := width <= 0 || width >= max(78, nameWidth+55+statusWidth)
 		row := func(marker, dot, name, status, latency, trend, last, reason string) string {
 			padding := strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name)))
 			middle := ""
@@ -38,7 +42,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			}
 			return strings.TrimRight(prefix+fmt.Sprintf("  %-10s  %s", last, reason), " ")
 		}
-		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", "STATUS ", "LATENCY", "TREND (16)", "LAST CHECK", "")) + "\n")
+		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", fmt.Sprintf("%-*s", statusWidth, "STATUS"), "LATENCY", "TREND (16)", "LAST CHECK", "")) + "\n")
 		for i, s := range snap.Services {
 			marker := " "
 			if i == selected {
@@ -53,7 +57,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			if i == selected {
 				name = selectedNameStyle.Render(name)
 			}
-			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, 7), latency, sparkline(s.Recent, 16), last, reason) + "\n")
+			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, statusWidth), latency, sparkline(s.Recent, 16), last, reason) + "\n")
 		}
 	}
 
@@ -83,12 +87,18 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 		}
 	}
 	b.WriteString("\n")
+	if !s.thresholdsDefault() {
+		fmt.Fprintf(&b, "Alerting: after %s · recovers after %s\n", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success"))
+	}
 	fmt.Fprintf(&b, "Status: %s", styledLabel(s, 0))
 	if s.HasResult {
 		fmt.Fprintf(&b, "   Last check: %s (%s)", ago(now, s.Latest.At), formatLatency(s.Latest.Latency))
 	}
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "Last error: %s\n", orDash(s.Latest.Error))
+	if streak := streakLine(s, now); streak != "" {
+		b.WriteString(streak + "\n")
+	}
 	downSince := "—"
 	if !s.DownSince.IsZero() {
 		downSince = fmt.Sprintf("%s (%s)", formatTime(s.DownSince, now), ago(now, s.DownSince))
@@ -181,14 +191,50 @@ func styledLabel(s Service, width int) string {
 }
 
 func statusStyle(s Service) lipgloss.Style {
-	switch s.Label() {
-	case "UP":
+	label := s.Label()
+	switch {
+	case label == "UP":
 		return upStyle
-	case "DOWN":
+	case label == "DOWN":
 		return downStyle
+	case strings.HasPrefix(label, "FAILING"), strings.HasPrefix(label, "RECOVERING"):
+		return warnStyle
 	default:
 		return pendingStyle
 	}
+}
+
+func plural(n int, noun string) string {
+	return fmt.Sprintf("%d %s", n, pluralNoun(n, noun))
+}
+
+// streakLine explains a FAILING or RECOVERING status: how many results in a
+// row, since when, and how many more fire the alert.
+func streakLine(s Service, now time.Time) string {
+	var n int
+	var noun string
+	switch {
+	case strings.HasPrefix(s.Label(), "FAILING"):
+		n, noun = s.Streak.Failures, "failure"
+	case strings.HasPrefix(s.Label(), "RECOVERING"):
+		n, noun = s.Streak.Successes, "success"
+	default:
+		return ""
+	}
+	if n < 1 || n > len(s.Recent) {
+		return ""
+	}
+	return fmt.Sprintf("Streak: %d consecutive %s since %s", n, pluralNoun(n, noun), formatTime(s.Recent[n-1].At, now))
+}
+
+func pluralNoun(n int, noun string) string {
+	if n == 1 {
+		return noun
+	}
+	if strings.HasSuffix(noun, "s") {
+		return noun + "es"
+	}
+	return noun + "s"
 }
 
 func formatLatency(d time.Duration) string {

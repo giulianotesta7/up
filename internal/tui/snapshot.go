@@ -3,6 +3,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/giulianotesta7/up/internal/check"
@@ -30,17 +31,38 @@ type Service struct {
 	// Recent and Outages are newest first.
 	Recent  []check.Result
 	Outages []store.Outage
+	// Streak is the alert state rebuilt from Recent with the monitor's
+	// thresholds.
+	Streak check.Streak
 }
 
-// Label is the status shown for the service.
+// thresholdsDefault reports the one-failure, one-success rule that alerts on
+// every status change.
+func (s Service) thresholdsDefault() bool {
+	return s.Check.FailuresToAlert() == 1 && s.Check.SuccessesToRecover() == 1
+}
+
+// Label is the status shown for the service. With alert thresholds above 1 a
+// failing monitor reads FAILING n/N until the down alert fires, and a
+// recovering one RECOVERING n/M until the recovery alert fires.
 func (s Service) Label() string {
 	switch {
 	case !s.HasResult:
 		return "PENDING"
-	case s.Latest.Status == check.StatusUp:
-		return "UP"
-	default:
+	case s.thresholdsDefault():
+		if s.Latest.Status == check.StatusUp {
+			return "UP"
+		}
 		return "DOWN"
+	case s.Latest.Status == check.StatusUp:
+		if s.Streak.Alerting {
+			return fmt.Sprintf("RECOVERING %d/%d", s.Streak.Successes, s.Check.SuccessesToRecover())
+		}
+		return "UP"
+	case s.Streak.Alerting:
+		return "DOWN"
+	default:
+		return fmt.Sprintf("FAILING %d/%d", s.Streak.Failures, s.Check.FailuresToAlert())
 	}
 }
 
@@ -126,6 +148,7 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 		if len(svc.Recent) > 0 {
 			svc.Latest, svc.HasResult = svc.Recent[0], true
 		}
+		svc.Streak = check.Replay(svc.Recent, c.FailuresToAlert(), c.SuccessesToRecover())
 		if svc.Outages, err = s.Outages(ctx, c.Name, outageLimit); err != nil {
 			return Snapshot{}, err
 		}

@@ -118,8 +118,8 @@ func TestOpenMigratesV1AndKeepsData(t *testing.T) {
 	}
 	defer s.Close()
 
-	if got := version(t, path); got != 2 {
-		t.Fatalf("user_version after Open = %d, want 2", got)
+	if got := version(t, path); got != 3 {
+		t.Fatalf("user_version after Open = %d, want 3", got)
 	}
 	if got := tables(t, path); !reflect.DeepEqual(got, v2Tables) {
 		t.Fatalf("tables after migration = %v, want %v", got, v2Tables)
@@ -158,8 +158,8 @@ func TestOpenCreatesV2AndReopenIsIdempotent(t *testing.T) {
 	s, path := openTemp(t)
 	record(t, s, result("api", 0, check.StatusUp))
 	s.Close()
-	if got := version(t, path); got != 2 {
-		t.Fatalf("user_version of a new database = %d, want 2", got)
+	if got := version(t, path); got != 3 {
+		t.Fatalf("user_version of a new database = %d, want 3", got)
 	}
 
 	again, err := Open(path)
@@ -179,7 +179,7 @@ func TestOpenReadOnlyRejectsV1WithUpgradeHint(t *testing.T) {
 	path := v1Database(t)
 
 	_, err := OpenReadOnly(path)
-	if err == nil || !strings.Contains(err.Error(), "database schema version 1 is older than this up (2); open it with `up serve` or `up tui` to upgrade it") {
+	if err == nil || !strings.Contains(err.Error(), "database schema version 1 is older than this up (3); open it with `up serve` or `up tui` to upgrade it") {
 		t.Fatalf("OpenReadOnly(v1) error = %v, want upgrade hint", err)
 	}
 	if got := version(t, path); got != 1 {

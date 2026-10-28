@@ -62,3 +62,32 @@ func TestValidateCheckMessagesUseReadableFieldName(t *testing.T) {
 		t.Fatalf("zero status: %v", err)
 	}
 }
+
+func TestValidateCheckAlertThresholds(t *testing.T) {
+	base := config.Check{Name: "api", URL: "https://example.com", Interval: 30 * time.Second, Timeout: 5 * time.Second, ExpectedStatus: 200}
+	for _, tc := range []struct {
+		name         string
+		alert, recov int
+		want         string
+	}{
+		{"defaults", 0, 0, ""},
+		{"explicit", 3, 2, ""},
+		{"maximum", 10, 10, ""},
+		{"alert too high", 11, 1, "alert after 11 must be between 1 and 10"},
+		{"alert negative", -1, 1, "alert after -1 must be between 1 and 10"},
+		{"recover too high", 1, 11, "recover after 11 must be between 1 and 10"},
+	} {
+		c := base
+		c.AlertAfter, c.RecoverAfter = tc.alert, tc.recov
+		err := config.ValidateCheck(c)
+		if tc.want == "" && err != nil {
+			t.Errorf("%s: unexpected error %v", tc.name, err)
+		}
+		if tc.want != "" && (err == nil || err.Error() != tc.want) {
+			t.Errorf("%s: error = %v, want %q", tc.name, err, tc.want)
+		}
+	}
+	if (config.Check{}).FailuresToAlert() != 1 || (config.Check{}).SuccessesToRecover() != 1 || (config.Check{AlertAfter: 4, RecoverAfter: 2}).FailuresToAlert() != 4 {
+		t.Error("threshold defaults wrong")
+	}
+}
