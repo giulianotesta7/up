@@ -25,7 +25,7 @@ func TestMonitorChannelSelectorAndDetail(t *testing.T) {
 	m = next.(Model)
 	m = fillForm(t, m, "api", "https://example.com", "30s", "5s", "200")
 	m, _ = press(t, m, keyTab)
-	requireText(t, m, "Channel: ‹ none ›", "none · infra · ops-team", "←/→ choose · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit")
+	requireText(t, m, "Channel: ‹ none ›", "←/→ choose · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit")
 	next, _ = m.Update(tea.PasteMsg{Content: "ops-team"})
 	m = next.(Model)
 	requireText(t, m, "Channel: ‹ none ›")

@@ -114,7 +114,7 @@ fitted:
 		b.WriteString(l + strings.Repeat(" ", leftWidth-ansi.StringWidth(l)) + helpStyle.Render(" │ ") + r + "\n")
 	}
 	b.WriteString(helpStyle.Render(strings.Repeat("─", width)) + "\n")
-	b.WriteString(headerStyle.Render("ACTIVITY") + " " + helpStyle.Render("all monitors, newest first") + "\n")
+	b.WriteString(headerStyle.Render("ACTIVITY") + "\n")
 	for _, event := range events {
 		glyph := downStyle.Render("●")
 		if event.kind == "up" {

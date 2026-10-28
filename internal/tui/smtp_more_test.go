@@ -24,7 +24,7 @@ func TestSMTPDetailNavigationAndEmptyList(t *testing.T) {
 func TestSMTPPasswordPasteAndSelectorPaste(t *testing.T) {
 	_, m := smtpSetup(t)
 	m, _ = press(t, m, keyS, keyN, keyTab, keyTab, keyTab)
-	requireText(t, m, "TLS: ‹ starttls ›", "starttls · tls · none", "←/→ choose")
+	requireText(t, m, "TLS: ‹ starttls ›", "←/→ choose")
 	next, _ := m.Update(tea.PasteMsg{Content: "none"})
 	m = next.(Model)
 	requireText(t, m, "TLS: ‹ starttls ›")

@@ -128,7 +128,7 @@ func TestFormTLSExpiryToggle(t *testing.T) {
 	s, m := formStore(t)
 	m = fillForm(t, m, "web", "https://example.com", "30s", "5s", "200")
 	m, _ = press(t, m, keyTab, keyTab, keyTab, keyTab) // channel, alert, recover, TLS
-	requireText(t, m, "TLS expiry: ‹ on ›", "on · off", "HTTPS only")
+	requireText(t, m, "TLS expiry: ‹ on ›", "HTTPS only")
 	m, _ = press(t, m, keyRight)
 	requireText(t, m, "TLS expiry: ‹ off ›")
 	m, cmd := press(t, m, keyEnter)

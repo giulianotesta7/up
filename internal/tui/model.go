@@ -454,18 +454,29 @@ func (m Model) View() tea.View {
 	}
 	modal := ""
 	if m.form != nil || m.deletion != nil || m.mute != nil {
-		screen := ""
+		screen, minimum := "", 0
 		switch {
 		case m.mute != nil:
 			screen = renderMute(*m.mute, m.snap, now, m.err)
+			p := *m.mute
+			p.custom = !p.custom
+			minimum = modalContentWidth(renderMute(p, m.snap, now, m.err))
 		case m.deletion != nil:
 			screen = renderDelete(*m.deletion, m.snap, now, m.err)
 		default:
 			screen = renderForm(*m.form, m.snap, now, m.err)
+			f := *m.form
+			for focus := 0; focus < focusCount; focus++ {
+				if f.editing && focus == 0 {
+					continue
+				}
+				f.focus, f.cursor = focus, 0
+				minimum = max(minimum, modalContentWidth(renderForm(f, m.snap, now, m.err)))
+			}
 		}
 		title, body := splitModalScreen(screen)
 		var fits bool
-		modal, fits = renderModal(title, body, m.width, m.height)
+		modal, fits = renderModal(title, body, m.width, m.height, minimum)
 		if !fits {
 			content = screen
 			split = false
@@ -484,6 +495,17 @@ func (m Model) View() tea.View {
 		if m.smtpDelete != nil {
 			child = renderSMTPDelete(*m.smtpDelete, m.snap, now, m.err)
 		}
+		minimum := 0
+		if m.smtpForm != nil {
+			f := *m.smtpForm
+			for focus := range f.values {
+				if (f.editing && focus == 0) || (focus == 5 && !m.snap.HasKey) {
+					continue
+				}
+				f.focus, f.cursor = focus, 0
+				minimum = max(minimum, modalContentWidth(renderSMTPForm(f, m.snap, now, m.err)))
+			}
+		}
 		title, body := splitModalScreen(parent)
 		var fits bool
 		stackParent, fits = renderModal(title, body, m.width, m.height)
@@ -493,7 +515,7 @@ func (m Model) View() tea.View {
 		}
 		if child != "" {
 			title, body = splitModalScreen(child)
-			stackChild, fits = renderModal(title, body, m.width, m.height)
+			stackChild, fits = renderModal(title, body, m.width, m.height, minimum)
 			if !fits {
 				stackParent = ""
 				content = child
@@ -510,6 +532,17 @@ func (m Model) View() tea.View {
 		if m.channelDelete != nil {
 			child = renderChannelDelete(*m.channelDelete, m.snap, now, m.err)
 		}
+		minimum := 0
+		if m.channelForm != nil {
+			f := *m.channelForm
+			for focus := range f.values {
+				if f.editing && focus == 0 {
+					continue
+				}
+				f.focus, f.cursor = focus, 0
+				minimum = max(minimum, modalContentWidth(renderChannelForm(f, m.snap, now, m.err)))
+			}
+		}
 		title, body := splitModalScreen(parent)
 		var fits bool
 		stackParent, fits = renderModal(title, body, m.width, m.height)
@@ -519,7 +552,7 @@ func (m Model) View() tea.View {
 		}
 		if child != "" {
 			title, body = splitModalScreen(child)
-			stackChild, fits = renderModal(title, body, m.width, m.height)
+			stackChild, fits = renderModal(title, body, m.width, m.height, minimum)
 			if !fits {
 				stackParent = ""
 				content = child

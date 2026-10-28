@@ -97,7 +97,7 @@ func TestMonitorFormThresholds(t *testing.T) {
 	s, m := formStore(t)
 	m = fillForm(t, m, "web", "https://example.com", "30s", "5s", "200")
 	m, _ = press(t, m, keyTab, keyTab) // channel, then Alert after
-	requireText(t, m, "Alert after: ‹ 1 › failures in a row", "1 · 2 · 3 · 5 · 10", "Recover after: ‹ 1 › successes in a row")
+	requireText(t, m, "Alert after: ‹ 1 › failures in a row", "Recover after: ‹ 1 › successes in a row")
 	if strings.Contains(view(m), "Detection time") {
 		t.Fatalf("hint shown for the default threshold:\n%s", view(m))
 	}

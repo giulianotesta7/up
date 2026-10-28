@@ -11,9 +11,22 @@ func splitModalScreen(screen string) (string, string) {
 	return ansi.Strip(title), body
 }
 
-func renderModal(title string, body string, width, height int) (string, bool) {
+// modalContentWidth measures the screen with the same padding used by renderModal.
+func modalContentWidth(screen string) int {
+	title, body := splitModalScreen(screen)
+	width := max(40, ansi.StringWidth(title)+6)
+	for _, line := range strings.Split(body, "\n") {
+		width = max(width, ansi.StringWidth(line)+4)
+	}
+	return width
+}
+
+func renderModal(title string, body string, width, height int, minimum ...int) (string, bool) {
 	lines := strings.Split(body, "\n")
 	boxWidth := max(40, ansi.StringWidth(title)+6)
+	for _, w := range minimum {
+		boxWidth = max(boxWidth, w)
+	}
 	for _, line := range lines {
 		boxWidth = max(boxWidth, ansi.StringWidth(line)+4)
 	}
