@@ -60,6 +60,7 @@ type MuteStore interface {
 type CertStore interface {
 	Cert(context.Context, string) (config.Cert, bool, error)
 	SaveCert(context.Context, config.Cert) error
+	DeleteCert(context.Context, string) error
 }
 
 // CertAlerter receives certificate warnings without blocking.
@@ -341,6 +342,12 @@ func observeCert(ctx context.Context, opts Options, c config.Check, res check.Re
 	}
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 	defer cancel()
+	if c.TLSOff {
+		if err := store.DeleteCert(wctx, c.Name); err != nil {
+			opts.Logger.Error("forgetting certificate failed", "check", c.Name, "error", err)
+		}
+		return
+	}
 	old, found, err := store.Cert(wctx, c.Name)
 	if err != nil {
 		opts.Logger.Error("reading certificate failed", "check", c.Name, "error", err)

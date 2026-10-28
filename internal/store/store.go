@@ -83,7 +83,10 @@ ALTER TABLE checks ADD COLUMN recover_after INTEGER NOT NULL DEFAULT 0;
 	// v3 -> v4: temporary alert mutes.
 	`CREATE TABLE mutes (check_name TEXT PRIMARY KEY, until_ns INTEGER NOT NULL, was_alerting INTEGER NOT NULL);`,
 	// v4 -> v5: last observed TLS certificates.
-	`CREATE TABLE certs (check_name TEXT PRIMARY KEY, host TEXT NOT NULL, issuer TEXT NOT NULL, serial TEXT NOT NULL, not_after_ns INTEGER NOT NULL, observed_ns INTEGER NOT NULL, notified INTEGER NOT NULL);`,
+	`
+CREATE TABLE certs (check_name TEXT PRIMARY KEY, host TEXT NOT NULL, issuer TEXT NOT NULL, serial TEXT NOT NULL, not_after_ns INTEGER NOT NULL, observed_ns INTEGER NOT NULL, notified INTEGER NOT NULL);
+ALTER TABLE checks ADD COLUMN tls_off INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 // Outage is a period during which a check was down. Ongoing outages have a
@@ -251,8 +254,8 @@ func insertCheck(ctx context.Context, tx *sql.Tx, position int, c config.Check) 
 		return err
 	}
 	_, err := tx.ExecContext(ctx,
-		"INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		position, c.Name, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter)
+		"INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after, tls_off) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		position, c.Name, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter, c.TLSOff)
 	return err
 }
 
@@ -266,7 +269,7 @@ type checkReader interface {
 }
 
 func readChecks(ctx context.Context, reader checkReader) ([]config.Check, error) {
-	rows, err := reader.QueryContext(ctx, "SELECT name, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after FROM checks ORDER BY position")
+	rows, err := reader.QueryContext(ctx, "SELECT name, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after, tls_off FROM checks ORDER BY position")
 	if err != nil {
 		return nil, fmt.Errorf("store: checks: %w", err)
 	}
@@ -275,7 +278,7 @@ func readChecks(ctx context.Context, reader checkReader) ([]config.Check, error)
 	for rows.Next() {
 		var c config.Check
 		var interval, timeout int64
-		if err := rows.Scan(&c.Name, &c.URL, &interval, &timeout, &c.ExpectedStatus, &c.Channel, &c.AlertAfter, &c.RecoverAfter); err != nil {
+		if err := rows.Scan(&c.Name, &c.URL, &interval, &timeout, &c.ExpectedStatus, &c.Channel, &c.AlertAfter, &c.RecoverAfter, &c.TLSOff); err != nil {
 			return nil, fmt.Errorf("store: checks: %w", err)
 		}
 		c.Interval, c.Timeout = time.Duration(interval), time.Duration(timeout)

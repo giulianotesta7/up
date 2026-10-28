@@ -40,6 +40,9 @@ type Check struct {
 	// means 1; use FailuresToAlert and SuccessesToRecover.
 	AlertAfter   int
 	RecoverAfter int
+	// TLSOff turns off certificate monitoring for an HTTPS check: no
+	// expiry warnings and no stored certificate. The zero value keeps it on.
+	TLSOff bool
 }
 
 // MaxAlertThreshold is the largest AlertAfter and RecoverAfter.

@@ -145,3 +145,39 @@ func TestCertFirstSeenMuteNoChannelAndPlainAlerter(t *testing.T) {
 		t.Fatalf("plain alerter marked sent: %+v", after)
 	}
 }
+
+func TestCertTLSOffIgnoresAndForgetsCertificate(t *testing.T) {
+	s := openStore(t)
+	c := alertingCheck(t, s, 1, 1)
+	bg := context.Background()
+	a := &certRecorder{}
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cert := &check.CertInfo{Host: "host", Issuer: "ca", Serial: "a", NotAfter: at.Add(5 * 24 * time.Hour)}
+	runCert(t, s, a, check.Result{CheckName: "api", At: at, Status: check.StatusUp, Cert: cert})
+	if got := a.got(); !reflect.DeepEqual(got, []int{7}) {
+		t.Fatalf("thresholds with monitoring on: %v", got)
+	}
+
+	c.TLSOff = true
+	if err := s.UpdateCheck(bg, c); err != nil {
+		t.Fatal(err)
+	}
+	later := at.Add(time.Hour)
+	ctx, cancel := context.WithCancel(bg)
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{Store: s, Runner: certRunner{check.Result{CheckName: "api", At: later, Status: check.StatusUp, Cert: &check.CertInfo{Host: "host", Issuer: "ca", Serial: "b", NotAfter: at.Add(2 * 24 * time.Hour)}}}, Alerter: a, HeartbeatInterval: time.Hour, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	}()
+	waitFor(t, "result", func() bool { x, ok, _ := s.Latest(bg, "api"); return ok && x.At.Equal(later) })
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.Cert(bg, "api"); ok {
+		t.Fatal("certificate kept after turning TLS monitoring off")
+	}
+	// A nearer threshold would have warned if monitoring were on.
+	if got := a.got(); !reflect.DeepEqual(got, []int{7}) {
+		t.Fatalf("thresholds after turning it off: %v", got)
+	}
+}

@@ -19,11 +19,14 @@ var fieldLabels = [...]string{"Name", "HTTP/HTTPS URL", "Interval", "Timeout", "
 // thresholdChoices are the values offered for Alert after and Recover after.
 var thresholdChoices = []string{"1", "2", "3", "5", "10"}
 
+var tlsChoices = []string{"on", "off"}
+
 // Focus positions after the text fields: the channel, then the thresholds.
 const (
 	focusChannel = len(fieldLabels) + iota
 	focusAlertAfter
 	focusRecoverAfter
+	focusTLS
 	focusCount
 )
 
@@ -32,6 +35,7 @@ type monitorForm struct {
 	channel      string
 	alertAfter   string
 	recoverAfter string
+	tlsExpiry    string
 	focus        int
 	cursor       int // rune offset in the focused field
 	err          error
@@ -41,13 +45,13 @@ type monitorForm struct {
 }
 
 func newMonitorForm() *monitorForm {
-	return &monitorForm{values: [5]string{"", "", "30s", "5s", "200"}, alertAfter: "1", recoverAfter: "1"}
+	return &monitorForm{values: [5]string{"", "", "30s", "5s", "200"}, alertAfter: "1", recoverAfter: "1", tlsExpiry: "on"}
 }
 
 func editMonitorForm(c config.Check, detail bool) *monitorForm {
 	return &monitorForm{
 		values:  [5]string{c.Name, c.URL, c.Interval.String(), c.Timeout.String(), strconv.Itoa(c.ExpectedStatus)},
-		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()),
+		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: tlsChoice(c.TLSOff),
 		focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail,
 	}
 }
@@ -71,7 +75,15 @@ func (f monitorForm) check() (config.Check, error) {
 	if c.RecoverAfter, err = strconv.Atoi(f.recoverAfter); err != nil {
 		return c, fmt.Errorf("recover after: %w", err)
 	}
+	c.TLSOff = f.tlsExpiry == "off"
 	return c, config.ValidateCheck(c)
+}
+
+func tlsChoice(off bool) string {
+	if off {
+		return "off"
+	}
+	return "on"
 }
 
 type saveMsg struct {
@@ -146,8 +158,10 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				f.channel = cycleChoice(channelChoices(m.snap), f.channel, delta)
 			case f.focus == focusAlertAfter:
 				f.alertAfter = cycleChoice(thresholdChoices, f.alertAfter, delta)
-			default:
+			case f.focus == focusRecoverAfter:
 				f.recoverAfter = cycleChoice(thresholdChoices, f.recoverAfter, delta)
+			default:
+				f.tlsExpiry = cycleChoice(tlsChoices, f.tlsExpiry, delta)
 			}
 		} else {
 			f.edit(msg)
@@ -258,6 +272,7 @@ func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) stri
 	choiceLine(focusChannel, "Channel", renderChoice(selected, choices, f.focus == focusChannel))
 	choiceLine(focusAlertAfter, "Alert after", renderChoiceUnit(f.alertAfter, "failures in a row", thresholdChoices, f.focus == focusAlertAfter))
 	choiceLine(focusRecoverAfter, "Recover after", renderChoiceUnit(f.recoverAfter, "successes in a row", thresholdChoices, f.focus == focusRecoverAfter))
+	choiceLine(focusTLS, "TLS expiry", renderChoiceUnit(f.tlsExpiry, "", tlsChoices, f.focus == focusTLS)+"   "+helpStyle.Render("HTTPS only"))
 	if hint := detectionHint(f); hint != "" {
 		b.WriteString("\n" + helpStyle.Render(hint) + "\n")
 	}

@@ -123,3 +123,38 @@ func TestDetailMarksStaleAndExpiredCertificate(t *testing.T) {
 		}
 	}
 }
+
+func TestFormTLSExpiryToggle(t *testing.T) {
+	s, m := formStore(t)
+	m = fillForm(t, m, "web", "https://example.com", "30s", "5s", "200")
+	m, _ = press(t, m, keyTab, keyTab, keyTab, keyTab) // channel, alert, recover, TLS
+	requireText(t, m, "TLS expiry: ‹ on ›", "on · off", "HTTPS only")
+	m, _ = press(t, m, keyRight)
+	requireText(t, m, "TLS expiry: ‹ off ›")
+	m, cmd := press(t, m, keyEnter)
+	finishCommand(t, m, cmd)
+	checks, err := s.Checks(context.Background())
+	if err != nil || len(checks) != 1 || !checks[0].TLSOff {
+		t.Fatalf("stored %+v, %v", checks, err)
+	}
+}
+
+func TestEditFormLoadsTLSOffAndHidesCertificate(t *testing.T) {
+	s, m := formStore(t)
+	ctx := context.Background()
+	c := config.Check{Name: "web", URL: "https://example.com", Interval: time.Minute, Timeout: 5 * time.Second, ExpectedStatus: 200, TLSOff: true}
+	if err := s.AddCheck(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	// A certificate stored before monitoring was turned off is not shown.
+	if err := s.SaveCert(ctx, config.Cert{Check: "web", Host: "example.com", NotAfter: now.Add(5 * day), Observed: now}); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := m.Update(m.Init()())
+	m = next.(Model)
+	if strings.Contains(ansi.Strip(view(m)), "CERT") {
+		t.Fatalf("CERT column for a monitor with TLS off:\n%s", view(m))
+	}
+	m, _ = press(t, m, keyE)
+	requireText(t, m, "TLS expiry: ‹ off ›")
+}

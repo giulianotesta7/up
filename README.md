@@ -120,6 +120,8 @@ For `https://` monitors `up` reads the certificate from the connection it alread
 
 The monitor's channel gets one email per threshold (14, 7 and 3 days), remembered across restarts. A certificate first seen with 2 days left produces one email, not three. A renewed certificate resets the thresholds without sending anything, and warnings wait while the monitor is muted. After a failed check the detail view shows the last known certificate and when it was observed.
 
+Set `TLS expiry` to `off` in the monitor form to skip all of this for one monitor (for example an internal service with a self-managed certificate): no warnings, no `CERT` value, and the stored certificate is forgotten. It is `on` by default and has no effect on `http://` monitors.
+
 ## Contributing
 
 Run `go vet ./...` and `go test -race ./...` before opening a PR. Regenerate the demo with `sh docs/demo/record.sh` (needs vhs, ttyd and ffmpeg).

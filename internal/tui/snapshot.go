@@ -178,7 +178,7 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 	for _, c := range checks {
 		svc := Service{Check: c}
 		for _, cert := range certs {
-			if cert.Check == c.Name {
+			if cert.Check == c.Name && !c.TLSOff {
 				svc.Cert, svc.HasCert = cert, true
 			}
 		}

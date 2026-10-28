@@ -68,3 +68,11 @@ func (s *Store) SaveCert(ctx context.Context, c config.Cert) error {
 	}
 	return nil
 }
+
+// DeleteCert forgets a check's certificate; a missing one is not an error.
+func (s *Store) DeleteCert(ctx context.Context, name string) error {
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM certs WHERE check_name = ?", name); err != nil {
+		return fmt.Errorf("store: delete cert: %w", err)
+	}
+	return nil
+}

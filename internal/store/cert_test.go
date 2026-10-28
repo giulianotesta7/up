@@ -66,3 +66,34 @@ func TestCertLifecycle(t *testing.T) {
 		t.Fatalf("deleted cert %v %v", ok, err)
 	}
 }
+
+func TestTLSOffPersistsAndDeleteCertForgets(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	c := config.Check{Name: "web", URL: "https://example.com", Interval: time.Second, Timeout: time.Second, ExpectedStatus: 200}
+	if err := s.AddCheck(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Checks(ctx); got[0].TLSOff {
+		t.Fatal("TLS monitoring is not on by default")
+	}
+	c.TLSOff = true
+	if err := s.UpdateCheck(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Checks(ctx); !got[0].TLSOff {
+		t.Fatal("TLSOff not stored")
+	}
+	if err := s.SaveCert(ctx, config.Cert{Check: "web", Host: "example.com", NotAfter: time.Unix(100, 0), Observed: time.Unix(50, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteCert(ctx, "web"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.Cert(ctx, "web"); ok {
+		t.Fatal("certificate kept")
+	}
+	if err := s.DeleteCert(ctx, "web"); err != nil {
+		t.Fatalf("deleting a missing certificate: %v", err)
+	}
+}
