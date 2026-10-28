@@ -80,7 +80,7 @@ In forms: `tab`/`shift+tab` switch fields · `←`/`→` choose an option · `en
 
 Alerts go from a monitor to a **channel**, and from the channel to an **SMTP server**:
 
-1. Press `s` and add an SMTP server: host, port, TLS mode, username, password and sender address.
+1. Press `s` and add an SMTP server: host, port, TLS mode, username, password and sender address. For a relay that does not require authentication, set **No login required** (above **Username**) to **Yes** with `←`/`→`; username and password are skipped, and no encryption key is needed. When editing, this option reflects the saved server; switching to **Yes** removes its stored credentials on save. TLS remains a separate setting.
 2. Press `c` and add a channel: pick the SMTP server and list one or more recipients, separated by commas.
 3. Edit a monitor (`e`) and choose the channel. Monitors without a channel never alert.
 

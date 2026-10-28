@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,11 +17,15 @@ import (
 	"github.com/giulianotesta7/up/internal/store"
 )
 
-var smtpLabels = [...]string{"Name", "Host", "Port", "TLS", "Username", "Password", "Sender"}
+var smtpLabels = [...]string{"Name", "Host", "Port", "TLS", "Username", "Password", "Sender", "No login required"}
+
+// Presentation and keyboard traversal share an order independent of value storage.
+var smtpFieldOrder = [...]int{0, 1, 2, 3, 7, 4, 5, 6}
+var smtpNoLoginOptions = []string{"No", "Yes"}
 var smtpTLSOptions = []string{string(config.TLSStartTLS), string(config.TLSImplicit), string(config.TLSNone)}
 
 type smtpForm struct {
-	values                       [7]string
+	values                       [8]string
 	focus, cursor                int
 	editing, hadPassword, saving bool
 	err                          error
@@ -36,13 +41,17 @@ type smtpDeleteMsg struct {
 }
 
 func newSMTPForm() *smtpForm {
-	return &smtpForm{values: [7]string{"", "", "587", "starttls", "", "", ""}}
+	return &smtpForm{values: [8]string{"", "", "587", "starttls", "", "", "", "No"}}
 }
 func editSMTPForm(s config.SMTPServer) *smtpForm {
-	return &smtpForm{values: [7]string{s.Name, s.Host, strconv.Itoa(s.Port), string(s.TLS), s.Username, "", s.Sender}, focus: 1, cursor: len([]rune(s.Host)), editing: true, hadPassword: !s.Password.Empty()}
+	noLogin := "No"
+	if s.Username == "" {
+		noLogin = "Yes"
+	}
+	return &smtpForm{values: [8]string{s.Name, s.Host, strconv.Itoa(s.Port), string(s.TLS), s.Username, "", s.Sender, noLogin}, focus: 1, cursor: len([]rune(s.Host)), editing: true, hadPassword: !s.Password.Empty()}
 }
 func (f *smtpForm) insert(text string) {
-	if f.focus == 3 {
+	if f.focus == 3 || f.focus == 7 || (f.noLogin() && (f.focus == 4 || f.focus == 5)) {
 		return
 	}
 	editor := monitorForm{focus: 0, cursor: f.cursor}
@@ -51,13 +60,20 @@ func (f *smtpForm) insert(text string) {
 	f.values[f.focus] = editor.values[0]
 	f.cursor = editor.cursor
 }
+func (f smtpForm) noLogin() bool {
+	return f.values[7] == "Yes"
+}
 func (f *smtpForm) edit(msg tea.KeyPressMsg) {
-	if f.focus == 3 {
+	if f.focus == 3 || f.focus == 7 {
+		options := smtpTLSOptions
+		if f.focus == 7 {
+			options = smtpNoLoginOptions
+		}
 		switch msg.String() {
 		case "left":
-			f.values[3] = cycleChoice(smtpTLSOptions, f.values[3], -1)
+			f.values[f.focus] = cycleChoice(options, f.values[f.focus], -1)
 		case "right":
-			f.values[3] = cycleChoice(smtpTLSOptions, f.values[3], 1)
+			f.values[f.focus] = cycleChoice(options, f.values[f.focus], 1)
 		}
 		return
 	}
@@ -81,9 +97,11 @@ func (m Model) handleSMTPFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == "shift+tab" {
 			delta = -1
 		}
+		position := slices.Index(smtpFieldOrder[:], f.focus)
 		for {
-			f.focus = (f.focus + delta + len(f.values)) % len(f.values)
-			if !(f.editing && f.focus == 0) && !(f.focus == 5 && !m.snap.HasKey) {
+			position = (position + delta + len(smtpFieldOrder)) % len(smtpFieldOrder)
+			f.focus = smtpFieldOrder[position]
+			if !(f.editing && f.focus == 0) && !(f.focus == 5 && !m.snap.HasKey) && !(f.noLogin() && (f.focus == 4 || f.focus == 5)) {
 				break
 			}
 		}
@@ -96,6 +114,10 @@ func (m Model) handleSMTPFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		server := config.SMTPServer{Name: f.values[0], Host: f.values[1], Port: port, TLS: config.TLSMode(f.values[3]), Username: f.values[4], Sender: f.values[6]}
 		password := f.values[5]
+		if f.noLogin() {
+			server.Username = ""
+			password = ""
+		}
 		key := bytes.Clone(m.snap.PublicKey)
 		editing := f.editing
 		f.saving = true
@@ -225,16 +247,21 @@ func renderSMTPForm(f smtpForm, snap Snapshot, now time.Time, loadErr error) str
 		title = "Edit SMTP server"
 	}
 	b.WriteString(titleStyle.Render(title) + "\n")
-	if !snap.HasKey {
+	if !snap.HasKey && !f.noLogin() {
 		b.WriteString(warnStyle.Render("Passwords need the encryption key: start `up serve` once, then come back.") + "\n")
 	}
 	b.WriteString(renderBanners(snap, now, loadErr))
-	for i, label := range smtpLabels {
+	for _, i := range smtpFieldOrder {
+		label := smtpLabels[i]
 		marker := " "
 		value := f.values[i]
 		focused := i == f.focus
 		if i == 3 {
 			value = renderChoice(value, smtpTLSOptions, focused)
+		} else if i == 7 {
+			value = renderChoice(value, smtpNoLoginOptions, focused)
+		} else if f.noLogin() && (i == 4 || i == 5) {
+			value = helpStyle.Render("(not required)")
 		} else if i == 5 && !snap.HasKey {
 			value = helpStyle.Render("(unavailable until `up serve` runs)")
 		} else {
@@ -262,12 +289,15 @@ func renderSMTPForm(f smtpForm, snap Snapshot, now time.Time, loadErr error) str
 		}
 		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, value)
 	}
+	if f.noLogin() && f.editing && (f.values[4] != "" || f.hadPassword) {
+		b.WriteString("\n" + warnStyle.Render("Saving without login removes the stored username and password.") + "\n")
+	}
 	if f.err != nil {
 		b.WriteString("\n" + warnStyle.Render("Cannot save SMTP server: "+f.err.Error()) + "\n")
 	}
 	if f.saving {
 		b.WriteString("\n" + renderHelp("Saving SMTP server… · ctrl+c quit"))
-	} else if f.focus == 3 {
+	} else if f.focus == 3 || f.focus == 7 {
 		b.WriteString("\n" + renderHelp("←/→ choose · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
 	} else {
 		b.WriteString("\n" + renderHelp("tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
