@@ -447,7 +447,7 @@ func (m Model) View() tea.View {
 	} else if m.detail && m.selected < len(m.snap.Services) {
 		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width)
 	}
-	if m.help {
+	if m.help && !helpPopupFits(m.width, m.height) {
 		content = renderKeys()
 	}
 	if m.form != nil {
@@ -489,9 +489,18 @@ func (m Model) View() tea.View {
 		rule = renderHostRuleCells(m.snap, m.hostname, now, m.width, position)
 	}
 	content = renderTitleWidth(m.snap, m.width) + "\n" + rule + "\n" + content
+	if m.help && helpPopupFits(m.width, m.height) {
+		content = padForPopup(content, m.height)
+	}
 	content += "\n" + helpStyle.Render("database: "+m.databasePath)
 	if m.splitMode() {
 		content = truncateLines(content, m.width)
+	}
+	if m.help && helpPopupFits(m.width, m.height) {
+		if m.width > 0 {
+			content = truncateLines(content, m.width)
+		}
+		content = overlayPopup(content, renderHelpPopup(m.splitMode()), m.width, m.height)
 	}
 	// Lipgloss v2 emits truecolor styles; colorprofile only recognizes boolean
 	// NO_COLOR values. Honor every nonempty value, including in direct renders.
