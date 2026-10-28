@@ -29,10 +29,8 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		for _, s := range snap.Services {
 			statusWidth = max(statusWidth, ansi.StringWidth(s.Label()))
 		}
-		anyMuted := false
-		for _, s := range snap.Services {
-			anyMuted = anyMuted || s.Muted(now)
-		}
+		// MUTED is always shown (13 cells), so its place does not move when a
+		// mute starts or ends.
 		showTrend := width <= 0 || width >= max(78, nameWidth+55+statusWidth)
 		row := func(marker, dot, name, status, latency, trend, last, muted, reason string) string {
 			padding := strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name)))
@@ -41,9 +39,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 				middle = "  " + trend + strings.Repeat(" ", max(0, 16-ansi.StringWidth(trend)))
 			}
 			prefix := marker + " " + dot + " " + name + padding + "  " + status + fmt.Sprintf("  %8s", latency) + middle
-			if anyMuted {
-				last = fmt.Sprintf("%-10s  %s", last, muted+strings.Repeat(" ", max(0, 13-ansi.StringWidth(muted))))
-			}
+			last = fmt.Sprintf("%-10s  %s", last, muted+strings.Repeat(" ", max(0, 13-ansi.StringWidth(muted))))
 			if showTrend {
 				return prefix + "  " + strings.TrimRight(fmt.Sprintf("%-10s  %s", last, reason), " ")
 			}

@@ -114,3 +114,11 @@ func TestDetailShowsHeldEmail(t *testing.T) {
 	m, _ = press(t, next.(Model), keyEnter)
 	requireText(t, m, "Muted: until 04:13 (28m left) · 1 email pending (down since Oct 25 03:40:30)")
 }
+
+func TestMutedColumnIsAlwaysShown(t *testing.T) {
+	_, m := mutedModel(t, check.StatusUp)
+	list := ansi.Strip(view(m))
+	if !strings.Contains(list, "MUTED") || strings.Contains(list, "⏸") {
+		t.Fatalf("want a MUTED header and no mute marker:\n%s", list)
+	}
+}
