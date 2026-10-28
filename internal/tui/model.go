@@ -74,6 +74,7 @@ type Model struct {
 	generation        uint64
 	selectName        string
 	animationOff      bool
+	help              bool
 	sweeping          bool
 	sweepPosition     int
 	sweepGeneration   uint64
@@ -361,7 +362,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleMuteKey(msg)
 	}
 	m.notice = ""
+	if m.help {
+		if key := msg.String(); key == "?" || key == "esc" {
+			m.help = false
+		}
+		return m, nil
+	}
 	switch msg.String() {
+	case "?":
+		m.help = true
 	case "q":
 		return m, tea.Quit
 	case "c":
@@ -421,6 +430,9 @@ func (m Model) View() tea.View {
 	content := renderList(m.snap, m.selected, now, m.err, m.width)
 	if m.detail && m.selected < len(m.snap.Services) {
 		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width)
+	}
+	if m.help {
+		content = renderKeys()
 	}
 	if m.form != nil {
 		content = renderForm(*m.form, m.snap, now, m.err)

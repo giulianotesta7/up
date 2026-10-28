@@ -87,7 +87,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		}
 	}
 
-	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("↑/↓ select · enter open · n new · e edit · d delete · m mute · ? more · q quit"))
 	return b.String()
 }
 
@@ -174,7 +174,7 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 		fmt.Fprintf(&b, "  %s → %s (%s)   %s\n", formatTime(o.Start, now), formatTime(o.End, now), o.End.Sub(o.Start), o.Error)
 	}
 
-	b.WriteString("\n" + renderHelp("esc back · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("esc back · e edit · d delete · m mute · ? more · q quit"))
 	return b.String()
 }
 
@@ -314,4 +314,33 @@ func orDash(s string) string {
 		return "—"
 	}
 	return s
+}
+
+// renderKeys is the full key map shown by "?" on the list and detail screens.
+func renderKeys() string {
+	row := func(key, left, key2, right string) string {
+		cell := accentStyle.Render(key) + strings.Repeat(" ", max(1, 9-ansi.StringWidth(key))) + helpStyle.Render(left)
+		if key2 == "" {
+			return "  " + cell
+		}
+		pad := strings.Repeat(" ", max(1, 28-9-ansi.StringWidth(left)))
+		return "  " + cell + pad + accentStyle.Render(key2) + strings.Repeat(" ", max(1, 4-ansi.StringWidth(key2))) + helpStyle.Render(right)
+	}
+	lines := []string{
+		headerStyle.Render("MONITORS") + strings.Repeat(" ", 20) + headerStyle.Render("ALERTING"),
+		"",
+		row("↑/↓ k/j", "select", "m", "mute selected"),
+		row("enter", "details", "u", "unmute"),
+		row("n", "new monitor", "s", "SMTP servers"),
+		row("e", "edit", "c", "channels"),
+		row("d", "delete", "", ""),
+		"",
+		headerStyle.Render("VIEW"),
+		"",
+		row("a", "animation on/off", "", ""),
+		row("q", "quit", "", ""),
+		"",
+		"  " + accentStyle.Render("? or esc") + "  " + helpStyle.Render("close"),
+	}
+	return strings.Join(lines, "\n")
 }

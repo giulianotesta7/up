@@ -200,7 +200,7 @@ func TestListView(t *testing.T) {
 		"api", "UP", "84ms", "30s ago",
 		"payments", "DOWN", "1m ago", reason,
 		"new", "PENDING",
-		"↑/↓ select", "enter details", "q quit",
+		"↑/↓ select", "enter open", "q quit",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("list view missing %q:\n%s", want, out)

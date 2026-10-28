@@ -113,21 +113,8 @@ func TestAnimationKeyPreservesModalInput(t *testing.T) {
 func TestAnimationHelp(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm")
-	m := modelWith(seededSnapshot(t, now))
-	for _, detail := range []bool{false, true} {
-		if detail {
-			m, _ = press(t, m, keyEnter)
-		}
-		prefix := "↑/↓ select (k/j) · enter details"
-		if detail {
-			prefix = "esc back"
-		}
-		want := prefix + " · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"
-		if !strings.Contains(view(m), want) {
-			t.Fatalf("missing complete help: %s", view(m))
-		}
-		if !strings.Contains(m.View().Content, accentStyle.Render("a")+" "+helpStyle.Render("animation")) {
-			t.Fatal("animation key is not accented")
-		}
+	m, _ := press(t, modelWith(seededSnapshot(t, now)), keyHelp)
+	if !strings.Contains(m.View().Content, accentStyle.Render("a")+strings.Repeat(" ", 8)+helpStyle.Render("animation on/off")) {
+		t.Fatalf("animation key is not accented in the key map:\n%s", view(m))
 	}
 }

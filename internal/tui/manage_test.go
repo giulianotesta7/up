@@ -319,7 +319,7 @@ func TestExistingKeysPreserved(t *testing.T) {
 			case "enter":
 				requireText(t, m, "Status:", "https://pay.example.com")
 			case "esc":
-				requireText(t, m, "MONITOR", "enter details")
+				requireText(t, m, "MONITOR", "enter open")
 			case "n":
 				requireText(t, m, "New monitor", "30s", "5s", "200")
 			case "q", "ctrl+c":
