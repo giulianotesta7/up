@@ -17,7 +17,7 @@ func TestSMTPEditWarnsThatRemovingUsernameRemovesPassword(t *testing.T) {
 	m, cmd := press(t, m, keyEnter)
 	m = finishCommand(t, m, cmd)
 
-	m, _ = press(t, m, keyE, keyTab, keyTab, keyTab)
+	m, _ = press(t, m, keyE, keyTab, keyTab, keyTab, keyTab)
 	m = replaceField(t, m, "user", "")
 	requireText(t, m, "(the current password is removed because Username is empty)")
 	if strings.Contains(view(m), "(leave empty to keep the current password)") {

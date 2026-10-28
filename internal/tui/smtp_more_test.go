@@ -28,7 +28,7 @@ func TestSMTPPasswordPasteAndSelectorPaste(t *testing.T) {
 	next, _ := m.Update(tea.PasteMsg{Content: "none"})
 	m = next.(Model)
 	requireText(t, m, "TLS: ‹ starttls ›")
-	m, _ = press(t, m, keyTab, keyTab)
+	m, _ = press(t, m, keyTab, keyTab, keyTab)
 	next, _ = m.Update(tea.PasteMsg{Content: "sécret\n"})
 	m = next.(Model)
 	if strings.Contains(view(m), "sécret") || !strings.Contains(view(m), "••••••") {
@@ -53,7 +53,7 @@ func TestSMTPPortErrorAndNoKeySave(t *testing.T) {
 		t.Fatalf("invalid port wrote %v %v", servers, err)
 	}
 	m = replaceField(t, m, "bad", "25")
-	m, _ = press(t, m, keyTab, keyRight, keyRight, keyTab, keyTab)
+	m, _ = press(t, m, keyTab, keyRight, keyRight, keyTab, keyTab, keyTab)
 	m = typeText(t, m, "up@example.com")
 	m, cmd = press(t, m, keyEnter)
 	finishCommand(t, m, cmd)

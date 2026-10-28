@@ -180,7 +180,7 @@ func TestSMTPModalMaskAndDetail(t *testing.T) {
 	if !strings.Contains(parent, "╭─ SMTP servers") || !strings.Contains(parent, "esc back") {
 		t.Errorf("detail background missing: %s", parent)
 	}
-	m, _ = press(t, m, keyN, keyTab, keyTab, keyTab, keyTab, keyTab)
+	m, _ = press(t, m, keyN, keyTab, keyTab, keyTab, keyTab, keyTab, keyTab)
 	m = typeText(t, m, "sëcret")
 	if out := view(m); strings.Contains(out, "sëcret") || !strings.Contains(out, "••••••") || !strings.Contains(out, "╭─ New SMTP server") {
 		t.Errorf("password mask or modal missing: %s", out)
