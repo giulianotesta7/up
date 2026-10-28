@@ -80,11 +80,11 @@ func TestEditPrefillSaveOriginAndFixedName(t *testing.T) {
 			m, _ = press(t, m, keyE)
 			requireText(t, m, "Edit monitor", "Name: api", "https://api.example.com/health", "30s", "5s", "200", "enter save", "esc cancel", "database: /shared/up.db")
 			// Focus wraps among editable fields only, including backwards from URL.
-			m, _ = press(t, m, keyShiftTab, keyShiftTab, keyShiftTab, keyShiftTab)
+			m, _ = press(t, m, keyShiftTab, keyShiftTab, keyShiftTab, keyShiftTab, keyShiftTab)
 			m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyHome})
 			m = typeText(t, m, "2")
 			requireText(t, m, "Name: api", "2│200")
-			m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDelete}, keyTab, keyTab, keyTab, keyTab)
+			m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDelete}, keyTab, keyTab, keyTab, keyTab, keyTab)
 			m = replaceEditURL(t, m, "https://changed.example.com")
 			m, _ = press(t, m, keyTab)
 			m = replaceField(t, m, "30s", "1m")

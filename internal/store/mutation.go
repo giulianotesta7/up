@@ -23,8 +23,8 @@ func (s *Store) UpdateCheck(ctx context.Context, c config.Check) error {
 		return fmt.Errorf("store: update check: %w", err)
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE checks
-SET url = ?, interval_ns = ?, timeout_ns = ?, expected_status = ?, channel = ?, alert_after = ?, recover_after = ? WHERE name = ?`,
-		c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter, c.Name)
+SET url = ?, interval_ns = ?, timeout_ns = ?, expected_status = ?, channel = ?, alert_after = ?, recover_after = ?, tls_off = ? WHERE name = ?`,
+		c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter, c.TLSOff, c.Name)
 	if err != nil {
 		return fmt.Errorf("store: update check: %w", err)
 	}
@@ -64,6 +64,9 @@ func (s *Store) DeleteCheck(ctx context.Context, name string) error {
 		return fmt.Errorf("store: delete check: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM mutes WHERE check_name = ?", name); err != nil {
+		return fmt.Errorf("store: delete check: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM certs WHERE check_name = ?", name); err != nil {
 		return fmt.Errorf("store: delete check: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

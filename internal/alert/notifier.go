@@ -36,8 +36,10 @@ type Options struct {
 	Location *time.Location
 }
 type event struct {
-	check  config.Check
-	result check.Result
+	check     config.Check
+	result    check.Result
+	cert      *config.Cert
+	remaining time.Duration
 }
 
 // Notifier sends alerts from a bounded queue, one at a time and in order.
@@ -59,10 +61,19 @@ func NewNotifier(opts Options) *Notifier {
 
 // Notify enqueues an alert without blocking.
 func (n *Notifier) Notify(c config.Check, r check.Result) {
+	n.enqueue(event{check: c, result: r})
+}
+
+// NotifyCert enqueues a certificate warning without blocking.
+func (n *Notifier) NotifyCert(c config.Check, cert config.Cert, remaining time.Duration) {
+	n.enqueue(event{check: c, cert: &cert, remaining: remaining})
+}
+
+func (n *Notifier) enqueue(e event) {
 	select {
-	case n.queue <- event{c, r}:
+	case n.queue <- e:
 	default:
-		n.opts.Logger.Error("alert dropped: queue full", "check", c.Name)
+		n.opts.Logger.Error("alert dropped: queue full", "check", e.check.Name)
 	}
 }
 
@@ -123,7 +134,10 @@ func (n *Notifier) send(ctx context.Context, e event) {
 	}
 	at := r.At.In(n.opts.Location).Format("Jan 02 15:04:05 (MST)")
 	msg := Message{From: server.Sender, To: ch.Recipients, Date: r.At}
-	if r.Status == check.StatusDown {
+	if e.cert != nil {
+		msg.Date = e.cert.Observed
+		msg.Subject, msg.Body = certMessage(c, *e.cert, e.remaining)
+	} else if r.Status == check.StatusDown {
 		if outages, err := n.opts.Store.Outages(ctx, c.Name, 1); err == nil && len(outages) > 0 && outages[0].Ongoing {
 			at = outages[0].Start.In(n.opts.Location).Format("Jan 02 15:04:05 (MST)")
 		}
@@ -143,4 +157,34 @@ func (n *Notifier) send(ctx context.Context, e event) {
 		return
 	}
 	n.opts.Logger.Info("alert sent", "check", c.Name, "channel", c.Channel, "status", r.Status)
+}
+
+func certUnit(n int, unit string) string {
+	if n != 1 {
+		unit += "s"
+	}
+	return fmt.Sprintf("%d %s", n, unit)
+}
+
+func certMessage(c config.Check, cert config.Cert, remaining time.Duration) (string, string) {
+	days := int(remaining / (24 * time.Hour))
+	var left string
+	if days >= 1 {
+		left = certUnit(days, "day")
+	} else {
+		left = certUnit(max(int(remaining/time.Hour), 1), "hour")
+	}
+	next := 0
+	for _, threshold := range config.CertWarnDays {
+		if threshold < cert.Notified && threshold > next {
+			next = threshold
+		}
+	}
+	line := ""
+	if next > 0 {
+		line = fmt.Sprintf("  Next warning %d days before expiry\n", next)
+	}
+	subject := fmt.Sprintf("[up] %s: TLS certificate expires in %s", c.Name, left)
+	body := fmt.Sprintf("The certificate served by %s expires in %s\n\n  Monitor   %s\n  Issuer    %s\n%s\nIf the certificate is renewed, up will detect it and stop warning.\n", c.URL, left, c.Name, cert.Issuer, line)
+	return subject, body
 }

@@ -25,6 +25,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 - **Stale-daemon detection.** If the daemon stops, the TUI says so and keeps the last known statuses instead of marking everything DOWN.
 - **Retention.** Results older than 30 days are pruned. Monitor definitions are kept.
 - **Email alerts.** One email when a monitor goes down and one when it recovers, sent over SMTP and configured from the TUI.
+- **TLS expiry warnings.** HTTPS monitors show the days left on their certificate and email you at 14, 7 and 3 days before it expires.
 - **Temporary mute.** Hold a monitor's emails for 30 minutes to 7 days, for example during a deploy. Checks and history keep running and the mute ends by itself.
 - **Quieter alerts.** Optionally wait for several failures in a row before the first email, so one timeout does not wake anyone up.
 
@@ -112,6 +113,14 @@ When the mute ends, recipients get only what they do not already know:
 - Back up, but they had been told it was down before the mute: the recovery email.
 
 The daemon notices an end within one check interval. Muting is stored in the database, so it survives restarts.
+
+#### Certificate expiry
+
+For `https://` monitors `up` reads the certificate from the connection it already makes: no extra requests, and validation stays on, so an invalid or expired certificate still fails the check. The list gets a `CERT` column with the days left (amber under 14, red under 3) and the detail view shows the host, issuer, expiry and which warnings went out.
+
+The monitor's channel gets one email per threshold (14, 7 and 3 days), remembered across restarts. A certificate first seen with 2 days left produces one email, not three. A renewed certificate resets the thresholds without sending anything, and warnings wait while the monitor is muted. After a failed check the detail view shows the last known certificate and when it was observed.
+
+Set `TLS expiry` to `off` in the monitor form to skip all of this for one monitor (for example an internal service with a self-managed certificate): no warnings, no `CERT` value, and the stored certificate is forgotten. It is `on` by default and has no effect on `http://` monitors.
 
 ## Contributing
 

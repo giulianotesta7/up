@@ -268,7 +268,7 @@ func TestSaveFailureRetainsFormAndCanRetry(t *testing.T) {
 		t.Fatal("missing duplicate error")
 	}
 	// Wrap focus back to name and correct the duplicate in the retained form.
-	m, _ = press(t, m, keyTab, keyTab, keyTab, keyTab)
+	m, _ = press(t, m, keyTab, keyTab, keyTab, keyTab, keyTab)
 	m = replaceField(t, m, "api", "unique")
 	m, cmd = press(t, m, keyEnter)
 	m = finishCommand(t, m, cmd)

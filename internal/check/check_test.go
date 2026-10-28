@@ -22,6 +22,59 @@ func checkFor(url string, expected int, timeout time.Duration) config.Check {
 	return config.Check{Name: "api", URL: url, Interval: time.Minute, Timeout: timeout, ExpectedStatus: expected}
 }
 
+func TestRunCapturesTLSCertificate(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	ch := &Checker{Client: srv.Client(), Now: func() time.Time { return fixedNow }}
+	res := ch.Run(context.Background(), checkFor(srv.URL, 200, time.Second))
+	cert := srv.Certificate()
+	issuer := cert.Issuer.CommonName
+	if issuer == "" && len(cert.Issuer.Organization) > 0 {
+		issuer = cert.Issuer.Organization[0]
+	}
+	if res.Status != StatusDown || res.Cert == nil {
+		t.Fatalf("result = %+v, want down with certificate", res)
+	}
+	if res.Cert.Host != "127.0.0.1" || res.Cert.Issuer != issuer || res.Cert.Serial != cert.SerialNumber.Text(16) || !res.Cert.NotAfter.Equal(cert.NotAfter) {
+		t.Fatalf("certificate = %+v, want host, issuer, serial and expiry from server", res.Cert)
+	}
+}
+
+func TestRunCertificateFromFinalRedirectResponse(t *testing.T) {
+	final := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer final.Close()
+	redirect := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, strings.Replace(final.URL, "127.0.0.1", "example.com", 1), http.StatusFound)
+	}))
+	defer redirect.Close()
+	client := redirect.Client()
+	transport := client.Transport.(*http.Transport).Clone()
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		address = strings.Replace(address, "example.com:", "127.0.0.1:", 1)
+		return (&net.Dialer{}).DialContext(ctx, network, address)
+	}
+	client.Transport = transport
+	defer transport.CloseIdleConnections()
+	ch := &Checker{Client: client, Now: func() time.Time { return fixedNow }}
+	res := ch.Run(context.Background(), checkFor(redirect.URL, 200, time.Second))
+	if res.Status != StatusUp || res.Cert == nil || res.Cert.Host != "example.com" || res.Cert.Serial != final.Certificate().SerialNumber.Text(16) {
+		t.Fatalf("result = %+v, want final server certificate", res)
+	}
+}
+
+func TestRunPlainHTTPHasNoCertificate(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer srv.Close()
+	res := newChecker().Run(context.Background(), checkFor(srv.URL, 200, time.Second))
+	if res.Status != StatusUp || res.Cert != nil {
+		t.Fatalf("result = %+v, want up without certificate", res)
+	}
+}
+
 func TestRunUpWhenStatusMatches(t *testing.T) {
 	var gotMethod, gotUA string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

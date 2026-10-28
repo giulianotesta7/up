@@ -38,6 +38,9 @@ type Service struct {
 	// reconciled by the daemon. Use Muted.
 	Mute    config.Mute
 	HasMute bool
+	// Cert is the last certificate observed for an HTTPS monitor.
+	Cert    config.Cert
+	HasCert bool
 }
 
 // Muted reports whether the service's alerts are being held at now.
@@ -115,6 +118,7 @@ type Store interface {
 	LastBeat(context.Context) (time.Time, bool, error)
 	UptimeWindow(context.Context, string, time.Time, time.Time) (time.Duration, time.Duration, int, error)
 	Mutes(context.Context) ([]config.Mute, error)
+	Certs(context.Context) ([]config.Cert, error)
 	SetMute(context.Context, string, time.Time, bool) error
 	Unmute(context.Context, string, time.Time) error
 	AddCheck(context.Context, config.Check) error
@@ -162,6 +166,10 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	certs, err := s.Certs(ctx)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	var observedMonitors int
 	checks, err := s.Checks(ctx)
 	if err != nil {
@@ -169,6 +177,11 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 	}
 	for _, c := range checks {
 		svc := Service{Check: c}
+		for _, cert := range certs {
+			if cert.Check == c.Name && !c.TLSOff {
+				svc.Cert, svc.HasCert = cert, true
+			}
+		}
 		for _, mute := range mutes {
 			if mute.Check == c.Name {
 				svc.Mute, svc.HasMute = mute, true
