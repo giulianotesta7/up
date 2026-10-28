@@ -57,7 +57,7 @@ func TestGraphDetailViews(t *testing.T) {
 		input []int
 		want  string
 	}{
-		{[]int{420, 100, 100, 100, 100, -1, -1}, "avg 164ms · p95 420ms · max 420ms · 2 failed of 7"},
+		{[]int{420, 100, 100, 100, 100, -1, -1}, "AVG      P95      MAX      FAILED\n  164ms    420ms    420ms    2 of 7"},
 		{[]int{-1, -1}, "no successful checks · 2 failed of 2"},
 	} {
 		snap.Services[0].Recent = samples(tc.input...)
@@ -66,7 +66,7 @@ func TestGraphDetailViews(t *testing.T) {
 			m.detail = true
 			next, _ := m.Update(tea.WindowSizeMsg{Width: width})
 			out := view(next.(Model))
-			if !strings.Contains(out, tc.want) || !strings.Contains(out, "older") || !strings.Contains(out, "now") || !strings.Contains(out, "0│") || !strings.Contains(out, "░") {
+			if !strings.Contains(out, tc.want) || !strings.Contains(out, "older") || !strings.Contains(out, "now") || !strings.Contains(out, "░") {
 				t.Fatal(out)
 			}
 			baseline := ""
@@ -75,7 +75,7 @@ func TestGraphDetailViews(t *testing.T) {
 					baseline = line
 				}
 			}
-			wantWidth := 28
+			wantWidth := recentLimit
 			if width == 25 {
 				wantWidth = 14
 			}
@@ -109,7 +109,7 @@ func TestDetailStatsUseVisibleWindow(t *testing.T) {
 	m.detail = true
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 19})
 	out := view(next.(Model))
-	if !strings.Contains(out, "avg 10ms · p95 10ms · max 10ms · 0 failed of 8") || strings.Contains(out, "1s│") {
+	if !strings.Contains(out, "AVG      P95      MAX      FAILED\n  10ms     10ms     10ms     0 of 8") || strings.Contains(out, "1s│") {
 		t.Fatal(out)
 	}
 }
@@ -124,7 +124,7 @@ func TestLoadGraphWindow(t *testing.T) {
 	if err := s.SetChecks(ctx, testChecks[:1]); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 70; i++ {
 		r := up("api", "03:44:30")
 		r.At = r.At.Add(time.Duration(i) * time.Second)
 		if err := s.Record(ctx, r); err != nil {
@@ -136,7 +136,7 @@ func TestLoadGraphWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := snap.Services[0]
-	if len(svc.Recent) != 28 || svc.Latest != svc.Recent[0] || !svc.HasResult || !svc.Recent[27].At.Equal(at("03:44:32")) {
+	if len(svc.Recent) != 60 || svc.Latest != svc.Recent[0] || !svc.HasResult || !svc.Recent[59].At.Equal(at("03:44:40")) {
 		t.Fatalf("window: %+v", svc)
 	}
 }

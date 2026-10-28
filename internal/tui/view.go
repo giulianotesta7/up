@@ -162,12 +162,13 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 			chartWidth = min(chartWidth, max(8, width-graphLabelWidth-1))
 		}
 		window := graphWindow(s.Recent, chartWidth)
-		b.WriteString("  " + strings.Join(chart(window, chartWidth, 4), "\n  ") + "\n")
+		b.WriteString("  " + strings.Join(chart(window, chartWidth, 5), "\n  ") + "\n")
 		avg, p95, maximum, failed, total := latencyStats(window)
 		if failed == total {
-			fmt.Fprintf(&b, "  no successful checks · %d failed of %d\n", failed, total)
+			fmt.Fprintf(&b, "\n  no successful checks · %d failed of %d\n", failed, total)
 		} else {
-			fmt.Fprintf(&b, "  avg %s · p95 %s · max %s · %d failed of %d\n", formatLatency(avg), formatLatency(p95), formatLatency(maximum), failed, total)
+			_, hi, _ := chartScale(window)
+			b.WriteString("\n" + renderLatencyStats(avg, p95, maximum, hi, failed, total))
 		}
 	}
 
@@ -356,4 +357,26 @@ func renderKeys() string {
 		"  " + accentStyle.Render("? or esc") + "  " + helpStyle.Render("close"),
 	}
 	return strings.Join(lines, "\n")
+}
+
+// renderLatencyStats lays the window's numbers out as a small table: dim
+// headers over the values, in fixed columns. A maximum above the chart scale is
+// amber, like the clipped bars.
+func renderLatencyStats(avg, p95, maximum, scaleTop time.Duration, failed, total int) string {
+	const column = 9
+	pad := func(text string) string {
+		return text + strings.Repeat(" ", max(1, column-ansi.StringWidth(text)))
+	}
+	maxStyle := lipgloss.NewStyle()
+	if maximum > scaleTop {
+		maxStyle = slowStyle
+	}
+	failedStyle := upStyle
+	if failed > 0 {
+		failedStyle = downStyle
+	}
+	header := "  " + headerStyle.Render(pad("AVG")+pad("P95")+pad("MAX")+"FAILED")
+	values := "  " + pad(formatLatency(avg)) + pad(formatLatency(p95)) + maxStyle.Render(pad(formatLatency(maximum))) +
+		failedStyle.Render(fmt.Sprint(failed)) + helpStyle.Render(fmt.Sprintf(" of %d", total))
+	return header + "\n" + values + "\n"
 }
