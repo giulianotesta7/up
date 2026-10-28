@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -473,13 +474,31 @@ func (m Model) View() tea.View {
 	if m.notice != "" && !split {
 		content += "\n" + warnStyle.Render(m.notice)
 	}
+	smtpParent, smtpChild := "", ""
 	if m.smtpScreen {
-		content = renderSMTPList(m.snap, m.smtpSelected, now, m.err)
+		parent := renderSMTPList(m.snap, m.smtpSelected, now, m.err)
+		child := ""
 		if m.smtpForm != nil {
-			content = renderSMTPForm(*m.smtpForm, m.snap, now, m.err)
+			child = renderSMTPForm(*m.smtpForm, m.snap, now, m.err)
 		}
 		if m.smtpDelete != nil {
-			content = renderSMTPDelete(*m.smtpDelete, m.snap, now, m.err)
+			child = renderSMTPDelete(*m.smtpDelete, m.snap, now, m.err)
+		}
+		title, body := splitModalScreen(parent)
+		var fits bool
+		smtpParent, fits = renderModal(title, body, m.width, m.height)
+		if !fits {
+			content = parent
+			split = false
+		}
+		if child != "" {
+			title, body = splitModalScreen(child)
+			smtpChild, fits = renderModal(title, body, m.width, m.height)
+			if !fits {
+				smtpParent = ""
+				content = child
+				split = false
+			}
 		}
 	}
 	if m.channelScreen {
@@ -500,7 +519,7 @@ func (m Model) View() tea.View {
 		rule = renderHostRuleCells(m.snap, m.hostname, now, m.width, position)
 	}
 	content = renderTitleWidth(m.snap, m.width) + "\n" + rule + "\n" + content
-	if modal != "" || (m.help && helpPopupFits(m.width, m.height)) {
+	if modal != "" || smtpParent != "" || smtpChild != "" || (m.help && helpPopupFits(m.width, m.height)) {
 		content = padForPopup(content, m.height)
 	}
 	content += "\n" + helpStyle.Render("database: "+m.databasePath)
@@ -518,6 +537,28 @@ func (m Model) View() tea.View {
 			content = truncateLines(content, m.width)
 		}
 		content = overlayPopup(content, modal, m.width, m.height)
+	}
+	if smtpParent != "" || smtpChild != "" {
+		if m.width > 0 {
+			content = truncateLines(content, m.width)
+		}
+		if smtpParent != "" {
+			content = overlayPopup(content, smtpParent, m.width, m.height)
+		}
+		if smtpChild != "" && smtpParent == "" {
+			content = overlayPopup(content, smtpChild, m.width, m.height)
+		} else if smtpChild != "" {
+			height := m.height
+			if height <= 0 {
+				height = strings.Count(content, "\n") + 1
+			}
+			parentHeight := strings.Count(smtpParent, "\n") + 1
+			childHeight := strings.Count(smtpChild, "\n") + 1
+			parentTop := max(0, (height-parentHeight)/2)
+			childTop := max((height-childHeight)/2, parentTop+1)
+			childTop = min(childTop, max(0, height-childHeight-1))
+			content = overlayPopup(content, smtpChild, m.width, childHeight+2*childTop)
+		}
 	}
 	// Lipgloss v2 emits truecolor styles; colorprofile only recognizes boolean
 	// NO_COLOR values. Honor every nonempty value, including in direct renders.
