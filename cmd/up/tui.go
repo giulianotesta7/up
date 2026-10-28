@@ -22,7 +22,8 @@ a confirmed delete removes history and cannot be undone.
 Manage SMTP servers and channels for email alerts with s and c; choose a monitor's channel in its form.
 SMTP passwords are encrypted with the key that 'up serve' keeps in <db>.key; run it once before entering a password, and back up that file with the database.
 
-Keys: ↑/↓ or k/j select · enter details · n new monitor · e edit · d delete · s SMTP servers · c channels · a toggle animation · ? all keys · esc back · q/ctrl+c quit
+Keys: ↑/↓ or k/j select · enter details (small terminals) · n new monitor · e edit · d delete · s SMTP servers · c channels · a toggle animation · ? all keys · esc back · q/ctrl+c quit
+Terminals of at least 110x30 show the selected monitor's detail beside the list, with an activity feed below; enter is not needed there.
 Form: tab/shift+tab focus · enter save · esc cancel · ctrl+c quit
 Delete: y delete · n cancel · esc cancel · ctrl+c quit
 

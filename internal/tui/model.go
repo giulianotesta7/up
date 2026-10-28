@@ -55,6 +55,7 @@ type Model struct {
 	snap              Snapshot
 	err               error
 	width             int
+	height            int
 	selected          int
 	detail            bool
 	form              *monitorForm
@@ -113,7 +114,10 @@ func (m Model) load() tea.Msg {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
+		m.width, m.height = msg.Width, msg.Height
+		if m.splitMode() {
+			m.detail = false
+		}
 		return m, nil
 	case snapshotMsg:
 		if msg.generation != m.generation {
@@ -189,7 +193,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.sweepPosition++
-		if m.sweepPosition >= ruleWidth(m.width)-1 || !sweepEnabled(m.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
+		cells := ruleWidth(m.width)
+		if m.splitMode() {
+			cells = m.width
+		}
+		if m.sweepPosition >= cells-1 || !sweepEnabled(m.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
 			m.sweeping = false
 			return m, nil
 		}
@@ -210,6 +218,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.detail = m.form.editing && m.form.returnDetail
 			m.form = nil
+			if m.splitMode() {
+				m.detail = false
+			}
 			m.selectName = msg.name
 		}
 		return m, m.load
@@ -343,6 +354,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.splitMode() {
+		m.detail = false
+	}
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
@@ -415,7 +429,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.selected++
 		}
 	case "enter":
-		if len(m.snap.Services) > 0 {
+		if len(m.snap.Services) > 0 && !m.splitMode() {
 			m.detail = true
 		}
 	case "esc", "backspace":
@@ -428,7 +442,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) View() tea.View {
 	now := m.now()
 	content := renderList(m.snap, m.selected, now, m.err, m.width)
-	if m.detail && m.selected < len(m.snap.Services) {
+	if m.splitMode() {
+		content = renderSplit(m.snap, m.selected, now, m.err, m.width, m.height, m.notice)
+	} else if m.detail && m.selected < len(m.snap.Services) {
 		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width)
 	}
 	if m.help {
@@ -443,7 +459,7 @@ func (m Model) View() tea.View {
 	if m.mute != nil {
 		content = renderMute(*m.mute, m.snap, now, m.err)
 	}
-	if m.notice != "" {
+	if m.notice != "" && !m.splitMode() {
 		content += "\n" + warnStyle.Render(m.notice)
 	}
 	if m.smtpScreen {
@@ -468,8 +484,15 @@ func (m Model) View() tea.View {
 	if m.sweeping && sweepEnabled(m.snap, now, os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
 		position = m.sweepPosition
 	}
-	content = renderTitleWidth(m.snap, m.width) + "\n" + renderHostRule(m.snap, m.hostname, now, m.width, position) + "\n" + content
+	rule := renderHostRule(m.snap, m.hostname, now, m.width, position)
+	if m.splitMode() {
+		rule = renderHostRuleCells(m.snap, m.hostname, now, m.width, position)
+	}
+	content = renderTitleWidth(m.snap, m.width) + "\n" + rule + "\n" + content
 	content += "\n" + helpStyle.Render("database: "+m.databasePath)
+	if m.splitMode() {
+		content = truncateLines(content, m.width)
+	}
 	// Lipgloss v2 emits truecolor styles; colorprofile only recognizes boolean
 	// NO_COLOR values. Honor every nonempty value, including in direct renders.
 	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {

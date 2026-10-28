@@ -91,7 +91,17 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 	return b.String()
 }
 
+type detailOptions struct {
+	compact               bool
+	config, cert, outages bool
+	chartRows             int
+}
+
 func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width int) string {
+	return renderDetailWithOptions(snap, s, now, loadErr, width, detailOptions{config: true, cert: true, outages: true, chartRows: 5})
+}
+
+func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr error, width int, opts detailOptions) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + s.Check.URL + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
@@ -130,27 +140,29 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 	}
 	field("Down since", downSince)
 
-	section("CONFIG")
-	field("Interval", s.Check.Interval.String())
-	field("Timeout", s.Check.Timeout.String())
-	field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
-	channel := s.Check.Channel
-	if channel == "" {
-		channel = "none"
-	}
-	for _, c := range snap.Channels {
-		if c.Name == s.Check.Channel && s.Check.Channel != "" {
-			noun := "recipients"
-			if len(c.Recipients) == 1 {
-				noun = "recipient"
-			}
-			channel += " " + helpStyle.Render(fmt.Sprintf("(%s via %s → %d %s)", c.Kind, c.SMTPServer, len(c.Recipients), noun))
-			break
+	if opts.config {
+		section("CONFIG")
+		field("Interval", s.Check.Interval.String())
+		field("Timeout", s.Check.Timeout.String())
+		field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
+		channel := s.Check.Channel
+		if channel == "" {
+			channel = "none"
 		}
-	}
-	field("Channel", channel)
-	if !s.thresholdsDefault() {
-		field("Alerting", fmt.Sprintf("after %s · recovers after %s", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success")))
+		for _, c := range snap.Channels {
+			if c.Name == s.Check.Channel && s.Check.Channel != "" {
+				noun := "recipients"
+				if len(c.Recipients) == 1 {
+					noun = "recipient"
+				}
+				channel += " " + helpStyle.Render(fmt.Sprintf("(%s via %s → %d %s)", c.Kind, c.SMTPServer, len(c.Recipients), noun))
+				break
+			}
+		}
+		field("Channel", channel)
+		if !s.thresholdsDefault() {
+			field("Alerting", fmt.Sprintf("after %s · recovers after %s", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success")))
+		}
 	}
 
 	section("LATENCY")
@@ -159,10 +171,14 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 	} else {
 		chartWidth := recentLimit
 		if width > 0 {
-			chartWidth = min(chartWidth, max(8, width-graphLabelWidth-1))
+			padding := 0
+			if opts.compact {
+				padding = 2
+			}
+			chartWidth = min(chartWidth, max(8, width-graphLabelWidth-1-padding))
 		}
 		window := graphWindow(s.Recent, chartWidth)
-		b.WriteString("  " + strings.Join(chart(window, chartWidth, 5), "\n  ") + "\n")
+		b.WriteString("  " + strings.Join(chart(window, chartWidth, opts.chartRows), "\n  ") + "\n")
 		avg, p95, maximum, failed, total := latencyStats(window)
 		if failed == total {
 			fmt.Fprintf(&b, "\n  no successful checks · %d failed of %d\n", failed, total)
@@ -172,22 +188,25 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 		}
 	}
 
-	if block := renderCert(s, now); block != "" {
-		b.WriteString("\n" + block)
-	}
-
-	section("RECENT OUTAGES")
-	if len(s.Outages) == 0 {
-		b.WriteString("  No outages recorded.\n")
-	}
-	for _, o := range s.Outages {
-		if o.Ongoing {
-			fmt.Fprintf(&b, "  %s → ongoing   %s\n", formatTime(o.Start, now), o.Error)
-			continue
+	if opts.cert {
+		if block := renderCert(s, now); block != "" {
+			b.WriteString("\n" + block)
 		}
-		fmt.Fprintf(&b, "  %s → %s (%s)   %s\n", formatTime(o.Start, now), formatTime(o.End, now), o.End.Sub(o.Start), o.Error)
 	}
 
+	if opts.outages {
+		section("RECENT OUTAGES")
+		if len(s.Outages) == 0 {
+			b.WriteString("  No outages recorded.\n")
+		}
+		for _, o := range s.Outages {
+			if o.Ongoing {
+				fmt.Fprintf(&b, "  %s → ongoing   %s\n", formatTime(o.Start, now), o.Error)
+				continue
+			}
+			fmt.Fprintf(&b, "  %s → %s (%s)   %s\n", formatTime(o.Start, now), formatTime(o.End, now), o.End.Sub(o.Start), o.Error)
+		}
+	}
 	b.WriteString("\n" + renderHelp("esc back · e edit · d delete · m mute · ? more · q quit"))
 	return b.String()
 }
