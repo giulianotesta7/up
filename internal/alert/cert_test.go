@@ -31,7 +31,7 @@ func TestCertificateQueueOrderAndMinuteFormatting(t *testing.T) {
 					t.Fatal(msg.Subject)
 				}
 			case 1:
-				if msg.Subject != "[up] api: TLS certificate expires in 1 hour" || msg.Body != "The certificate served by example.com expires on 2026-11-02 10:00 UTC (30 minutes from now).\n\n  Monitor   api (https://example.com)\n  Issuer    CA\n\nIf the certificate is renewed automatically, up will\ndetect the new one and stop warning.\n" {
+				if msg.Subject != "[up] api: TLS certificate expires in 1 hour" || msg.Body != "The certificate served by https://example.com expires in 1 hour\n\n  Monitor   api\n  Issuer    CA\n\nIf the certificate is renewed, up will detect it and stop warning.\n" {
 					t.Fatalf("message: %+v", msg)
 				}
 			case 2:
@@ -56,7 +56,7 @@ func TestNotifierCertificateMessages(t *testing.T) {
 	n.NotifyCert(c, cert, 6*24*time.Hour+21*time.Hour)
 	select {
 	case m := <-sender.messages:
-		want := "The certificate served by example.com expires on 2026-11-02 10:00 UTC (6 days 21 hours from now).\n\n  Monitor   api (https://example.com)\n  Issuer    Example CA\n  Next warning at 3 days.\n\nIf the certificate is renewed automatically, up will\ndetect the new one and stop warning.\n"
+		want := "The certificate served by https://example.com expires in 6 days\n\n  Monitor   api\n  Issuer    Example CA\n  Next warning 3 days before expiry\n\nIf the certificate is renewed, up will detect it and stop warning.\n"
 		if m.Subject != "[up] api: TLS certificate expires in 6 days" || m.Body != want {
 			t.Fatalf("message = %+v", m)
 		}
@@ -67,7 +67,7 @@ func TestNotifierCertificateMessages(t *testing.T) {
 	n.NotifyCert(c, cert, 90*time.Minute)
 	select {
 	case m := <-sender.messages:
-		if m.Subject != "[up] api: TLS certificate expires in 1 hour" || m.Body != "The certificate served by example.com expires on 2026-11-02 10:00 UTC (1 hour from now).\n\n  Monitor   api (https://example.com)\n  Issuer    Example CA\n\nIf the certificate is renewed automatically, up will\ndetect the new one and stop warning.\n" {
+		if m.Subject != "[up] api: TLS certificate expires in 1 hour" || m.Body != "The certificate served by https://example.com expires in 1 hour\n\n  Monitor   api\n  Issuer    Example CA\n\nIf the certificate is renewed, up will detect it and stop warning.\n" {
 			t.Fatalf("message = %+v", m)
 		}
 	case <-time.After(5 * time.Second):
