@@ -201,7 +201,7 @@ func TestFormSavePersistsAndSelects(t *testing.T) {
 		t.Fatalf("persisted %+v", c)
 	}
 	m, _ = press(t, m, keyEnter)
-	if !strings.Contains(view(m), "Status: PENDING") || !strings.Contains(view(m), "https://example.com") {
+	if !strings.Contains(view(m), "Status      PENDING") || !strings.Contains(view(m), "https://example.com") {
 		t.Fatalf("selection/detail:\n%s", view(m))
 	}
 }

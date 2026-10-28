@@ -13,7 +13,7 @@ import (
 func TestIdentityViews(t *testing.T) {
 	m := modelWith(seededSnapshot(t, now))
 	m.databasePath = "/shared/up.db"
-	// Previous fresh fixture line counts: list 9, detail 14, form 10, delete 6.
+	// Previous fresh fixture line counts: list 9, detail 22 (29 with section spacing), form 10, delete 6.
 	// The list's blank becomes the rule; other views retain their title below it.
 	for _, tc := range []struct {
 		name  string
@@ -22,7 +22,7 @@ func TestIdentityViews(t *testing.T) {
 		help  string
 	}{
 		{"list", tea.KeyPressMsg{}, 9, "↑/↓ select · enter open · n new · e edit · d delete · m mute · ? more · q quit"},
-		{"detail", keyEnter, 22, "esc back · e edit · d delete · m mute · ? more · q quit"},
+		{"detail", keyEnter, 29, "esc back · e edit · d delete · m mute · ? more · q quit"},
 		{"form", keyN, 15, "tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"},
 		{"delete", keyD, 7, "y delete · n cancel"},
 	} {

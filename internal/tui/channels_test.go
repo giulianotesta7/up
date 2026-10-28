@@ -81,7 +81,7 @@ func TestChannelsNavigationAndMissingServer(t *testing.T) {
 		t.Fatalf("invalid save %v %v", channels, err)
 	}
 	m, _ = press(t, m, keyEsc, keyEsc)
-	requireText(t, m, "Recent outages:")
+	requireText(t, m, "RECENT OUTAGES")
 	m, _ = press(t, m, keyEsc)
 	requireText(t, m, "MONITOR")
 }

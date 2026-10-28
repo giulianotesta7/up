@@ -96,23 +96,20 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + s.Check.URL + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
 
-	fmt.Fprintf(&b, "Interval: %s   Timeout: %s   Expected status: %d\n", s.Check.Interval, s.Check.Timeout, s.Check.ExpectedStatus)
-	channelName := s.Check.Channel
-	if channelName == "" {
-		channelName = "none"
+	// Sections are separated by one blank line; a header sits right above its rows.
+	section := func(title string) {
+		b.WriteString("\n" + headerStyle.Render(title) + "\n")
 	}
-	fmt.Fprintf(&b, "Channel: %s", channelName)
-	for _, c := range snap.Channels {
-		if c.Name == s.Check.Channel && s.Check.Channel != "" {
-			noun := "recipients"
-			if len(c.Recipients) == 1 {
-				noun = "recipient"
-			}
-			fmt.Fprint(&b, " "+helpStyle.Render(fmt.Sprintf("(%s via %s → %d %s)", c.Kind, c.SMTPServer, len(c.Recipients), noun)))
-			break
-		}
+	field := func(label, value string) {
+		fmt.Fprintf(&b, "  %-10s  %s\n", label, value)
 	}
-	b.WriteString("\n")
+
+	b.WriteString("\n" + headerStyle.Render("STATUS") + "\n")
+	status := styledLabel(s, 0)
+	if s.HasResult {
+		status += "   last check " + ago(now, s.Latest.At) + " (" + formatLatency(s.Latest.Latency) + ")"
+	}
+	field("Status", status)
 	if s.Muted(now) {
 		held := "nothing pending"
 		switch s.Pending() {
@@ -121,40 +118,56 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 		case "recovery":
 			held = "1 email pending (recovery)"
 		}
-		fmt.Fprintf(&b, "Muted: %s\n", warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))+" · "+held)
+		field("Muted", warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))+" · "+held)
 	}
-	if !s.thresholdsDefault() {
-		fmt.Fprintf(&b, "Alerting: after %s · recovers after %s\n", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success"))
-	}
-	fmt.Fprintf(&b, "Status: %s", styledLabel(s, 0))
-	if s.HasResult {
-		fmt.Fprintf(&b, "   Last check: %s (%s)", ago(now, s.Latest.At), formatLatency(s.Latest.Latency))
-	}
-	b.WriteString("\n")
-	fmt.Fprintf(&b, "Last error: %s\n", orDash(s.Latest.Error))
+	field("Last error", orDash(s.Latest.Error))
 	if streak := streakLine(s, now); streak != "" {
-		b.WriteString(streak + "\n")
+		field("Streak", streak)
 	}
 	downSince := "—"
 	if !s.DownSince.IsZero() {
 		downSince = fmt.Sprintf("%s (%s)", formatTime(s.DownSince, now), ago(now, s.DownSince))
 	}
-	fmt.Fprintf(&b, "Down since: %s\n\n", downSince)
+	field("Down since", downSince)
 
+	section("CONFIG")
+	field("Interval", s.Check.Interval.String())
+	field("Timeout", s.Check.Timeout.String())
+	field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
+	channel := s.Check.Channel
+	if channel == "" {
+		channel = "none"
+	}
+	for _, c := range snap.Channels {
+		if c.Name == s.Check.Channel && s.Check.Channel != "" {
+			noun := "recipients"
+			if len(c.Recipients) == 1 {
+				noun = "recipient"
+			}
+			channel += " " + helpStyle.Render(fmt.Sprintf("(%s via %s → %d %s)", c.Kind, c.SMTPServer, len(c.Recipients), noun))
+			break
+		}
+	}
+	field("Channel", channel)
+	if !s.thresholdsDefault() {
+		field("Alerting", fmt.Sprintf("after %s · recovers after %s", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success")))
+	}
+
+	section("LATENCY")
 	if len(s.Recent) == 0 {
-		b.WriteString("No checks yet.\n")
+		b.WriteString("  No checks yet.\n")
 	} else {
 		chartWidth := recentLimit
 		if width > 0 {
 			chartWidth = min(chartWidth, max(8, width-graphLabelWidth-1))
 		}
 		window := graphWindow(s.Recent, chartWidth)
-		b.WriteString(strings.Join(chart(window, chartWidth, 4), "\n") + "\n")
+		b.WriteString("  " + strings.Join(chart(window, chartWidth, 4), "\n  ") + "\n")
 		avg, p95, maximum, failed, total := latencyStats(window)
 		if failed == total {
-			fmt.Fprintf(&b, "no successful checks · %d failed of %d\n", failed, total)
+			fmt.Fprintf(&b, "  no successful checks · %d failed of %d\n", failed, total)
 		} else {
-			fmt.Fprintf(&b, "avg %s · p95 %s · max %s · %d failed of %d\n", formatLatency(avg), formatLatency(p95), formatLatency(maximum), failed, total)
+			fmt.Fprintf(&b, "  avg %s · p95 %s · max %s · %d failed of %d\n", formatLatency(avg), formatLatency(p95), formatLatency(maximum), failed, total)
 		}
 	}
 
@@ -162,7 +175,7 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 		b.WriteString("\n" + block)
 	}
 
-	b.WriteString("\nRecent outages:\n")
+	section("RECENT OUTAGES")
 	if len(s.Outages) == 0 {
 		b.WriteString("  No outages recorded.\n")
 	}
@@ -264,7 +277,7 @@ func streakLine(s Service, now time.Time) string {
 	if n < 1 || n > len(s.Recent) {
 		return ""
 	}
-	return fmt.Sprintf("Streak: %d consecutive %s since %s", n, pluralNoun(n, noun), formatTime(s.Recent[n-1].At, now))
+	return fmt.Sprintf("%d consecutive %s since %s", n, pluralNoun(n, noun), formatTime(s.Recent[n-1].At, now))
 }
 
 func pluralNoun(n int, noun string) string {

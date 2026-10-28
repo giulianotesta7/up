@@ -45,7 +45,7 @@ func renderCert(s Service, now time.Time) string {
 	cert := s.Cert
 	remaining := cert.NotAfter.Sub(now)
 	var b strings.Builder
-	b.WriteString("TLS certificate")
+	b.WriteString(headerStyle.Render("CERTIFICATE"))
 	if s.HasResult && s.Latest.Status != "up" && cert.Observed.Before(s.Latest.At) {
 		b.WriteString("  " + warnStyle.Render("last known, observed "+ago(now, cert.Observed)))
 	}

@@ -41,9 +41,9 @@ func TestEscFromAlertScreensReturnsToDetail(t *testing.T) {
 	m = next.(Model)
 	for _, key := range []string{"s", "c"} {
 		m, _ = press(t, m, keyEnter)
-		requireText(t, m, "Recent outages:")
+		requireText(t, m, "RECENT OUTAGES")
 		m, _ = press(t, m, map[string]tea.KeyPressMsg{"s": keyS, "c": keyC}[key], keyEsc)
-		requireText(t, m, "Recent outages:")
+		requireText(t, m, "RECENT OUTAGES")
 		m, _ = press(t, m, keyEsc)
 	}
 }

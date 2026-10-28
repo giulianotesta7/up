@@ -78,9 +78,9 @@ func TestDetailExplainsStreakAndRule(t *testing.T) {
 	snap := quietSnapshot(t, check.StatusUp, check.StatusDown, check.StatusDown)
 	detail := ansi.Strip(renderDetail(snap, snap.Services[0], now, nil, 100))
 	for _, want := range []string{
-		"Alerting: after 3 failures · recovers after 2 successes",
-		"Status: FAILING 2/3",
-		"Streak: 2 consecutive failures since Oct 25 03:00:30",
+		"Alerting    after 3 failures · recovers after 2 successes",
+		"Status      FAILING 2/3",
+		"Streak      2 consecutive failures since Oct 25 03:00:30",
 	} {
 		if !strings.Contains(detail, want) {
 			t.Fatalf("detail missing %q:\n%s", want, detail)
@@ -88,7 +88,7 @@ func TestDetailExplainsStreakAndRule(t *testing.T) {
 	}
 	seeded := seededSnapshot(t, now)
 	plain := ansi.Strip(renderDetail(seeded, seeded.Services[0], now, nil, 100))
-	if strings.Contains(plain, "Alerting:") || strings.Contains(plain, "Streak:") {
+	if strings.Contains(plain, "Alerting ") || strings.Contains(plain, "Streak ") {
 		t.Fatalf("default thresholds changed the detail:\n%s", plain)
 	}
 }
