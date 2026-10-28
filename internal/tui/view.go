@@ -31,12 +31,23 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		}
 		// MUTED is always shown (13 cells), so its place does not move when a
 		// mute starts or ends.
-		showTrend := width <= 0 || width >= max(78, nameWidth+55+statusWidth)
-		row := func(marker, dot, name, status, latency, trend, last, muted, reason string) string {
+		anyCert := false
+		for _, s := range snap.Services {
+			anyCert = anyCert || s.HasCert
+		}
+		certWidth := 0
+		if anyCert {
+			certWidth = 9
+		}
+		showTrend := width <= 0 || width >= max(78, nameWidth+55+statusWidth+certWidth)
+		row := func(marker, dot, name, status, latency, trend, cert, last, muted, reason string) string {
 			padding := strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name)))
 			middle := ""
 			if showTrend {
 				middle = "  " + trend + strings.Repeat(" ", max(0, 16-ansi.StringWidth(trend)))
+			}
+			if anyCert {
+				middle += "  " + cert + strings.Repeat(" ", max(0, 7-ansi.StringWidth(cert)))
 			}
 			prefix := marker + " " + dot + " " + name + padding + "  " + status + fmt.Sprintf("  %8s", latency) + middle
 			last = fmt.Sprintf("%-10s  %s", last, muted+strings.Repeat(" ", max(0, 13-ansi.StringWidth(muted))))
@@ -45,7 +56,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			}
 			return strings.TrimRight(prefix+fmt.Sprintf("  %-10s  %s", last, reason), " ")
 		}
-		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", fmt.Sprintf("%-*s", statusWidth, "STATUS"), "LATENCY", "TREND (16)", "LAST CHECK", "MUTED", "")) + "\n")
+		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", fmt.Sprintf("%-*s", statusWidth, "STATUS"), "LATENCY", "TREND (16)", "CERT", "LAST CHECK", "MUTED", "")) + "\n")
 		for i, s := range snap.Services {
 			marker := " "
 			if i == selected {
@@ -60,11 +71,19 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			if i == selected {
 				name = selectedNameStyle.Render(name)
 			}
+			cert := ""
+			if anyCert {
+				cert = helpStyle.Render("—")
+			}
+			if s.HasCert {
+				remaining := s.Cert.NotAfter.Sub(now)
+				cert = certStyle(remaining).Render(certLeft(remaining))
+			}
 			muted := ""
 			if s.Muted(now) {
 				muted = warnStyle.Render("⏸ " + timeLeft(s.Mute.Until.Sub(now)) + " left")
 			}
-			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, statusWidth), latency, sparkline(s.Recent, 16), last, muted, reason) + "\n")
+			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, statusWidth), latency, sparkline(s.Recent, 16), cert, last, muted, reason) + "\n")
 		}
 	}
 
@@ -137,6 +156,10 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 		} else {
 			fmt.Fprintf(&b, "avg %s · p95 %s · max %s · %d failed of %d\n", formatLatency(avg), formatLatency(p95), formatLatency(maximum), failed, total)
 		}
+	}
+
+	if block := renderCert(s, now); block != "" {
+		b.WriteString("\n" + block)
 	}
 
 	b.WriteString("\nRecent outages:\n")
