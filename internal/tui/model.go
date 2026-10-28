@@ -474,7 +474,7 @@ func (m Model) View() tea.View {
 	if m.notice != "" && !split {
 		content += "\n" + warnStyle.Render(m.notice)
 	}
-	smtpParent, smtpChild := "", ""
+	stackParent, stackChild := "", ""
 	if m.smtpScreen {
 		parent := renderSMTPList(m.snap, m.smtpSelected, now, m.err)
 		child := ""
@@ -486,28 +486,45 @@ func (m Model) View() tea.View {
 		}
 		title, body := splitModalScreen(parent)
 		var fits bool
-		smtpParent, fits = renderModal(title, body, m.width, m.height)
+		stackParent, fits = renderModal(title, body, m.width, m.height)
 		if !fits {
 			content = parent
 			split = false
 		}
 		if child != "" {
 			title, body = splitModalScreen(child)
-			smtpChild, fits = renderModal(title, body, m.width, m.height)
+			stackChild, fits = renderModal(title, body, m.width, m.height)
 			if !fits {
-				smtpParent = ""
+				stackParent = ""
 				content = child
 				split = false
 			}
 		}
 	}
 	if m.channelScreen {
-		content = renderChannelList(m.snap, m.channelSelected, now, m.err)
+		parent := renderChannelList(m.snap, m.channelSelected, now, m.err)
+		child := ""
 		if m.channelForm != nil {
-			content = renderChannelForm(*m.channelForm, m.snap, now, m.err)
+			child = renderChannelForm(*m.channelForm, m.snap, now, m.err)
 		}
 		if m.channelDelete != nil {
-			content = renderChannelDelete(*m.channelDelete, m.snap, now, m.err)
+			child = renderChannelDelete(*m.channelDelete, m.snap, now, m.err)
+		}
+		title, body := splitModalScreen(parent)
+		var fits bool
+		stackParent, fits = renderModal(title, body, m.width, m.height)
+		if !fits {
+			content = parent
+			split = false
+		}
+		if child != "" {
+			title, body = splitModalScreen(child)
+			stackChild, fits = renderModal(title, body, m.width, m.height)
+			if !fits {
+				stackParent = ""
+				content = child
+				split = false
+			}
 		}
 	}
 	position := -1
@@ -519,7 +536,7 @@ func (m Model) View() tea.View {
 		rule = renderHostRuleCells(m.snap, m.hostname, now, m.width, position)
 	}
 	content = renderTitleWidth(m.snap, m.width) + "\n" + rule + "\n" + content
-	if modal != "" || smtpParent != "" || smtpChild != "" || (m.help && helpPopupFits(m.width, m.height)) {
+	if modal != "" || stackParent != "" || stackChild != "" || (m.help && helpPopupFits(m.width, m.height)) {
 		content = padForPopup(content, m.height)
 	}
 	content += "\n" + helpStyle.Render("database: "+m.databasePath)
@@ -538,26 +555,26 @@ func (m Model) View() tea.View {
 		}
 		content = overlayPopup(content, modal, m.width, m.height)
 	}
-	if smtpParent != "" || smtpChild != "" {
+	if stackParent != "" || stackChild != "" {
 		if m.width > 0 {
 			content = truncateLines(content, m.width)
 		}
-		if smtpParent != "" {
-			content = overlayPopup(content, smtpParent, m.width, m.height)
+		if stackParent != "" {
+			content = overlayPopup(content, stackParent, m.width, m.height)
 		}
-		if smtpChild != "" && smtpParent == "" {
-			content = overlayPopup(content, smtpChild, m.width, m.height)
-		} else if smtpChild != "" {
+		if stackChild != "" && stackParent == "" {
+			content = overlayPopup(content, stackChild, m.width, m.height)
+		} else if stackChild != "" {
 			height := m.height
 			if height <= 0 {
 				height = strings.Count(content, "\n") + 1
 			}
-			parentHeight := strings.Count(smtpParent, "\n") + 1
-			childHeight := strings.Count(smtpChild, "\n") + 1
+			parentHeight := strings.Count(stackParent, "\n") + 1
+			childHeight := strings.Count(stackChild, "\n") + 1
 			parentTop := max(0, (height-parentHeight)/2)
 			childTop := max((height-childHeight)/2, parentTop+1)
 			childTop = min(childTop, max(0, height-childHeight-1))
-			content = overlayPopup(content, smtpChild, m.width, childHeight+2*childTop)
+			content = overlayPopup(content, stackChild, m.width, childHeight+2*childTop)
 		}
 	}
 	// Lipgloss v2 emits truecolor styles; colorprofile only recognizes boolean

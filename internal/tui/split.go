@@ -23,7 +23,7 @@ func splitListWidth(snap Snapshot, selected int, now time.Time) int {
 }
 
 func (m Model) splitMode() bool {
-	return m.width >= 110 && m.height >= 30 && !m.channelScreen && m.width >= splitListWidth(m.snap, m.selected, m.now())+3+minDetailWidth
+	return m.width >= 110 && m.height >= 30 && m.width >= splitListWidth(m.snap, m.selected, m.now())+3+minDetailWidth
 }
 
 type activityEvent struct {
