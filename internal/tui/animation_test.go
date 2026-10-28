@@ -99,8 +99,14 @@ func TestAnimationKeyPreservesModalInput(t *testing.T) {
 				if view(m) != oldView {
 					t.Fatal("a changed delete confirmation")
 				}
-			} else if view(m) != strings.Replace(oldView, "│", "a│", 1) {
-				t.Fatal("a was not inserted at the focused field cursor")
+			} else {
+				cursor := "Name: │"
+				if mode == "edit" {
+					cursor = "https://api.example.com/health│"
+				}
+				if !strings.Contains(oldView, cursor) || !strings.Contains(view(m), strings.Replace(cursor, "│", "a│", 1)) {
+					t.Fatal("a was not inserted at the focused field cursor")
+				}
 			}
 			after, err := Load(context.Background(), s)
 			if err != nil || !reflect.DeepEqual(before, after) {

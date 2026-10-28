@@ -451,16 +451,16 @@ func (m Model) View() tea.View {
 	if m.help && !helpPopupFits(m.width, m.height) {
 		content = renderKeys()
 	}
-	if m.form != nil {
-		content = renderForm(*m.form, m.snap, now, m.err)
-	}
 	modal := ""
-	if m.deletion != nil || m.mute != nil {
+	if m.form != nil || m.deletion != nil || m.mute != nil {
 		screen := ""
-		if m.deletion != nil {
-			screen = renderDelete(*m.deletion, m.snap, now, m.err)
-		} else {
+		switch {
+		case m.mute != nil:
 			screen = renderMute(*m.mute, m.snap, now, m.err)
+		case m.deletion != nil:
+			screen = renderDelete(*m.deletion, m.snap, now, m.err)
+		default:
+			screen = renderForm(*m.form, m.snap, now, m.err)
 		}
 		title, body := splitModalScreen(screen)
 		var fits bool

@@ -19,6 +19,65 @@ func TestRenderModal(t *testing.T) {
 	}
 }
 
+func TestFormModals(t *testing.T) {
+	for _, size := range []struct{ w, h int }{{100, 30}, {80, 24}, {120, 35}, {30, 8}} {
+		for _, edit := range []bool{false, true} {
+			m := modelWith(seededSnapshot(t, now))
+			m.width, m.height = size.w, size.h
+			before := view(m)
+			key, title := keyN, "New monitor"
+			if edit {
+				key, title = keyE, "Edit monitor"
+			}
+			m, _ = press(t, m, key)
+			out := view(m)
+			for _, want := range []string{"Name", "URL", "tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("%dx%d missing %q: %s", size.w, size.h, want, out)
+				}
+			}
+			if size.w == 30 {
+				if strings.Contains(out, "╭") || !strings.Contains(out, title) {
+					t.Errorf("bad fallback: %s", out)
+				}
+			} else {
+				for _, want := range []string{"payments", "╭─ " + title, "╰"} {
+					if !strings.Contains(out, want) {
+						t.Errorf("%dx%d missing %q: %s", size.w, size.h, want, out)
+					}
+				}
+				for _, line := range strings.Split(out, "\n") {
+					if ansi.StringWidth(line) > size.w {
+						t.Errorf("line exceeds %d: %q", size.w, line)
+					}
+				}
+				if size.w == 120 && !m.splitMode() {
+					t.Error("form disabled split layout")
+				}
+			}
+			m, _ = press(t, m, keyEsc)
+			if view(m) != before {
+				t.Errorf("escape did not restore view")
+			}
+		}
+	}
+}
+
+func TestEditModalReturnsToDetail(t *testing.T) {
+	m := modelWith(seededSnapshot(t, now))
+	m.width, m.height = 100, 30
+	m, _ = press(t, m, keyEnter)
+	before := view(m)
+	m, _ = press(t, m, keyE)
+	if out := view(m); !strings.Contains(out, "╭─ Edit monitor") || !strings.Contains(out, "esc back") {
+		t.Errorf("detail or popup missing: %s", out)
+	}
+	m, _ = press(t, m, keyEsc)
+	if view(m) != before {
+		t.Error("cancel did not restore detail")
+	}
+}
+
 func TestModalScreens(t *testing.T) {
 	for _, size := range []struct{ w, h int }{{120, 35}, {80, 24}, {0, 0}, {30, 8}} {
 		for _, tc := range []struct {
