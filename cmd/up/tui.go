@@ -19,6 +19,7 @@ Keep 'up serve' running to discover monitors and record results while closed.
 New monitors require a name and HTTP/HTTPS URL. Defaults: interval 30s,
 timeout 5s, expected status 200. An edit cannot rename a monitor;
 a confirmed delete removes history and cannot be undone.
+Forms and confirmations open as popups when they fit; small terminals use full screens.
 Manage SMTP servers and channels for email alerts with s and c; choose a monitor's channel in its form.
 SMTP passwords are encrypted with the key that 'up serve' keeps in <db>.key; run it once before entering a password, and back up that file with the database.
 

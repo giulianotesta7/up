@@ -23,6 +23,7 @@ func TestTUICreationHelp(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
 	for _, want := range []string{
+		"Forms and confirmations open as popups when they fit; small terminals use full screens.",
 		"n new monitor", "tab/shift+tab", "enter save", "esc cancel", "ctrl+c quit",
 		"30s", "5s", "200", "created if missing", "edit cannot rename", "delete removes history",
 		"e edit", "d delete", "y delete", "n cancel",
