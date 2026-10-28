@@ -32,6 +32,12 @@ const userAgent = "up-monitor"
 // the connection can be reused without downloading large pages.
 const maxDrain = 64 << 10
 
+// CertInfo describes the certificate served by the final HTTP response.
+type CertInfo struct {
+	Host, Issuer, Serial string
+	NotAfter             time.Time
+}
+
 // Result is the outcome of one check run.
 type Result struct {
 	CheckName string
@@ -45,6 +51,8 @@ type Result struct {
 	StatusCode int
 	// Error is the reason a check is down; empty when it is up.
 	Error string
+	// Cert is the final response's TLS leaf certificate, if any.
+	Cert *CertInfo
 }
 
 // Checker runs HTTP checks.
@@ -90,6 +98,14 @@ func (ch *Checker) Run(ctx context.Context, c config.Check) Result {
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrain))
 	resp.Body.Close()
 
+	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+		cert := resp.TLS.PeerCertificates[0]
+		issuer := cert.Issuer.CommonName
+		if issuer == "" && len(cert.Issuer.Organization) > 0 {
+			issuer = cert.Issuer.Organization[0]
+		}
+		res.Cert = &CertInfo{Host: resp.Request.URL.Hostname(), Issuer: issuer, Serial: cert.SerialNumber.Text(16), NotAfter: cert.NotAfter}
+	}
 	res.StatusCode = resp.StatusCode
 	if resp.StatusCode != c.ExpectedStatus {
 		res.Status = StatusDown

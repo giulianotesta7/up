@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 4
+const schemaVersion = 5
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -82,6 +82,8 @@ ALTER TABLE checks ADD COLUMN recover_after INTEGER NOT NULL DEFAULT 0;
 `,
 	// v3 -> v4: temporary alert mutes.
 	`CREATE TABLE mutes (check_name TEXT PRIMARY KEY, until_ns INTEGER NOT NULL, was_alerting INTEGER NOT NULL);`,
+	// v4 -> v5: last observed TLS certificates.
+	`CREATE TABLE certs (check_name TEXT PRIMARY KEY, host TEXT NOT NULL, issuer TEXT NOT NULL, serial TEXT NOT NULL, not_after_ns INTEGER NOT NULL, observed_ns INTEGER NOT NULL, notified INTEGER NOT NULL);`,
 }
 
 // Outage is a period during which a check was down. Ongoing outages have a

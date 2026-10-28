@@ -56,6 +56,17 @@ type MuteStore interface {
 	ClearMute(context.Context, string, time.Time) error
 }
 
+// CertStore is the optional certificate observation persistence API.
+type CertStore interface {
+	Cert(context.Context, string) (config.Cert, bool, error)
+	SaveCert(context.Context, config.Cert) error
+}
+
+// CertAlerter receives certificate warnings without blocking.
+type CertAlerter interface {
+	NotifyCert(config.Check, config.Cert, time.Duration)
+}
+
 // Alerter receives transitions; Notify must not block.
 type Alerter interface {
 	Notify(config.Check, check.Result)
@@ -292,6 +303,9 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 			streak.Observe(res.Status, c.AlertAfter, c.RecoverAfter)
 			m, found := readMute()
 			active := found && m.Until.After(time.Now())
+			if res.Cert != nil {
+				observeCert(ctx, opts, c, res, active)
+			}
 			if c.Channel == "" {
 				notified = streak.Alerting
 			} else if !active {
@@ -317,6 +331,38 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 			return last
 		case <-ticker.C:
 		}
+	}
+}
+
+func observeCert(ctx context.Context, opts Options, c config.Check, res check.Result, muted bool) {
+	store, ok := opts.Store.(CertStore)
+	if !ok {
+		return
+	}
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	old, found, err := store.Cert(wctx, c.Name)
+	if err != nil {
+		opts.Logger.Error("reading certificate failed", "check", c.Name, "error", err)
+		return
+	}
+	cert := config.Cert{Check: c.Name, Host: res.Cert.Host, Issuer: res.Cert.Issuer, Serial: res.Cert.Serial, NotAfter: res.Cert.NotAfter, Observed: res.At}
+	if found && old.Serial == cert.Serial && old.NotAfter.Equal(cert.NotAfter) {
+		cert.Notified = old.Notified
+	}
+	remaining := cert.NotAfter.Sub(res.At)
+	due := 0
+	for _, threshold := range config.CertWarnDays {
+		if remaining <= time.Duration(threshold)*24*time.Hour && (cert.Notified == 0 || threshold < cert.Notified) && (due == 0 || threshold < due) {
+			due = threshold
+		}
+	}
+	if alerter, ok := opts.Alerter.(CertAlerter); ok && due != 0 && c.Channel != "" && !muted {
+		cert.Notified = due
+		alerter.NotifyCert(c, cert, remaining)
+	}
+	if err := store.SaveCert(wctx, cert); err != nil {
+		opts.Logger.Error("saving certificate failed", "check", c.Name, "error", err)
 	}
 }
 

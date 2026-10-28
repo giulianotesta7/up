@@ -8,6 +8,16 @@ import (
 	"time"
 )
 
+// Cert is the last observed TLS certificate and its notification state.
+type Cert struct {
+	Check, Host, Issuer, Serial string
+	NotAfter, Observed          time.Time
+	Notified                    int
+}
+
+// CertWarnDays lists certificate expiry warning thresholds.
+var CertWarnDays = []int{14, 7, 3}
+
 // Mute records when alert delivery resumes and the recipients' prior state.
 type Mute struct {
 	Check       string
