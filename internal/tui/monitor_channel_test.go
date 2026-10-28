@@ -66,7 +66,7 @@ func TestMonitorChannelHelpPreservesText(t *testing.T) {
 	}
 	next, _ := m.Update(m.Init()())
 	m = next.(Model)
-	requireText(t, m, "↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · s SMTP servers · c channels · a animation · q quit · ctrl+c quit")
+	requireText(t, m, "↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit")
 	m, _ = press(t, m, keyEnter)
-	requireText(t, m, "esc back · n new monitor · e edit · d delete · s SMTP servers · c channels · a animation · q quit · ctrl+c quit")
+	requireText(t, m, "esc back · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit")
 }

@@ -59,6 +59,8 @@ type Model struct {
 	detail            bool
 	form              *monitorForm
 	deletion          *deletePrompt
+	mute              *mutePrompt
+	notice            string
 	smtpScreen        bool
 	smtpSelected      int
 	smtpSelectName    string
@@ -231,6 +233,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.deletion, m.detail, m.selectName = nil, false, ""
 		}
 		return m, m.load
+	case muteMsg:
+		if msg.generation != m.generation || m.mute == nil || !m.mute.saving {
+			return m, nil
+		}
+		if msg.err != nil {
+			p := *m.mute
+			p.saving, p.err = false, msg.err
+			m.mute = &p
+			return m, nil
+		}
+		m.mute = nil
+		return m, m.load
+	case unmuteMsg:
+		if msg.generation != m.generation {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.notice = "Cannot unmute: " + msg.err.Error()
+			return m, nil
+		}
+		return m, m.load
 	case smtpSaveMsg:
 		if msg.generation != m.generation || m.smtpForm == nil || !m.smtpForm.saving {
 			return m, nil
@@ -334,6 +357,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.deletion != nil {
 		return m.handleDeleteKey(msg)
 	}
+	if m.mute != nil {
+		return m.handleMuteKey(msg)
+	}
+	m.notice = ""
 	switch msg.String() {
 	case "q":
 		return m, tea.Quit
@@ -358,6 +385,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.form = editMonitorForm(c, m.detail)
 			} else {
 				m.deletion = &deletePrompt{name: c.Name}
+			}
+		}
+	case "m", "u":
+		if m.selected < len(m.snap.Services) {
+			svc := m.snap.Services[m.selected]
+			if msg.String() == "m" {
+				m.mute = &mutePrompt{name: svc.Check.Name, wasAlerting: svc.Streak.Alerting}
+			} else if svc.Muted(m.now()) {
+				m.generation++
+				return m, m.unmute(svc.Check.Name)
 			}
 		}
 	case "up", "k":
@@ -390,6 +427,12 @@ func (m Model) View() tea.View {
 	}
 	if m.deletion != nil {
 		content = renderDelete(*m.deletion, m.snap, now, m.err)
+	}
+	if m.mute != nil {
+		content = renderMute(*m.mute, m.snap, now, m.err)
+	}
+	if m.notice != "" {
+		content += "\n" + warnStyle.Render(m.notice)
 	}
 	if m.smtpScreen {
 		content = renderSMTPList(m.snap, m.smtpSelected, now, m.err)

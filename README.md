@@ -25,6 +25,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 - **Stale-daemon detection.** If the daemon stops, the TUI says so and keeps the last known statuses instead of marking everything DOWN.
 - **Retention.** Results older than 30 days are pruned. Monitor definitions are kept.
 - **Email alerts.** One email when a monitor goes down and one when it recovers, sent over SMTP and configured from the TUI.
+- **Temporary mute.** Hold a monitor's emails for 30 minutes to 7 days, for example during a deploy. Checks and history keep running and the mute ends by itself.
 - **Quieter alerts.** Optionally wait for several failures in a row before the first email, so one timeout does not wake anyone up.
 
 ## Install
@@ -70,7 +71,7 @@ New monitors default to a 30s interval, 5s timeout and expected status 200.
 
 ### Keys
 
-`j`/`k` move · `enter` details · `n` new · `e` edit · `d` delete · `s` SMTP servers · `c` channels · `a` toggle animation · `esc` back · `q` quit
+`j`/`k` move · `enter` details · `n` new · `e` edit · `d` delete · `m` mute · `u` unmute · `s` SMTP servers · `c` channels · `a` toggle animation · `esc` back · `q` quit
 
 In forms: `tab`/`shift+tab` switch fields · `←`/`→` choose an option · `enter` save · `esc` cancel.
 
@@ -99,6 +100,18 @@ SMTP passwords are never stored in plain text. The first `up serve` run creates 
 
 - **Back up `up.db.key` together with `up.db`.** Without it, stored passwords cannot be decrypted: the daemon creates a new key and the TUI marks those passwords as `needs re-entry`.
 - `up serve` refuses to start if the key file is readable or writable by group or others. Fix it with `chmod 600`.
+
+#### Muting during maintenance
+
+Press `m` on a monitor and pick 30 minutes, 1 hour, 4 hours, 24 hours or a custom duration (1m to 7d); `u` ends the mute early. While muted the list shows the time left, and checks and history continue.
+
+When the mute ends, recipients get only what they do not already know:
+
+- Still down, and they were not told yet: one down email, giving the real outage start.
+- Back up, and the outage began during the mute: nothing.
+- Back up, but they had been told it was down before the mute: the recovery email.
+
+The daemon notices an end within one check interval. Muting is stored in the database, so it survives restarts.
 
 ## Contributing
 

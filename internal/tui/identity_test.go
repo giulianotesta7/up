@@ -21,8 +21,8 @@ func TestIdentityViews(t *testing.T) {
 		lines int
 		help  string
 	}{
-		{"list", tea.KeyPressMsg{}, 9, "↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"},
-		{"detail", keyEnter, 22, "esc back · n new monitor · e edit · d delete · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"},
+		{"list", tea.KeyPressMsg{}, 9, "↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"},
+		{"detail", keyEnter, 22, "esc back · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"},
 		{"form", keyN, 14, "tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"},
 		{"delete", keyD, 7, "y delete · n cancel"},
 	} {
