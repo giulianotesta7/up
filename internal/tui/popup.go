@@ -6,6 +6,29 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+func splitModalScreen(screen string) (string, string) {
+	title, body, _ := strings.Cut(screen, "\n")
+	return ansi.Strip(title), body
+}
+
+func renderModal(title string, body string, width, height int) (string, bool) {
+	lines := strings.Split(body, "\n")
+	boxWidth := max(40, ansi.StringWidth(title)+6)
+	for _, line := range lines {
+		boxWidth = max(boxWidth, ansi.StringWidth(line)+4)
+	}
+	if (width > 0 && boxWidth+2 > width) || (height > 0 && len(lines)+4 > height) {
+		return "", false
+	}
+	border := func(s string) string { return accentStyle.Render(s) }
+	out := []string{border("╭─ " + title + " " + strings.Repeat("─", boxWidth-ansi.StringWidth(title)-5) + "╮")}
+	for _, line := range lines {
+		out = append(out, border("│")+" "+line+strings.Repeat(" ", boxWidth-3-ansi.StringWidth(line))+border("│"))
+	}
+	out = append(out, border("╰"+strings.Repeat("─", boxWidth-2)+"╯"))
+	return strings.Join(out, "\n"), true
+}
+
 const popupWidth = 46
 const popupHeight = 14
 

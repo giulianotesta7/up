@@ -39,7 +39,10 @@ func TestIdentityViews(t *testing.T) {
 			if lines[1] != "└"+strings.Repeat("─", 59) {
 				t.Errorf("rule: %q", lines[1])
 			}
-			if len(lines) != tc.lines {
+			if tc.name == "delete" && !strings.Contains(out, "╭─ Delete monitor") {
+				t.Errorf("missing delete popup:\n%s", out)
+			}
+			if tc.name != "delete" && len(lines) != tc.lines {
 				t.Errorf("lines = %d, want %d:\n%s", len(lines), tc.lines, out)
 			}
 			if !strings.Contains(out, tc.help) || !strings.HasSuffix(out, "database: /shared/up.db") {

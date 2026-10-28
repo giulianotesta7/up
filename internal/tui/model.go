@@ -442,7 +442,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) View() tea.View {
 	now := m.now()
 	content := renderList(m.snap, m.selected, now, m.err, m.width)
-	if m.splitMode() {
+	split := m.splitMode()
+	if split {
 		content = renderSplit(m.snap, m.selected, now, m.err, m.width, m.height, m.notice)
 	} else if m.detail && m.selected < len(m.snap.Services) {
 		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width)
@@ -453,13 +454,23 @@ func (m Model) View() tea.View {
 	if m.form != nil {
 		content = renderForm(*m.form, m.snap, now, m.err)
 	}
-	if m.deletion != nil {
-		content = renderDelete(*m.deletion, m.snap, now, m.err)
+	modal := ""
+	if m.deletion != nil || m.mute != nil {
+		screen := ""
+		if m.deletion != nil {
+			screen = renderDelete(*m.deletion, m.snap, now, m.err)
+		} else {
+			screen = renderMute(*m.mute, m.snap, now, m.err)
+		}
+		title, body := splitModalScreen(screen)
+		var fits bool
+		modal, fits = renderModal(title, body, m.width, m.height)
+		if !fits {
+			content = screen
+			split = false
+		}
 	}
-	if m.mute != nil {
-		content = renderMute(*m.mute, m.snap, now, m.err)
-	}
-	if m.notice != "" && !m.splitMode() {
+	if m.notice != "" && !split {
 		content += "\n" + warnStyle.Render(m.notice)
 	}
 	if m.smtpScreen {
@@ -485,15 +496,15 @@ func (m Model) View() tea.View {
 		position = m.sweepPosition
 	}
 	rule := renderHostRule(m.snap, m.hostname, now, m.width, position)
-	if m.splitMode() {
+	if split {
 		rule = renderHostRuleCells(m.snap, m.hostname, now, m.width, position)
 	}
 	content = renderTitleWidth(m.snap, m.width) + "\n" + rule + "\n" + content
-	if m.help && helpPopupFits(m.width, m.height) {
+	if modal != "" || (m.help && helpPopupFits(m.width, m.height)) {
 		content = padForPopup(content, m.height)
 	}
 	content += "\n" + helpStyle.Render("database: "+m.databasePath)
-	if m.splitMode() {
+	if split {
 		content = truncateLines(content, m.width)
 	}
 	if m.help && helpPopupFits(m.width, m.height) {
@@ -501,6 +512,12 @@ func (m Model) View() tea.View {
 			content = truncateLines(content, m.width)
 		}
 		content = overlayPopup(content, renderHelpPopup(m.splitMode()), m.width, m.height)
+	}
+	if modal != "" {
+		if m.width > 0 {
+			content = truncateLines(content, m.width)
+		}
+		content = overlayPopup(content, modal, m.width, m.height)
 	}
 	// Lipgloss v2 emits truecolor styles; colorprofile only recognizes boolean
 	// NO_COLOR values. Honor every nonempty value, including in direct renders.
