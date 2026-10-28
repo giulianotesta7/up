@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -55,6 +56,7 @@ type Model struct {
 	snap              Snapshot
 	err               error
 	width             int
+	height            int
 	selected          int
 	detail            bool
 	form              *monitorForm
@@ -74,6 +76,7 @@ type Model struct {
 	generation        uint64
 	selectName        string
 	animationOff      bool
+	help              bool
 	sweeping          bool
 	sweepPosition     int
 	sweepGeneration   uint64
@@ -112,7 +115,10 @@ func (m Model) load() tea.Msg {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
+		m.width, m.height = msg.Width, msg.Height
+		if m.splitMode() {
+			m.detail = false
+		}
 		return m, nil
 	case snapshotMsg:
 		if msg.generation != m.generation {
@@ -188,7 +194,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.sweepPosition++
-		if m.sweepPosition >= ruleWidth(m.width)-1 || !sweepEnabled(m.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
+		cells := ruleWidth(m.width)
+		if m.splitMode() {
+			cells = m.width
+		}
+		if m.sweepPosition >= cells-1 || !sweepEnabled(m.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
 			m.sweeping = false
 			return m, nil
 		}
@@ -209,6 +219,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.detail = m.form.editing && m.form.returnDetail
 			m.form = nil
+			if m.splitMode() {
+				m.detail = false
+			}
 			m.selectName = msg.name
 		}
 		return m, m.load
@@ -342,6 +355,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.splitMode() {
+		m.detail = false
+	}
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
@@ -361,7 +377,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleMuteKey(msg)
 	}
 	m.notice = ""
+	if m.help {
+		if key := msg.String(); key == "?" || key == "esc" {
+			m.help = false
+		}
+		return m, nil
+	}
 	switch msg.String() {
+	case "?":
+		m.help = true
 	case "q":
 		return m, tea.Quit
 	case "c":
@@ -406,7 +430,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.selected++
 		}
 	case "enter":
-		if len(m.snap.Services) > 0 {
+		if len(m.snap.Services) > 0 && !m.splitMode() {
 			m.detail = true
 		}
 	case "esc", "backspace":
@@ -419,45 +443,173 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) View() tea.View {
 	now := m.now()
 	content := renderList(m.snap, m.selected, now, m.err, m.width)
-	if m.detail && m.selected < len(m.snap.Services) {
+	split := m.splitMode()
+	if split {
+		content = renderSplit(m.snap, m.selected, now, m.err, m.width, m.height, m.notice)
+	} else if m.detail && m.selected < len(m.snap.Services) {
 		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width)
 	}
-	if m.form != nil {
-		content = renderForm(*m.form, m.snap, now, m.err)
+	if m.help && !helpPopupFits(m.width, m.height) {
+		content = renderKeys()
 	}
-	if m.deletion != nil {
-		content = renderDelete(*m.deletion, m.snap, now, m.err)
+	modal := ""
+	if m.form != nil || m.deletion != nil || m.mute != nil {
+		screen, minimum := "", 0
+		switch {
+		case m.mute != nil:
+			screen = renderMute(*m.mute, m.snap, now, m.err)
+			p := *m.mute
+			p.custom = !p.custom
+			minimum = modalContentWidth(renderMute(p, m.snap, now, m.err))
+		case m.deletion != nil:
+			screen = renderDelete(*m.deletion, m.snap, now, m.err)
+		default:
+			screen = renderForm(*m.form, m.snap, now, m.err)
+			f := *m.form
+			for focus := 0; focus < focusCount; focus++ {
+				if f.editing && focus == 0 {
+					continue
+				}
+				f.focus, f.cursor = focus, 0
+				minimum = max(minimum, modalContentWidth(renderForm(f, m.snap, now, m.err)))
+			}
+		}
+		title, body := splitModalScreen(screen)
+		var fits bool
+		modal, fits = renderModal(title, body, m.width, m.height, minimum)
+		if !fits {
+			content = screen
+			split = false
+		}
 	}
-	if m.mute != nil {
-		content = renderMute(*m.mute, m.snap, now, m.err)
-	}
-	if m.notice != "" {
+	if m.notice != "" && !split {
 		content += "\n" + warnStyle.Render(m.notice)
 	}
+	stackParent, stackChild := "", ""
 	if m.smtpScreen {
-		content = renderSMTPList(m.snap, m.smtpSelected, now, m.err)
+		parent := renderSMTPList(m.snap, m.smtpSelected, now, m.err)
+		child := ""
 		if m.smtpForm != nil {
-			content = renderSMTPForm(*m.smtpForm, m.snap, now, m.err)
+			child = renderSMTPForm(*m.smtpForm, m.snap, now, m.err)
 		}
 		if m.smtpDelete != nil {
-			content = renderSMTPDelete(*m.smtpDelete, m.snap, now, m.err)
+			child = renderSMTPDelete(*m.smtpDelete, m.snap, now, m.err)
+		}
+		minimum := 0
+		if m.smtpForm != nil {
+			f := *m.smtpForm
+			for focus := range f.values {
+				if (f.editing && focus == 0) || (focus == 5 && !m.snap.HasKey) {
+					continue
+				}
+				f.focus, f.cursor = focus, 0
+				minimum = max(minimum, modalContentWidth(renderSMTPForm(f, m.snap, now, m.err)))
+			}
+		}
+		title, body := splitModalScreen(parent)
+		var fits bool
+		stackParent, fits = renderModal(title, body, m.width, m.height)
+		if !fits {
+			content = parent
+			split = false
+		}
+		if child != "" {
+			title, body = splitModalScreen(child)
+			stackChild, fits = renderModal(title, body, m.width, m.height, minimum)
+			if !fits {
+				stackParent = ""
+				content = child
+				split = false
+			}
 		}
 	}
 	if m.channelScreen {
-		content = renderChannelList(m.snap, m.channelSelected, now, m.err)
+		parent := renderChannelList(m.snap, m.channelSelected, now, m.err)
+		child := ""
 		if m.channelForm != nil {
-			content = renderChannelForm(*m.channelForm, m.snap, now, m.err)
+			child = renderChannelForm(*m.channelForm, m.snap, now, m.err)
 		}
 		if m.channelDelete != nil {
-			content = renderChannelDelete(*m.channelDelete, m.snap, now, m.err)
+			child = renderChannelDelete(*m.channelDelete, m.snap, now, m.err)
+		}
+		minimum := 0
+		if m.channelForm != nil {
+			f := *m.channelForm
+			for focus := range f.values {
+				if f.editing && focus == 0 {
+					continue
+				}
+				f.focus, f.cursor = focus, 0
+				minimum = max(minimum, modalContentWidth(renderChannelForm(f, m.snap, now, m.err)))
+			}
+		}
+		title, body := splitModalScreen(parent)
+		var fits bool
+		stackParent, fits = renderModal(title, body, m.width, m.height)
+		if !fits {
+			content = parent
+			split = false
+		}
+		if child != "" {
+			title, body = splitModalScreen(child)
+			stackChild, fits = renderModal(title, body, m.width, m.height, minimum)
+			if !fits {
+				stackParent = ""
+				content = child
+				split = false
+			}
 		}
 	}
 	position := -1
 	if m.sweeping && sweepEnabled(m.snap, now, os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
 		position = m.sweepPosition
 	}
-	content = renderTitleWidth(m.snap, m.width) + "\n" + renderHostRule(m.snap, m.hostname, now, m.width, position) + "\n" + content
+	rule := renderHostRule(m.snap, m.hostname, now, m.width, position)
+	if split {
+		rule = renderHostRuleCells(m.snap, m.hostname, now, m.width, position)
+	}
+	content = renderTitleWidth(m.snap, m.width) + "\n" + rule + "\n" + content
+	if modal != "" || stackParent != "" || stackChild != "" || (m.help && helpPopupFits(m.width, m.height)) {
+		content = padForPopup(content, m.height)
+	}
 	content += "\n" + helpStyle.Render("database: "+m.databasePath)
+	if split {
+		content = truncateLines(content, m.width)
+	}
+	if m.help && helpPopupFits(m.width, m.height) {
+		if m.width > 0 {
+			content = truncateLines(content, m.width)
+		}
+		content = overlayPopup(content, renderHelpPopup(m.splitMode()), m.width, m.height)
+	}
+	if modal != "" {
+		if m.width > 0 {
+			content = truncateLines(content, m.width)
+		}
+		content = overlayPopup(content, modal, m.width, m.height)
+	}
+	if stackParent != "" || stackChild != "" {
+		if m.width > 0 {
+			content = truncateLines(content, m.width)
+		}
+		if stackParent != "" {
+			content = overlayPopup(content, stackParent, m.width, m.height)
+		}
+		if stackChild != "" && stackParent == "" {
+			content = overlayPopup(content, stackChild, m.width, m.height)
+		} else if stackChild != "" {
+			height := m.height
+			if height <= 0 {
+				height = strings.Count(content, "\n") + 1
+			}
+			parentHeight := strings.Count(stackParent, "\n") + 1
+			childHeight := strings.Count(stackChild, "\n") + 1
+			parentTop := max(0, (height-parentHeight)/2)
+			childTop := max((height-childHeight)/2, parentTop+1)
+			childTop = min(childTop, max(0, height-childHeight-1))
+			content = overlayPopup(content, stackChild, m.width, childHeight+2*childTop)
+		}
+	}
 	// Lipgloss v2 emits truecolor styles; colorprofile only recognizes boolean
 	// NO_COLOR values. Honor every nonempty value, including in direct renders.
 	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {

@@ -23,10 +23,12 @@ func TestTUICreationHelp(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
 	for _, want := range []string{
+		"Forms and confirmations open as popups when they fit; small terminals use full screens.",
 		"n new monitor", "tab/shift+tab", "enter save", "esc cancel", "ctrl+c quit",
 		"30s", "5s", "200", "created if missing", "edit cannot rename", "delete removes history",
 		"e edit", "d delete", "y delete", "n cancel",
-		"Keys: ↑/↓ or k/j select · enter details · n new monitor · e edit · d delete · s SMTP servers · c channels · a toggle animation · esc back · q/ctrl+c quit",
+		"Keys: ↑/↓ or k/j select · enter details (small terminals) · n new monitor · e edit · d delete · s SMTP servers · c channels · a toggle animation · ? all keys · esc back · q/ctrl+c quit",
+		"Terminals of at least 110x30 show the selected monitor's detail beside the list, with an activity feed below; enter is not needed there.",
 		"Manage SMTP servers and channels for email alerts with s and c; choose a monitor's channel in its form.",
 		"SMTP passwords are encrypted with the key that 'up serve' keeps in <db>.key; run it once before entering a password, and back up that file with the database.",
 	} {

@@ -40,7 +40,7 @@ var (
 )
 
 func renderHelp(text string) string {
-	keys := map[string]bool{"↑/↓": true, "(k/j)": true, "enter": true, "n": true, "e": true, "d": true, "m": true, "u": true, "s": true, "c": true, "a": true, "q": true, "ctrl+c": true, "esc": true, "tab/shift+tab": true, "←/→": true, "y": true}
+	keys := map[string]bool{"↑/↓": true, "(k/j)": true, "enter": true, "n": true, "e": true, "d": true, "m": true, "u": true, "s": true, "c": true, "a": true, "q": true, "ctrl+c": true, "esc": true, "tab/shift+tab": true, "←/→": true, "y": true, "?": true}
 	words := strings.Split(text, " ")
 	for i, word := range words {
 		if keys[word] {
@@ -62,7 +62,11 @@ func ruleWidth(width int) int {
 // A negative position renders the original, byte-identical idle rule.
 // The pulse replaces cells rather than adding them, clipping at the edge.
 func renderRule(width, position int) string {
-	length := ruleWidth(width) - 1
+	return renderRuleCells(ruleWidth(width), position)
+}
+
+func renderRuleCells(cells, position int) string {
+	length := cells - 1
 	stem := accentStyle.Render(logoStem)
 	if position < 0 || position >= length {
 		return stem + helpStyle.Render(strings.Repeat("─", length))
@@ -75,7 +79,10 @@ func renderRule(width, position int) string {
 // renderHostRule keeps every label cell intact while the pulse lights it.
 // Positions are relative to the first cell after the stem, as in renderRule.
 func renderHostRule(snap Snapshot, hostname string, now time.Time, width, position int) string {
-	cells := ruleWidth(width)
+	return renderHostRuleCells(snap, hostname, now, ruleWidth(width), position)
+}
+
+func renderHostRuleCells(snap Snapshot, hostname string, now time.Time, cells, position int) string {
 	hostname = ansi.Truncate(ansi.Strip(strings.Map(func(r rune) rune {
 		if r < 32 || r == 127 {
 			return -1
@@ -93,7 +100,7 @@ func renderHostRule(snap Snapshot, hostname string, now time.Time, width, positi
 		label = ""
 	}
 	if label == "" {
-		return renderRule(width, position)
+		return renderRuleCells(cells, position)
 	}
 	var b strings.Builder
 	b.WriteString(accentStyle.Render(logoStem))

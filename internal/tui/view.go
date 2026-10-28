@@ -87,32 +87,39 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		}
 	}
 
-	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("↑/↓ select · enter open · n new · e edit · d delete · m mute · ? more · q quit"))
 	return b.String()
 }
 
+type detailOptions struct {
+	compact               bool
+	config, cert, outages bool
+	chartRows             int
+}
+
 func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width int) string {
+	return renderDetailWithOptions(snap, s, now, loadErr, width, detailOptions{config: true, cert: true, outages: true, chartRows: 5})
+}
+
+func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr error, width int, opts detailOptions) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + s.Check.URL + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
 
-	fmt.Fprintf(&b, "Interval: %s   Timeout: %s   Expected status: %d\n", s.Check.Interval, s.Check.Timeout, s.Check.ExpectedStatus)
-	channelName := s.Check.Channel
-	if channelName == "" {
-		channelName = "none"
+	// Sections are separated by one blank line; a header sits right above its rows.
+	section := func(title string) {
+		b.WriteString("\n" + headerStyle.Render(title) + "\n")
 	}
-	fmt.Fprintf(&b, "Channel: %s", channelName)
-	for _, c := range snap.Channels {
-		if c.Name == s.Check.Channel && s.Check.Channel != "" {
-			noun := "recipients"
-			if len(c.Recipients) == 1 {
-				noun = "recipient"
-			}
-			fmt.Fprint(&b, " "+helpStyle.Render(fmt.Sprintf("(%s via %s → %d %s)", c.Kind, c.SMTPServer, len(c.Recipients), noun)))
-			break
-		}
+	field := func(label, value string) {
+		fmt.Fprintf(&b, "  %-10s  %s\n", label, value)
 	}
-	b.WriteString("\n")
+
+	b.WriteString("\n" + headerStyle.Render("STATUS") + "\n")
+	status := styledLabel(s, 0)
+	if s.HasResult {
+		status += "   last check " + ago(now, s.Latest.At) + " (" + formatLatency(s.Latest.Latency) + ")"
+	}
+	field("Status", status)
 	if s.Muted(now) {
 		held := "nothing pending"
 		switch s.Pending() {
@@ -121,60 +128,86 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 		case "recovery":
 			held = "1 email pending (recovery)"
 		}
-		fmt.Fprintf(&b, "Muted: %s\n", warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))+" · "+held)
+		field("Muted", warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))+" · "+held)
 	}
-	if !s.thresholdsDefault() {
-		fmt.Fprintf(&b, "Alerting: after %s · recovers after %s\n", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success"))
-	}
-	fmt.Fprintf(&b, "Status: %s", styledLabel(s, 0))
-	if s.HasResult {
-		fmt.Fprintf(&b, "   Last check: %s (%s)", ago(now, s.Latest.At), formatLatency(s.Latest.Latency))
-	}
-	b.WriteString("\n")
-	fmt.Fprintf(&b, "Last error: %s\n", orDash(s.Latest.Error))
+	field("Last error", orDash(s.Latest.Error))
 	if streak := streakLine(s, now); streak != "" {
-		b.WriteString(streak + "\n")
+		field("Streak", streak)
 	}
 	downSince := "—"
 	if !s.DownSince.IsZero() {
 		downSince = fmt.Sprintf("%s (%s)", formatTime(s.DownSince, now), ago(now, s.DownSince))
 	}
-	fmt.Fprintf(&b, "Down since: %s\n\n", downSince)
+	field("Down since", downSince)
 
+	if opts.config {
+		section("CONFIG")
+		field("Interval", s.Check.Interval.String())
+		field("Timeout", s.Check.Timeout.String())
+		field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
+		channel := s.Check.Channel
+		if channel == "" {
+			channel = "none"
+		}
+		for _, c := range snap.Channels {
+			if c.Name == s.Check.Channel && s.Check.Channel != "" {
+				noun := "recipients"
+				if len(c.Recipients) == 1 {
+					noun = "recipient"
+				}
+				channel += " " + helpStyle.Render(fmt.Sprintf("(%s via %s → %d %s)", c.Kind, c.SMTPServer, len(c.Recipients), noun))
+				break
+			}
+		}
+		field("Channel", channel)
+		if !s.thresholdsDefault() {
+			field("Alerting", fmt.Sprintf("after %s · recovers after %s", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success")))
+		}
+	}
+
+	section("LATENCY")
 	if len(s.Recent) == 0 {
-		b.WriteString("No checks yet.\n")
+		b.WriteString("  No checks yet.\n")
 	} else {
 		chartWidth := recentLimit
 		if width > 0 {
-			chartWidth = min(chartWidth, max(8, width-graphLabelWidth-1))
+			padding := 0
+			if opts.compact {
+				padding = 2
+			}
+			chartWidth = min(chartWidth, max(8, width-graphLabelWidth-1-padding))
 		}
 		window := graphWindow(s.Recent, chartWidth)
-		b.WriteString(strings.Join(chart(window, chartWidth, 4), "\n") + "\n")
+		b.WriteString("  " + strings.Join(chart(window, chartWidth, opts.chartRows), "\n  ") + "\n")
 		avg, p95, maximum, failed, total := latencyStats(window)
 		if failed == total {
-			fmt.Fprintf(&b, "no successful checks · %d failed of %d\n", failed, total)
+			fmt.Fprintf(&b, "\n  no successful checks · %d failed of %d\n", failed, total)
 		} else {
-			fmt.Fprintf(&b, "avg %s · p95 %s · max %s · %d failed of %d\n", formatLatency(avg), formatLatency(p95), formatLatency(maximum), failed, total)
+			_, hi, _ := chartScale(window)
+			b.WriteString("\n" + renderLatencyStats(avg, p95, maximum, hi, failed, total))
 		}
 	}
 
-	if block := renderCert(s, now); block != "" {
-		b.WriteString("\n" + block)
-	}
-
-	b.WriteString("\nRecent outages:\n")
-	if len(s.Outages) == 0 {
-		b.WriteString("  No outages recorded.\n")
-	}
-	for _, o := range s.Outages {
-		if o.Ongoing {
-			fmt.Fprintf(&b, "  %s → ongoing   %s\n", formatTime(o.Start, now), o.Error)
-			continue
+	if opts.cert {
+		if block := renderCert(s, now); block != "" {
+			b.WriteString("\n" + block)
 		}
-		fmt.Fprintf(&b, "  %s → %s (%s)   %s\n", formatTime(o.Start, now), formatTime(o.End, now), o.End.Sub(o.Start), o.Error)
 	}
 
-	b.WriteString("\n" + renderHelp("esc back · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"))
+	if opts.outages {
+		section("RECENT OUTAGES")
+		if len(s.Outages) == 0 {
+			b.WriteString("  No outages recorded.\n")
+		}
+		for _, o := range s.Outages {
+			if o.Ongoing {
+				fmt.Fprintf(&b, "  %s → ongoing   %s\n", formatTime(o.Start, now), o.Error)
+				continue
+			}
+			fmt.Fprintf(&b, "  %s → %s (%s)   %s\n", formatTime(o.Start, now), formatTime(o.End, now), o.End.Sub(o.Start), o.Error)
+		}
+	}
+	b.WriteString("\n" + renderHelp("esc back · e edit · d delete · m mute · ? more · q quit"))
 	return b.String()
 }
 
@@ -264,7 +297,7 @@ func streakLine(s Service, now time.Time) string {
 	if n < 1 || n > len(s.Recent) {
 		return ""
 	}
-	return fmt.Sprintf("Streak: %d consecutive %s since %s", n, pluralNoun(n, noun), formatTime(s.Recent[n-1].At, now))
+	return fmt.Sprintf("%d consecutive %s since %s", n, pluralNoun(n, noun), formatTime(s.Recent[n-1].At, now))
 }
 
 func pluralNoun(n int, noun string) string {
@@ -314,4 +347,55 @@ func orDash(s string) string {
 		return "—"
 	}
 	return s
+}
+
+// renderKeys is the full key map shown by "?" on the list and detail screens.
+func renderKeys() string {
+	row := func(key, left, key2, right string) string {
+		cell := accentStyle.Render(key) + strings.Repeat(" ", max(1, 9-ansi.StringWidth(key))) + helpStyle.Render(left)
+		if key2 == "" {
+			return "  " + cell
+		}
+		pad := strings.Repeat(" ", max(1, 28-9-ansi.StringWidth(left)))
+		return "  " + cell + pad + accentStyle.Render(key2) + strings.Repeat(" ", max(1, 4-ansi.StringWidth(key2))) + helpStyle.Render(right)
+	}
+	lines := []string{
+		headerStyle.Render("MONITORS") + strings.Repeat(" ", 20) + headerStyle.Render("ALERTING"),
+		"",
+		row("↑/↓ k/j", "select", "m", "mute selected"),
+		row("enter", "details", "u", "unmute"),
+		row("n", "new monitor", "s", "SMTP servers"),
+		row("e", "edit", "c", "channels"),
+		row("d", "delete", "", ""),
+		"",
+		headerStyle.Render("VIEW"),
+		"",
+		row("a", "animation on/off", "", ""),
+		row("q", "quit", "", ""),
+		"",
+		"  " + accentStyle.Render("? or esc") + "  " + helpStyle.Render("close"),
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderLatencyStats lays the window's numbers out as a small table: dim
+// headers over the values, in fixed columns. A maximum above the chart scale is
+// amber, like the clipped bars.
+func renderLatencyStats(avg, p95, maximum, scaleTop time.Duration, failed, total int) string {
+	const column = 9
+	pad := func(text string) string {
+		return text + strings.Repeat(" ", max(1, column-ansi.StringWidth(text)))
+	}
+	maxStyle := lipgloss.NewStyle()
+	if maximum > scaleTop {
+		maxStyle = slowStyle
+	}
+	failedStyle := upStyle
+	if failed > 0 {
+		failedStyle = downStyle
+	}
+	header := "  " + headerStyle.Render(pad("AVG")+pad("P95")+pad("MAX")+"FAILED")
+	values := "  " + pad(formatLatency(avg)) + pad(formatLatency(p95)) + maxStyle.Render(pad(formatLatency(maximum))) +
+		failedStyle.Render(fmt.Sprint(failed)) + helpStyle.Render(fmt.Sprintf(" of %d", total))
+	return header + "\n" + values + "\n"
 }

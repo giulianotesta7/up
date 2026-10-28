@@ -19,12 +19,12 @@ func TestSMTPDetailNavigationAndEmptyList(t *testing.T) {
 	m, _ = press(t, m, keyEnter, keyS)
 	requireText(t, m, "SMTP servers", "No SMTP servers configured.", "↑/↓ select (k/j) · n new · e edit · d delete · esc back · q quit · ctrl+c quit")
 	m, _ = press(t, m, keyEsc)
-	requireText(t, m, "Status: PENDING", "Recent outages:")
+	requireText(t, m, "Status      PENDING", "RECENT OUTAGES")
 }
 func TestSMTPPasswordPasteAndSelectorPaste(t *testing.T) {
 	_, m := smtpSetup(t)
 	m, _ = press(t, m, keyS, keyN, keyTab, keyTab, keyTab)
-	requireText(t, m, "TLS: ‹ starttls ›", "starttls · tls · none", "←/→ choose")
+	requireText(t, m, "TLS: ‹ starttls ›", "←/→ choose")
 	next, _ := m.Update(tea.PasteMsg{Content: "none"})
 	m = next.(Model)
 	requireText(t, m, "TLS: ‹ starttls ›")

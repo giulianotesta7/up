@@ -1,7 +1,5 @@
 package tui
 
-import "strings"
-
 // cycleChoice wraps a selection in display order, preserving an unknown value
 // until the user explicitly chooses an option.
 func cycleChoice(options []string, value string, delta int) string {
@@ -34,9 +32,6 @@ func renderChoiceUnit(value, unit string, options []string, focused bool) string
 	text := left + " " + value + " " + right
 	if unit != "" {
 		text += " " + unit
-	}
-	if len(options) > 0 {
-		text += "   " + helpStyle.Render(strings.Join(options, " · "))
 	}
 	return text
 }

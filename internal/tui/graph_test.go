@@ -77,8 +77,8 @@ func TestGraphColors(t *testing.T) {
 			if tc.slow {
 				want = slowStyle.Render("█")
 			}
-			if !strings.HasSuffix(bars[0], want) {
-				t.Errorf("chart top = %q, want suffix %q", bars[0], want)
+			if !strings.HasSuffix(bars[3], want) {
+				t.Errorf("chart bottom = %q, want suffix %q", bars[3], want)
 			}
 		})
 	}
@@ -110,37 +110,6 @@ func TestLatencyStats(t *testing.T) {
 	}
 }
 
-func TestChartFlatAndSpike(t *testing.T) {
-	flat := chart(samples(10, 10, 10), 3, 4)
-	for i, line := range flat[:4] {
-		label := "          "
-		if i == 0 {
-			label = "      10ms"
-		}
-		if i == 3 {
-			label = "         0"
-		}
-		if got := ansi.Strip(line); got != label+"│███" {
-			t.Fatal(got)
-		}
-	}
-	input := append(samples(1000), samples(10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10)...)
-	spike := chart(input, 20, 4)
-	want := []string{
-		"        1s│" + strings.Repeat(" ", 19) + "█",
-		"          │" + strings.Repeat(" ", 19) + "█",
-		"          │" + strings.Repeat(" ", 19) + "█",
-		"         0│" + strings.Repeat("▁", 19) + "█",
-		"          └" + strings.Repeat("─", 20),
-		"           older            now",
-	}
-	for i, line := range spike {
-		if got := ansi.Strip(line); got != want[i] {
-			t.Errorf("line %d: %q != %q", i, got, want[i])
-		}
-	}
-}
-
 func TestChart(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -149,10 +118,10 @@ func TestChart(t *testing.T) {
 		want        []string
 	}{
 		{"empty", nil, 3, 4, []string{"         —│   ", "          │   ", "          │   ", "         0│   ", "          └───", "           older now"}},
-		{"single padded", samples(80), 3, 4, []string{"      80ms│  █", "          │  █", "          │  █", "         0│  █", "          └───", "           older now"}},
-		{"mixed", samples(-1, 80, 20), 3, 4, []string{"      80ms│ █░", "          │ █░", "          │ █░", "         0│██░", "          └───", "           older now"}},
+		{"single padded", samples(80), 3, 4, []string{"      88ms│   ", "          │   ", "          │  █", "      72ms│  █", "          └───", "           older now"}},
+		{"mixed", samples(-1, 80, 20), 3, 4, []string{"      88ms│ ▅░", "          │ █░", "          │ █░", "      18ms│▁█░", "          └───", "           older now"}},
 		{"all down", samples(-1, -2), 2, 2, []string{"         —│░░", "         0│░░", "          └──", "           older now"}},
-		{"window", samples(10, 1000), 1, 2, []string{"      10ms│█", "         0│█", "          └─", "           older now"}},
+		{"window", samples(10, 1000), 1, 2, []string{"      11ms│ ", "       9ms│█", "          └─", "           older now"}},
 		{"zero width", samples(1), 0, 4, nil},
 		{"negative rows", samples(1), 4, -1, nil},
 	} {

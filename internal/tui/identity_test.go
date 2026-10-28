@@ -13,7 +13,7 @@ import (
 func TestIdentityViews(t *testing.T) {
 	m := modelWith(seededSnapshot(t, now))
 	m.databasePath = "/shared/up.db"
-	// Previous fresh fixture line counts: list 9, detail 14, form 10, delete 6.
+	// Previous fresh fixture line counts: list 9, detail 22 (32 with section spacing, the zoomed chart and the stats table), form 10, delete 6.
 	// The list's blank becomes the rule; other views retain their title below it.
 	for _, tc := range []struct {
 		name  string
@@ -21,8 +21,8 @@ func TestIdentityViews(t *testing.T) {
 		lines int
 		help  string
 	}{
-		{"list", tea.KeyPressMsg{}, 9, "↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"},
-		{"detail", keyEnter, 22, "esc back · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit"},
+		{"list", tea.KeyPressMsg{}, 9, "↑/↓ select · enter open · n new · e edit · d delete · m mute · ? more · q quit"},
+		{"detail", keyEnter, 32, "esc back · e edit · d delete · m mute · ? more · q quit"},
 		{"form", keyN, 15, "tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"},
 		{"delete", keyD, 7, "y delete · n cancel"},
 	} {
@@ -36,10 +36,16 @@ func TestIdentityViews(t *testing.T) {
 			if lines[0] != "▲ up  58.5% uptime today · 2 incidents" {
 				t.Errorf("header: %q", lines[0])
 			}
-			if lines[1] != "└"+strings.Repeat("─", 59) {
+			if tc.name != "form" && lines[1] != "└"+strings.Repeat("─", 59) {
 				t.Errorf("rule: %q", lines[1])
 			}
-			if len(lines) != tc.lines {
+			if tc.name == "delete" && !strings.Contains(out, "╭─ Delete monitor") {
+				t.Errorf("missing delete popup:\n%s", out)
+			}
+			if tc.name == "form" && !strings.Contains(out, "╭─ New monitor") {
+				t.Errorf("missing form popup:\n%s", out)
+			}
+			if tc.name != "delete" && tc.name != "form" && len(lines) != tc.lines {
 				t.Errorf("lines = %d, want %d:\n%s", len(lines), tc.lines, out)
 			}
 			if !strings.Contains(out, tc.help) || !strings.HasSuffix(out, "database: /shared/up.db") {

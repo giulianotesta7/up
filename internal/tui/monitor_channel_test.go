@@ -25,7 +25,7 @@ func TestMonitorChannelSelectorAndDetail(t *testing.T) {
 	m = next.(Model)
 	m = fillForm(t, m, "api", "https://example.com", "30s", "5s", "200")
 	m, _ = press(t, m, keyTab)
-	requireText(t, m, "Channel: ‹ none ›", "none · infra · ops-team", "←/→ choose · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit")
+	requireText(t, m, "Channel: ‹ none ›", "←/→ choose · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit")
 	next, _ = m.Update(tea.PasteMsg{Content: "ops-team"})
 	m = next.(Model)
 	requireText(t, m, "Channel: ‹ none ›")
@@ -38,8 +38,8 @@ func TestMonitorChannelSelectorAndDetail(t *testing.T) {
 		t.Fatalf("checks %v %v", checks, err)
 	}
 	m, _ = press(t, m, keyEnter)
-	requireText(t, m, "Channel: ops-team (email via gmail → 2 recipients)")
-	if !strings.Contains(view(m), "Expected status: 200\nChannel: ops-team") {
+	requireText(t, m, "Channel     ops-team (email via gmail → 2 recipients)")
+	if !strings.Contains(view(m), "Expected    200\n  Channel     ops-team") {
 		t.Fatal("channel line not after interval")
 	}
 	m, _ = press(t, m, keyE, keyShiftTab, keyShiftTab, keyShiftTab, keyShiftTab)
@@ -52,12 +52,12 @@ func TestMonitorChannelSelectorAndDetail(t *testing.T) {
 	if err != nil || checks[0].Channel != "" {
 		t.Fatalf("clear: %v %v", checks, err)
 	}
-	requireText(t, m, "Channel: none")
+	requireText(t, m, "Channel     none")
 	m, _ = press(t, m, keyE, keyShiftTab, keyShiftTab, keyShiftTab, keyShiftTab, keyRight)
 	requireText(t, m, "Channel: ‹ infra ›")
 	m, cmd = press(t, m, keyEnter)
 	m = finishCommand(t, m, cmd)
-	requireText(t, m, "Channel: infra (email via gmail → 1 recipient)")
+	requireText(t, m, "Channel     infra (email via gmail → 1 recipient)")
 }
 func TestMonitorChannelHelpPreservesText(t *testing.T) {
 	s, m := formStore(t)
@@ -66,7 +66,7 @@ func TestMonitorChannelHelpPreservesText(t *testing.T) {
 	}
 	next, _ := m.Update(m.Init()())
 	m = next.(Model)
-	requireText(t, m, "↑/↓ select (k/j) · enter details · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit")
+	requireText(t, m, "↑/↓ select · enter open · n new · e edit · d delete · m mute · ? more · q quit")
 	m, _ = press(t, m, keyEnter)
-	requireText(t, m, "esc back · n new monitor · e edit · d delete · m mute · u unmute · s SMTP servers · c channels · a animation · q quit · ctrl+c quit")
+	requireText(t, m, "esc back · e edit · d delete · m mute · ? more · q quit")
 }

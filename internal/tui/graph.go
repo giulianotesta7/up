@@ -103,35 +103,70 @@ func sparkline(results []check.Result, width int) string {
 	return b.String()
 }
 
+// chartScale zooms the chart to the typical range of successful checks, from
+// just under the fastest up to just over p95. Slower checks are clipped, so one
+// spike cannot flatten the rest. ok is false when nothing succeeded.
+func chartScale(results []check.Result) (lo, hi time.Duration, ok bool) {
+	values := successfulLatencies(results)
+	if len(values) == 0 {
+		return 0, 0, false
+	}
+	median := values[len(values)/2]
+	_, p95, _, _, _ := latencyStats(results)
+	lo = values[0] * 9 / 10
+	hi = max(p95*11/10, lo+median/5)
+	return lo, hi, true
+}
+
 // chart returns the bars, fixed-width axis, baseline and time direction.
 // Blank padding denotes missing history; failures fill their entire column.
+// Successes are scaled by chartScale: checks above it fill their column and
+// are marked with ▲ on the top row.
 func chart(results []check.Result, width, rows int) []string {
 	if width <= 0 || rows <= 0 {
 		return nil
 	}
 	results = graphWindow(results, width)
 	_, _, maximum, _, _ := latencyStats(results)
+	lo, hi, scaled := chartScale(results)
 	threshold, detectSlow := slowThreshold(results)
+	levels := rows * 8
+	level := func(latency time.Duration) int {
+		if hi <= lo {
+			return 1
+		}
+		return min(levels, max(1, int(math.Ceil(float64(latency-lo)/float64(hi-lo)*float64(levels)))))
+	}
+	clipped := scaled && maximum > hi
 	lines := make([]string, 0, rows+2)
 	for row := 0; row < rows; row++ {
 		label := ""
-		if row == 0 {
-			label = formatLatency(maximum)
-		} else if row == rows-1 {
+		switch {
+		case row == 0 && !scaled:
+			label = formatLatency(0)
+		case row == 0 && clipped:
+			label = formatLatency(maximum) + " ▲"
+		case row == 0:
+			label = formatLatency(hi)
+		case row == rows-1 && scaled:
+			label = formatLatency(lo)
+		case row == rows-1:
 			label = "0"
 		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "%*s│", graphLabelWidth, label)
+		b.WriteString(helpStyle.Render(fmt.Sprintf("%*s", graphLabelWidth, label)) + "│")
 		b.WriteString(strings.Repeat(" ", width-len(results)))
 		for i := len(results) - 1; i >= 0; i-- {
 			r := results[i]
 			glyph := "░"
 			if r.Status == check.StatusUp {
-				height := graphHeight(r.Latency, float64(maximum), rows*8)
-				fill := min(8, max(0, height-(rows-row-1)*8))
+				fill := min(8, max(0, level(r.Latency)-(rows-row-1)*8))
 				glyph = " "
 				if fill > 0 {
 					glyph = string(blockLevels[fill-1])
+				}
+				if row == 0 && r.Latency > hi {
+					glyph = "▲"
 				}
 			}
 			b.WriteString(graphStyle(r, threshold, detectSlow).Render(glyph))

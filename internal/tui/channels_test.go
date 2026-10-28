@@ -26,7 +26,7 @@ func TestChannelsCreateEdit(t *testing.T) {
 	m := channelServers(t)
 	s := m.store
 	m, _ = press(t, m, keyC, keyN)
-	requireText(t, m, "New channel", "Kind: ‹ email ›", "gmail · relay", "recipients separated by commas")
+	requireText(t, m, "New channel", "Kind: ‹ email ›", "recipients separated by commas")
 	m = typeText(t, m, "ops-team")
 	m, _ = press(t, m, keyTab, keyRight, keyTab, keyRight, keyTab)
 	next, _ := m.Update(tea.PasteMsg{Content: " ana@example.com, , oncall@example.com "})
@@ -81,7 +81,7 @@ func TestChannelsNavigationAndMissingServer(t *testing.T) {
 		t.Fatalf("invalid save %v %v", channels, err)
 	}
 	m, _ = press(t, m, keyEsc, keyEsc)
-	requireText(t, m, "Recent outages:")
+	requireText(t, m, "RECENT OUTAGES")
 	m, _ = press(t, m, keyEsc)
 	requireText(t, m, "MONITOR")
 }
@@ -107,7 +107,15 @@ func TestChannelsListAndDeletion(t *testing.T) {
 	m, _ = press(t, m, keyC)
 	requireText(t, m, "NAME", "KIND", "SMTP SERVER", "RECIPIENTS", "MONITORS", "ana@example.com, web@example.com")
 	out := view(m)
-	if !strings.Contains(out, " 2\n") || !strings.Contains(out, " 0\n") {
+	counts := map[string]string{"ops-team": "2", "unused": "0"}
+	for _, line := range strings.Split(out, "\n") {
+		for name, count := range counts {
+			if strings.Contains(line, name) && strings.Contains(line, " "+count+" ") {
+				delete(counts, name)
+			}
+		}
+	}
+	if len(counts) != 0 {
 		t.Fatalf("counts: %s", out)
 	}
 	m, _ = press(t, m, keyD)

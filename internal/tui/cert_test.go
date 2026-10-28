@@ -96,7 +96,7 @@ func TestDetailShowsCertificateBlock(t *testing.T) {
 	snap := certSnapshot(t, cert, check.StatusUp)
 	detail := ansi.Strip(renderDetail(snap, snap.Services[0], now, nil, 100))
 	for _, want := range []string{
-		"TLS certificate\n", "  Host        example.com", "  Issuer      Let's Encrypt R11",
+		"CERTIFICATE\n", "  Host        example.com", "  Issuer      Let's Encrypt R11",
 		"  Expires     2026-10-30 10:00 UTC", "  Remaining   5 days",
 		"  Alerts      14d sent · 7d sent · 3d pending",
 	} {
@@ -108,7 +108,7 @@ func TestDetailShowsCertificateBlock(t *testing.T) {
 		t.Fatalf("fresh certificate marked stale:\n%s", detail)
 	}
 	plain := ansi.Strip(renderDetail(snap, snap.Services[1], now, nil, 100))
-	if strings.Contains(plain, "TLS certificate") {
+	if strings.Contains(plain, "CERTIFICATE") {
 		t.Fatalf("plain HTTP monitor shows a certificate:\n%s", plain)
 	}
 }
@@ -117,7 +117,7 @@ func TestDetailMarksStaleAndExpiredCertificate(t *testing.T) {
 	cert := config.Cert{Host: "example.com", Issuer: "CA", Serial: "01", NotAfter: now.Add(-time.Hour), Observed: now.Add(-4 * time.Minute)}
 	snap := certSnapshot(t, cert, check.StatusDown)
 	detail := ansi.Strip(renderDetail(snap, snap.Services[0], now, nil, 100))
-	for _, want := range []string{"TLS certificate  last known, observed 4m ago", "Remaining   expired"} {
+	for _, want := range []string{"CERTIFICATE  last known, observed 4m ago", "Remaining   expired"} {
 		if !strings.Contains(detail, want) {
 			t.Fatalf("detail missing %q:\n%s", want, detail)
 		}
@@ -128,7 +128,7 @@ func TestFormTLSExpiryToggle(t *testing.T) {
 	s, m := formStore(t)
 	m = fillForm(t, m, "web", "https://example.com", "30s", "5s", "200")
 	m, _ = press(t, m, keyTab, keyTab, keyTab, keyTab) // channel, alert, recover, TLS
-	requireText(t, m, "TLS expiry: ‹ on ›", "on · off", "HTTPS only")
+	requireText(t, m, "TLS expiry: ‹ on ›", "HTTPS only")
 	m, _ = press(t, m, keyRight)
 	requireText(t, m, "TLS expiry: ‹ off ›")
 	m, cmd := press(t, m, keyEnter)

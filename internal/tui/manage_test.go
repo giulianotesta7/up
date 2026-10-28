@@ -105,13 +105,13 @@ func TestEditPrefillSaveOriginAndFixedName(t *testing.T) {
 			if s.updates != 1 || s.updated != want {
 				t.Fatalf("updates=%d definition=%+v", s.updates, s.updated)
 			}
-			if strings.Contains(view(m), "Edit monitor") || strings.Contains(view(m), "Status:") != detail {
+			if strings.Contains(view(m), "Edit monitor") || strings.Contains(view(m), "Status      ") != detail {
 				t.Fatalf("wrong origin: %s", view(m))
 			}
 			if !detail {
 				m, _ = press(t, m, keyEnter)
 			}
-			requireText(t, m, want.URL, "Interval: 1m0s", "Timeout: 10s", "Expected status: 204", "e edit", "d delete")
+			requireText(t, m, want.URL, "Interval    1m0s", "Timeout     10s", "Expected    204", "e edit", "d delete")
 		})
 	}
 }
@@ -140,7 +140,7 @@ func TestEditRejectedAndCancelKeepDraftAndStorage(t *testing.T) {
 			m = replaceEditURL(t, m, url)
 			if kind == "cancel" {
 				m, _ = press(t, m, keyEsc)
-				requireText(t, m, "Status:")
+				requireText(t, m, "Status      ")
 			} else {
 				var cmd tea.Cmd
 				m, cmd = press(t, m, keyEnter)
@@ -249,7 +249,7 @@ func TestDeleteSuccessNeighborAndEmpty(t *testing.T) {
 				t.Fatal("write was synchronous or double submit")
 			}
 			m = finishCommand(t, busy, cmd)
-			if s.deletes != 1 || strings.Contains(view(m), "Status:") {
+			if s.deletes != 1 || strings.Contains(view(m), "Status      ") {
 				t.Fatal("did not return to list")
 			}
 			if count == 1 {
@@ -317,9 +317,9 @@ func TestExistingKeysPreserved(t *testing.T) {
 				m, _ = press(t, m, keyEnter)
 				requireText(t, m, "https://new.example.com")
 			case "enter":
-				requireText(t, m, "Status:", "https://pay.example.com")
+				requireText(t, m, "Status      ", "https://pay.example.com")
 			case "esc":
-				requireText(t, m, "MONITOR", "enter details")
+				requireText(t, m, "MONITOR", "enter open")
 			case "n":
 				requireText(t, m, "New monitor", "30s", "5s", "200")
 			case "q", "ctrl+c":
