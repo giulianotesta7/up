@@ -37,14 +37,14 @@ with a key kept in <db>.key (mode 0600) next to the database; back it up with
 the database. Without it stored passwords must be entered again. up serve refuses
 a key file readable by group or others.
 
-The optional API is enabled with --api-listen. HTTPS is required except on
-loopback or behind a TLS proxy (--behind-proxy). Use --tls-cert and --tls-key
-together, or --no-tls to serve plain HTTP on any address when the network is
-already encrypted (VPN, Tailscale): the token is then not encrypted and a
-warning is printed. The
-access token hash is stored in <db>.token (0600); a new token is shown once
-on stderr. Use up token reset to replace it. GET /api/v1/snapshot returns the
-current monitoring snapshot without SMTP passwords.
+The optional API is enabled with --api-listen. Choose how it is served: --tls-cert
+and --tls-key together (HTTPS), --behind-proxy (a proxy in front terminates TLS),
+or --no-tls (plain HTTP on any address, for networks that are already encrypted,
+such as a VPN or Tailscale; the token is then not encrypted and a warning is
+printed). Without one of them the API only accepts loopback addresses.
+The access token hash is stored in <db>.token (0600); a new token is shown once on
+stderr. Use up token reset to replace it. GET /api/v1/snapshot returns the current
+monitoring snapshot without SMTP passwords.
 
 Every API flag also reads an environment variable, handy for containers:
 UP_API_LISTEN, UP_TLS_CERT, UP_TLS_KEY, UP_BEHIND_PROXY and UP_NO_TLS (true or
