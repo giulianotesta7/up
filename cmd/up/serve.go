@@ -37,7 +37,10 @@ the database. Without it stored passwords must be entered again. up serve refuse
 a key file readable by group or others.
 
 The optional API is enabled with --api-listen. HTTPS is required except on
-loopback or behind a TLS proxy. Use --tls-cert and --tls-key together. The
+loopback or behind a TLS proxy (--behind-proxy). Use --tls-cert and --tls-key
+together, or --no-tls to serve plain HTTP on any address when the network is
+already encrypted (VPN, Tailscale): the token is then not encrypted and a
+warning is printed. The
 access token hash is stored in <db>.token (0600); a new token is shown once
 on stderr. Use up token reset to replace it.
 
@@ -51,6 +54,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	tlsCert := fs.String("tls-cert", "", "TLS certificate file (requires --tls-key)")
 	tlsKey := fs.String("tls-key", "", "TLS private key file (requires --tls-cert)")
 	behindProxy := fs.Bool("behind-proxy", false, "allow HTTP behind a TLS proxy")
+	noTLS := fs.Bool("no-tls", false, "serve the API over plain HTTP on any address (the token is not encrypted on the network)")
 	retention := fs.Duration("retention", 720*time.Hour, "how long to keep results, for example 720h (30 days); 0 keeps everything")
 	if code, ok := parseFlags(fs, serveHelp, args, stdout, stderr); !ok {
 		return code
@@ -60,12 +64,20 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	if *noTLS && *apiListen == "" {
+		fmt.Fprintln(stderr, "up: --no-tls requires --api-listen")
+		return 1
+	}
+	if *noTLS && (*tlsCert != "" || *tlsKey != "" || *behindProxy) {
+		fmt.Fprintln(stderr, "up: --no-tls cannot be combined with --tls-cert, --tls-key or --behind-proxy")
+		return 1
+	}
 	if (*tlsCert == "") != (*tlsKey == "") {
 		fmt.Fprintln(stderr, "up: --tls-cert and --tls-key must be provided together")
 		return 1
 	}
 	if *apiListen != "" {
-		if err := remote.ValidateListen(*apiListen, *tlsCert != "", *behindProxy); err != nil {
+		if err := remote.ValidateListen(*apiListen, *tlsCert != "", *behindProxy, *noTLS); err != nil {
 			fmt.Fprintf(stderr, "up: %v\n", err)
 			return 1
 		}
@@ -125,7 +137,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var apiDone <-chan error
 	if *apiListen != "" {
 		var err error
-		apiDone, err = startAPI(apiCtx, cancelAPI, *apiListen, *tlsCert, *tlsKey, *dbPath+".token", stderr)
+		apiDone, err = startAPI(apiCtx, cancelAPI, *apiListen, *tlsCert, *tlsKey, *dbPath+".token", *noTLS, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "up: %v\n", err)
 			return 1

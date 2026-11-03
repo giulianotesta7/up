@@ -173,8 +173,6 @@ func loginTick(generation uint64) tea.Cmd {
 // describeLoginError turns a failure kind into one actionable line.
 func describeLoginError(err error, serverURL string) string {
 	switch {
-	case errors.Is(err, connection.ErrPlainHTTP):
-		return "Plain http is refused. Use https://."
 	case errors.Is(err, connection.ErrTokenRejected):
 		return "Token rejected (401). Check it and retry."
 	case errors.Is(err, connection.ErrCertUntrusted):
@@ -230,6 +228,9 @@ func (m loginModel) renderBody() string {
 		b.WriteString("  " + accentStyle.Render(loginSpinner[m.frame]) + " Checking certificate and token…\n")
 		b.WriteString("  " + renderHelp("esc cancel"))
 	default:
+		if connection.IsPlainHTTP(m.values[loginFieldURL]) {
+			b.WriteString("  " + warnStyle.Render("⚠ Plain http: the token is sent unencrypted") + "\n")
+		}
 		if m.err != "" {
 			b.WriteString("  " + downStyle.Render("✗ "+m.err) + "\n")
 		}

@@ -21,7 +21,7 @@ func TestAPIRejectsUnsafeConfiguration(t *testing.T) {
 		args    []string
 		message string
 	}{
-		{[]string{"--api-listen", "0.0.0.0:12345"}, "API address \"0.0.0.0:12345\" is reachable without TLS: add --tls-cert and --tls-key, use --behind-proxy behind a TLS proxy, or listen on 127.0.0.1"},
+		{[]string{"--api-listen", "0.0.0.0:12345"}, "API address \"0.0.0.0:12345\" is reachable without TLS: add --tls-cert and --tls-key, use --behind-proxy behind a TLS proxy, use --no-tls to accept plain HTTP, or listen on 127.0.0.1"},
 		{[]string{"--api-listen", "127.0.0.1:0", "--tls-cert", "cert"}, "--tls-cert and --tls-key must be provided together"},
 		{[]string{"--api-listen", "127.0.0.1:0", "--tls-key", "key"}, "--tls-cert and --tls-key must be provided together"},
 	} {
@@ -212,5 +212,81 @@ func TestAPIListenFailureCreatesNoToken(t *testing.T) {
 	}
 	if _, err := os.Stat(path + ".token"); !os.IsNotExist(err) {
 		t.Errorf("a failed start must not leave a token behind: %v", err)
+	}
+}
+
+func TestAPINoTLSIsExplicitAndWarns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "up.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	reader, writer := io.Pipe()
+	lines := make(chan string, 32)
+	go func() {
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		close(lines)
+	}()
+	done := make(chan int, 1)
+	go func() {
+		code := run(ctx, []string{"serve", "--db", path, "--api-listen", "0.0.0.0:0", "--no-tls"}, io.Discard, writer)
+		writer.Close()
+		done <- code
+	}()
+	var warned, listening, monitoring bool
+	timeout := time.After(5 * time.Second)
+	for !listening || !monitoring {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				t.Fatal("serve stopped before listening")
+			}
+			if line == "up: WARNING: API over plain HTTP; the token and data are not encrypted on the network" {
+				warned = true
+			}
+			if strings.HasPrefix(line, "up: API listening on ") {
+				listening = true
+			}
+			if strings.Contains(line, "monitoring started") {
+				monitoring = true
+			}
+		case <-timeout:
+			t.Fatal("serve did not listen")
+		}
+	}
+	if !warned {
+		t.Error("missing plain HTTP warning before listening")
+	}
+	cancel()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown timed out")
+	}
+	reader.Close()
+}
+
+func TestAPINoTLSConflictsWithCertificates(t *testing.T) {
+	for _, extra := range [][]string{{"--tls-cert", "c", "--tls-key", "k"}, {"--behind-proxy"}} {
+		dir := t.TempDir()
+		args := append([]string{"serve", "--db", filepath.Join(dir, "up.db"), "--api-listen", "127.0.0.1:0", "--no-tls"}, extra...)
+		code, out, errout := runCmd(context.Background(), args...)
+		if code != 1 || out != "" || errout != "up: --no-tls cannot be combined with --tls-cert, --tls-key or --behind-proxy\n" {
+			t.Errorf("%v: got %d %q %q", extra, code, out, errout)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+			t.Errorf("%v: changed files %v", extra, entries)
+		}
+	}
+}
+
+func TestNoTLSWithoutAPIListenIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	code, _, errout := runCmd(context.Background(), "serve", "--db", filepath.Join(dir, "up.db"), "--no-tls")
+	if code != 1 || errout != "up: --no-tls requires --api-listen\n" {
+		t.Errorf("got %d %q", code, errout)
 	}
 }

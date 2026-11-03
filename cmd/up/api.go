@@ -13,7 +13,7 @@ import (
 	"github.com/giulianotesta7/up/internal/remote"
 )
 
-func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, tokenPath string, stderr io.Writer) (<-chan error, error) {
+func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, tokenPath string, noTLS bool, stderr io.Writer) (<-chan error, error) {
 	_, err := remote.LoadVerifier(tokenPath)
 	missing := errors.Is(err, remote.ErrNoToken)
 	if err != nil && !missing {
@@ -39,6 +39,9 @@ func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, t
 			return nil, err
 		}
 		fmt.Fprintf(stderr, "up: access token (shown once): %s\n", token)
+	}
+	if noTLS {
+		fmt.Fprintln(stderr, "up: WARNING: API over plain HTTP; the token and data are not encrypted on the network")
 	}
 	fmt.Fprintf(stderr, "up: API listening on %s\n", listener.Addr())
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

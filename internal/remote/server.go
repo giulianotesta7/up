@@ -146,14 +146,15 @@ func NewHTTPServer(addr string, handler http.Handler) *http.Server {
 }
 
 // ValidateListen refuses to serve the token over plain HTTP on a reachable
-// address. Plain HTTP is allowed on loopback, or behind a proxy that
-// terminates TLS when the operator says so.
-func ValidateListen(addr string, hasTLS, behindProxy bool) error {
+// address unless the operator chose it: TLS, a TLS-terminating proxy
+// (behindProxy) or an explicit plain HTTP mode (noTLS). Loopback is always
+// allowed.
+func ValidateListen(addr string, hasTLS, behindProxy, noTLS bool) error {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fmt.Errorf("invalid API address %q: %w", addr, err)
 	}
-	if hasTLS || behindProxy {
+	if hasTLS || behindProxy || noTLS {
 		return nil
 	}
 	if host == "localhost" {
@@ -162,5 +163,5 @@ func ValidateListen(addr string, hasTLS, behindProxy bool) error {
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
 		return nil
 	}
-	return fmt.Errorf("API address %q is reachable without TLS: add --tls-cert and --tls-key, use --behind-proxy behind a TLS proxy, or listen on 127.0.0.1", addr)
+	return fmt.Errorf("API address %q is reachable without TLS: add --tls-cert and --tls-key, use --behind-proxy behind a TLS proxy, use --no-tls to accept plain HTTP, or listen on 127.0.0.1", addr)
 }

@@ -11,15 +11,15 @@ import (
 
 // Failure kinds a validator wraps so the TUI can explain them precisely.
 var (
-	ErrPlainHTTP     = errors.New("plain http is refused")
 	ErrTokenRejected = errors.New("token rejected")
 	ErrCertUntrusted = errors.New("certificate not trusted")
 	ErrUnreachable   = errors.New("server unreachable")
 )
 
-// NormalizeURL returns the canonical https base URL of a server. Only https is
-// accepted, so a token never travels in plain text. User info, query strings
-// and fragments are rejected because they would leak or change the target.
+// NormalizeURL returns the canonical base URL of a server. https and http are
+// accepted; plain http is the user's choice and the UI warns about it (see
+// IsPlainHTTP). User info, query strings and fragments are rejected because
+// they would leak or change the target.
 func NormalizeURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -29,19 +29,22 @@ func NormalizeURL(raw string) (string, error) {
 	if err != nil || u.Host == "" {
 		return "", errors.New("enter a full URL such as https://up.example.com")
 	}
-	switch strings.ToLower(u.Scheme) {
-	case "https":
-	case "http":
-		return "", ErrPlainHTTP
-	default:
-		return "", fmt.Errorf("unsupported scheme %q: use https://", u.Scheme)
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "https" && scheme != "http" {
+		return "", fmt.Errorf("unsupported scheme %q: use https:// or http://", u.Scheme)
 	}
 	if u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery {
 		return "", errors.New("the URL cannot contain credentials, a query or a fragment")
 	}
-	u.Scheme = "https"
+	u.Scheme = scheme
 	u.Host = strings.ToLower(u.Host)
 	u.Path = strings.TrimRight(u.Path, "/")
 	u.RawPath = ""
 	return u.String(), nil
+}
+
+// IsPlainHTTP reports whether raw starts with http://, where the token travels
+// unencrypted.
+func IsPlainHTTP(raw string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), "http://")
 }

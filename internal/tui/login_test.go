@@ -73,18 +73,35 @@ func TestLoginMasksToken(t *testing.T) {
 	}
 }
 
-func TestLoginRejectsPlainHTTPWithoutCallingValidator(t *testing.T) {
-	called := false
-	m := newTestLogin(func(context.Context, string, string) error { called = true; return nil })
-	m = loginType(m, "http://up.acme.com")
-	m, _ = loginPress(m, "tab")
-	m = loginType(m, "tok")
-	m, cmd := loginPress(m, "enter")
-	if cmd != nil || called {
-		t.Fatalf("validator must not run for plain http (cmd=%v called=%v)", cmd != nil, called)
+func TestLoginAcceptsPlainHTTPWithAWarning(t *testing.T) {
+	m := newTestLogin(func(context.Context, string, string) error { return nil })
+	if strings.Contains(loginPlain(m), "unencrypted") {
+		t.Fatal("no warning expected for an empty URL")
 	}
-	if view := loginPlain(m); !strings.Contains(view, "Plain http is refused. Use https://.") {
-		t.Errorf("missing error:\n%s", view)
+	m = loginType(m, "http://100.64.0.5:8443")
+	view := loginPlain(m)
+	if !strings.Contains(view, "⚠ Plain http: the token is sent unencrypted") {
+		t.Errorf("missing http warning:\n%s", view)
+	}
+}
+
+func TestLoginHTTPSShowsNoWarning(t *testing.T) {
+	m := newTestLogin(nil)
+	m = loginType(m, "https://up.acme.com")
+	if strings.Contains(loginPlain(m), "unencrypted") {
+		t.Error("https must not warn")
+	}
+}
+
+func TestLoginSubmitsPlainHTTPToTheValidator(t *testing.T) {
+	var got loginCall
+	m := newTestLogin(func(_ context.Context, u, tok string) error { got = loginCall{u, tok}; return nil })
+	m = loginFill(m, "http://100.64.0.5:8443/", "tok")
+	m, cmd := loginSubmit(t, m)
+	next, quit := m.Update(loginDone(cmd))
+	m = next.(loginModel)
+	if got != (loginCall{"http://100.64.0.5:8443", "tok"}) || !m.Result().Connected || quit == nil {
+		t.Fatalf("validator got %+v, result %+v", got, m.Result())
 	}
 }
 
