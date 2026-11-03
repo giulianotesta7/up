@@ -140,6 +140,21 @@ On the client, run `up login` once to save the remote, then connect with `up tui
 - `GET /api/v1/snapshot` returns the monitoring snapshot without SMTP passwords.
 - Every API flag has an environment variable, handy for containers: `UP_API_LISTEN`, `UP_TLS_CERT`, `UP_TLS_KEY`, `UP_BEHIND_PROXY` and `UP_NO_TLS` (`true` or `false`). A flag on the command line overrides its variable.
 
+### Docker (optional)
+
+Docker is not required: `up serve` runs fine under systemd. If you prefer a container, the repository has a `Dockerfile` and an example `docker-compose.yml`:
+
+```sh
+docker compose up -d
+docker compose logs up        # the first start prints the access token once
+```
+
+- Configure it with environment variables (`UP_API_LISTEN`, `UP_BEHIND_PROXY`, `UP_NO_TLS`, `UP_TLS_CERT`, `UP_TLS_KEY`); the flags work too.
+- Everything that must survive lives in the `/data` volume: the database, its encryption key (`up.db.key`) and the access token hash (`up.db.token`). Back the three up together; without the key, stored SMTP passwords have to be entered again.
+- The container runs as an unprivileged user (uid 10001). The example publishes the port on `127.0.0.1` only: put a TLS reverse proxy in front (`UP_BEHIND_PROXY`), or publish it on an already encrypted network such as Tailscale and set `UP_NO_TLS`.
+- Replace the token with `docker compose exec up up token reset`.
+- From your machine: `up login`, then `up tui --remote`.
+
 ## Contributing
 
 Run `go vet ./...` and `go test -race ./...` before opening a PR. Regenerate the demo with `sh docs/demo/record.sh` (needs vhs, ttyd and ffmpeg).
