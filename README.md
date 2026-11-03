@@ -122,6 +122,18 @@ The monitor's channel gets one email per threshold (14, 7 and 3 days), remembere
 
 Set `TLS expiry` to `off` in the monitor form to skip all of this for one monitor (for example an internal service with a self-managed certificate): no warnings, no `CERT` value, and the stored certificate is forgotten. It is `on` by default and has no effect on `http://` monitors.
 
+### Remote API (optional)
+
+`up serve` can expose an authenticated HTTPS API so a TUI on another machine can connect without SSH. It is off unless you pass `--api-listen`:
+
+```sh
+up serve --api-listen :8443 --tls-cert cert.pem --tls-key key.pem
+```
+
+- HTTPS is required, except on `127.0.0.1` or behind a TLS proxy (`--behind-proxy`).
+- There is one access token. The first start prints it once on stderr; only its hash is stored in `<db>.token` (mode 0600). Run `up token reset` to replace it; the old token stops working immediately.
+- The token travels only in the `Authorization: Bearer` header.
+
 ## Contributing
 
 Run `go vet ./...` and `go test -race ./...` before opening a PR. Regenerate the demo with `sh docs/demo/record.sh` (needs vhs, ttyd and ffmpeg).

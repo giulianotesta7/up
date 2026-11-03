@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"github.com/giulianotesta7/up/internal/alert"
 	"github.com/giulianotesta7/up/internal/check"
 	"github.com/giulianotesta7/up/internal/monitor"
+	"github.com/giulianotesta7/up/internal/remote"
 	"github.com/giulianotesta7/up/internal/secret"
 	"github.com/giulianotesta7/up/internal/store"
 )
@@ -34,12 +36,21 @@ with a key kept in <db>.key (mode 0600) next to the database; back it up with
 the database. Without it stored passwords must be entered again. up serve refuses
 a key file readable by group or others.
 
+The optional API is enabled with --api-listen. HTTPS is required except on
+loopback or behind a TLS proxy. Use --tls-cert and --tls-key together. The
+access token hash is stored in <db>.token (0600); a new token is shown once
+on stderr. Use up token reset to replace it.
+
 Flags:
 `
 
 func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	dbPath := databaseFlag(fs)
+	apiListen := fs.String("api-listen", "", "enable the API on this address")
+	tlsCert := fs.String("tls-cert", "", "TLS certificate file (requires --tls-key)")
+	tlsKey := fs.String("tls-key", "", "TLS private key file (requires --tls-cert)")
+	behindProxy := fs.Bool("behind-proxy", false, "allow HTTP behind a TLS proxy")
 	retention := fs.Duration("retention", 720*time.Hour, "how long to keep results, for example 720h (30 days); 0 keeps everything")
 	if code, ok := parseFlags(fs, serveHelp, args, stdout, stderr); !ok {
 		return code
@@ -49,11 +60,28 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	if (*tlsCert == "") != (*tlsKey == "") {
+		fmt.Fprintln(stderr, "up: --tls-cert and --tls-key must be provided together")
+		return 1
+	}
+	if *apiListen != "" {
+		if err := remote.ValidateListen(*apiListen, *tlsCert != "", *behindProxy); err != nil {
+			fmt.Fprintf(stderr, "up: %v\n", err)
+			return 1
+		}
+	}
 	if err := prepareDatabase(fs, dbPath); err != nil {
 		fmt.Fprintf(stderr, "up: %v\n", err)
 		return 1
 	}
 
+	if *apiListen != "" {
+		_, err := remote.LoadVerifier(*dbPath + ".token")
+		if err != nil && !errors.Is(err, remote.ErrNoToken) {
+			fmt.Fprintf(stderr, "up: %v\n", err)
+			return 1
+		}
+	}
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
 	keyPath := *dbPath + ".key"
 	var key *secret.Key
@@ -92,6 +120,19 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "up: %v\n", err)
 		return 1
 	}
+	apiCtx, cancelAPI := context.WithCancel(ctx)
+	defer cancelAPI()
+	var apiDone <-chan error
+	if *apiListen != "" {
+		var err error
+		apiDone, err = startAPI(apiCtx, cancelAPI, *apiListen, *tlsCert, *tlsKey, *dbPath+".token", stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "up: %v\n", err)
+			return 1
+		}
+		defer func() { cancelAPI(); <-apiDone }()
+	}
+	ctx = apiCtx
 	hostname, _ := os.Hostname()
 	notifier := alert.NewNotifier(alert.Options{Store: s, Key: key, Sender: alert.SMTPSender{}, Hostname: hostname, Logger: logger})
 	notifyCtx, cancelNotify := context.WithCancel(ctx)
@@ -110,6 +151,13 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "up: %v\n", err)
 		return 1
+	}
+	if apiDone != nil {
+		cancelAPI()
+		if err := <-apiDone; err != nil {
+			fmt.Fprintf(stderr, "up: %v\n", err)
+			return 1
+		}
 	}
 	return 0
 }
