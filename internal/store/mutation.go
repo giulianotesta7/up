@@ -12,7 +12,7 @@ import (
 // position, history and the daemon heartbeat are left untouched.
 func (s *Store) UpdateCheck(ctx context.Context, c config.Check) error {
 	if err := config.ValidateCheck(c); err != nil {
-		return fmt.Errorf("store: update check: %w", err)
+		return classify(ErrValidation, fmt.Errorf("store: update check: %w", err))
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -33,7 +33,7 @@ SET url = ?, interval_ns = ?, timeout_ns = ?, expected_status = ?, channel = ?, 
 		return fmt.Errorf("store: update check: %w", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("store: update check: name %q not found", c.Name)
+		return classify(ErrNotFound, fmt.Errorf("store: update check: name %q not found", c.Name))
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: update check: %w", err)
@@ -58,7 +58,7 @@ func (s *Store) DeleteCheck(ctx context.Context, name string) error {
 		return fmt.Errorf("store: delete check: %w", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("store: delete check: name %q not found", name)
+		return classify(ErrNotFound, fmt.Errorf("store: delete check: name %q not found", name))
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM results WHERE check_name = ?", name); err != nil {
 		return fmt.Errorf("store: delete check: %w", err)

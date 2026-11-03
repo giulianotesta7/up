@@ -45,9 +45,13 @@ func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, t
 		fmt.Fprintln(stderr, "up: WARNING: API over plain HTTP; the token and data are not encrypted on the network")
 	}
 	fmt.Fprintf(stderr, "up: API listening on %s\n", listener.Addr())
-	routes := remote.SnapshotRoutes(func(ctx context.Context, now time.Time) (tui.Snapshot, error) {
+	routes := http.NewServeMux()
+	routes.Handle("/api/v1/snapshot", remote.SnapshotRoutes(func(ctx context.Context, now time.Time) (tui.Snapshot, error) {
 		return tui.Load(ctx, s, now)
-	})
+	}))
+	writes := remote.WriteRoutes(s)
+	routes.Handle("/api/v1/checks", writes)
+	routes.Handle("/api/v1/checks/", writes)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		verifier, err := remote.LoadVerifier(tokenPath)
 		if err != nil {

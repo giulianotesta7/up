@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	minMute = time.Minute
-	maxMute = 7 * 24 * time.Hour
+	MinMute = time.Minute
+	MaxMute = 7 * 24 * time.Hour
 )
 
 // muteOptions are the picker rows; the last one asks for a duration.
@@ -57,7 +57,7 @@ func (p mutePrompt) duration() (time.Duration, error) {
 	if err != nil {
 		return 0, fmt.Errorf("duration %q is not a duration (use values like 45m or 2h)", p.input)
 	}
-	if d < minMute || d > maxMute {
+	if d < MinMute || d > MaxMute {
 		return 0, fmt.Errorf("duration must be between 1m and 7d")
 	}
 	return d, nil

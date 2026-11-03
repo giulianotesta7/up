@@ -39,7 +39,7 @@ func requireChannel(ctx context.Context, tx *sql.Tx, name string) error {
 		return err
 	}
 	if !exists {
-		return fmt.Errorf("channel %q does not exist", name)
+		return classify(ErrValidation, fmt.Errorf("channel %q does not exist", name))
 	}
 	return nil
 }
