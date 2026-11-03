@@ -53,7 +53,14 @@ type loginDoneMsg struct {
 type loginTickMsg struct{ generation uint64 }
 
 // NewLogin builds the standalone login modal used by `up login`.
-func NewLogin(validate LoginValidator) loginModel { return loginModel{validate: validate} }
+func NewLogin(validate LoginValidator, prefilled ...string) loginModel {
+	m := loginModel{validate: validate}
+	if len(prefilled) > 0 {
+		m.values[loginFieldURL] = prefilled[0]
+		m.cursor = len([]rune(prefilled[0]))
+	}
+	return m
+}
 
 // Result reports the outcome after the program ends.
 func (m loginModel) Result() LoginResult { return m.result }
@@ -259,8 +266,8 @@ func (m loginModel) View() tea.View {
 
 // RunLogin shows the login modal and returns what the user entered once the
 // server accepted the token. A cancelled modal returns a zero result.
-func RunLogin(ctx context.Context, validate LoginValidator) (LoginResult, error) {
-	p := tea.NewProgram(NewLogin(validate), tea.WithContext(ctx))
+func RunLogin(ctx context.Context, validate LoginValidator, prefilled ...string) (LoginResult, error) {
+	p := tea.NewProgram(NewLogin(validate, prefilled...), tea.WithContext(ctx))
 	final, err := p.Run()
 	if err != nil {
 		if ctx.Err() != nil && errors.Is(err, tea.ErrProgramKilled) {

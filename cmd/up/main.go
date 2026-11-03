@@ -18,6 +18,8 @@ Commands:
   serve   Run the HTTP checks and store their results (keep it running, for example under systemd)
   tui     Show the stored results in the terminal
   token   Reset the remote API access token
+  login   Connect to a remote server and save its access token
+  logout  Remove the saved remote
 
 Run 'up <command> -h' for the flags of a command.
 `
@@ -42,6 +44,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return serve(ctx, args[1:], stdout, stderr)
 	case "token":
 		return tokenCommand(args[1:], stdout, stderr)
+	case "login":
+		return login(ctx, args[1:], stdout, stderr)
+	case "logout":
+		return logout(args[1:], stdout, stderr)
 	case "tui":
 		return runTUI(ctx, args[1:], stdout, stderr)
 	default:

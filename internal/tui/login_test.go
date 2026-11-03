@@ -46,6 +46,17 @@ func loginPress(m loginModel, key string) (loginModel, tea.Cmd) {
 
 func loginPlain(m loginModel) string { return ansi.Strip(m.View().Content) }
 
+func TestLoginPrefilledURL(t *testing.T) {
+	m := NewLogin(nil, "https://example.com")
+	if !strings.Contains(loginPlain(m), "https://example.com") {
+		t.Fatal("prefill missing")
+	}
+	m = loginType(m, "/path")
+	if m.values[loginFieldURL] != "https://example.com/path" {
+		t.Fatalf("url = %q", m.values[loginFieldURL])
+	}
+}
+
 func TestLoginEmptyShowsModal(t *testing.T) {
 	m := newTestLogin(nil)
 	view := loginPlain(m)
