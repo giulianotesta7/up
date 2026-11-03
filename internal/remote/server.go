@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -42,6 +43,11 @@ func NewHandler(o Options) http.Handler {
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/ping" {
+			// Ping takes no body, but an oversized chunked one is still refused.
+			if _, err := io.Copy(io.Discard, r.Body); err != nil {
+				writeBodyError(w, err)
+				return
+			}
 			writeJSON(w, http.StatusOK, map[string]string{"name": "up", "version": o.Version})
 			return
 		}
@@ -77,8 +83,16 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 		return false
 	}
 	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	err = dec.Decode(dst)
+	var raw json.RawMessage
+	err = dec.Decode(&raw)
+	if err == nil && !bytes.HasPrefix(raw, []byte("{")) {
+		err = errors.New("the request body must be a JSON object")
+	}
+	if err == nil {
+		strict := json.NewDecoder(bytes.NewReader(raw))
+		strict.DisallowUnknownFields()
+		err = strict.Decode(dst)
+	}
 	if err == nil {
 		// A size error found while looking for trailing data stays a size
 		// error; anything else after the value is just unexpected data.
@@ -90,15 +104,20 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 		}
 	}
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-		} else {
-			writeError(w, http.StatusBadRequest, "invalid request body")
-		}
+		writeBodyError(w, err)
 		return false
 	}
 	return true
+}
+
+// writeBodyError answers 413 for a body over the limit and 400 otherwise.
+func writeBodyError(w http.ResponseWriter, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return
+	}
+	writeError(w, http.StatusBadRequest, "invalid request body")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
