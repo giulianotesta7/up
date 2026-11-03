@@ -89,6 +89,12 @@ func LoadProfile() (Profile, error) {
 		return p, fmt.Errorf("read saved remote file %s: %w", path, err)
 	}
 	defer f.Close()
+	// The checks above ran on the path; make sure the file we opened is that
+	// same file and still private, so a swap in between cannot slip through.
+	opened, err := f.Stat()
+	if err != nil || !os.SameFile(info, opened) || !opened.Mode().IsRegular() || opened.Mode().Perm()&0077 != 0 {
+		return p, fmt.Errorf("saved remote file %s changed while it was being read", path)
+	}
 	d := json.NewDecoder(f)
 	d.DisallowUnknownFields()
 	if err = d.Decode(&p); err != nil {
