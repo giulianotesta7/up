@@ -122,39 +122,6 @@ The monitor's channel gets one email per threshold (14, 7 and 3 days), remembere
 
 Set `TLS expiry` to `off` in the monitor form to skip all of this for one monitor (for example an internal service with a self-managed certificate): no warnings, no `CERT` value, and the stored certificate is forgotten. It is `on` by default and has no effect on `http://` monitors.
 
-### Remote API (optional)
-
-`up serve` can expose an authenticated HTTPS API so a TUI on another machine can connect without SSH. It is off unless you pass `--api-listen`:
-
-```sh
-up serve --api-listen :8443 --tls-cert cert.pem --tls-key key.pem
-```
-
-On the client, run `up login` once to save the remote, then connect with `up tui --remote` or `UP_REMOTE=true up tui`.
-
-- Without a mode it only listens on `127.0.0.1`. Choose one: HTTPS (`--tls-cert` and `--tls-key`), a TLS proxy in front (`--behind-proxy`), or plain HTTP on any address with `--no-tls` for networks that are already encrypted (VPN, Tailscale). With `--no-tls` the token is not encrypted on the network and `up serve` prints a warning.
-- There is one access token. The first start prints it once on stderr; only its hash is stored in `<db>.token` (mode 0600). Run `up token reset` to replace it; the old token stops working immediately.
-- The token travels only in the `Authorization: Bearer` header.
-- SMTP servers and channels are managed with `POST /api/v1/smtp-servers`, `PUT`/`DELETE /api/v1/smtp-servers/{name}`, `POST /api/v1/channels` and `PUT`/`DELETE /api/v1/channels/{name}`. The API never accepts a plaintext SMTP password: the client seals it with the server's public key (from the snapshot) and sends only `password_sealed`; responses show `password_state`, never the password.
-- Write endpoints: `POST /api/v1/checks`, `PUT`/`DELETE /api/v1/checks/{name}`, and `PUT`/`DELETE /api/v1/checks/{name}/mute`.
-- `GET /api/v1/snapshot` returns the monitoring snapshot without SMTP passwords.
-- Every API flag has an environment variable, handy for containers: `UP_API_LISTEN`, `UP_TLS_CERT`, `UP_TLS_KEY`, `UP_BEHIND_PROXY` and `UP_NO_TLS` (`true` or `false`). A flag on the command line overrides its variable.
-
-### Docker (optional)
-
-Docker is not required: `up serve` runs fine under systemd. If you prefer a container, the repository has a `Dockerfile` and an example `docker-compose.yml`:
-
-```sh
-docker compose up -d
-docker compose logs up        # the first start prints the access token once
-```
-
-- Configure it with environment variables (`UP_API_LISTEN`, `UP_BEHIND_PROXY`, `UP_NO_TLS`, `UP_TLS_CERT`, `UP_TLS_KEY`); the flags work too.
-- Everything that must survive lives in the `/data` volume: the database, its encryption key (`up.db.key`) and the access token hash (`up.db.token`). Back the three up together; without the key, stored SMTP passwords have to be entered again.
-- The container runs as an unprivileged user (uid 10001). The example publishes the port on `127.0.0.1` only: put a TLS reverse proxy in front (`UP_BEHIND_PROXY`), or publish it on an already encrypted network such as Tailscale and set `UP_NO_TLS`.
-- Replace the token with `docker compose exec up up token reset`.
-- From your machine: `up login`, then `up tui --remote`. For scripts, `echo "$UP_TOKEN" | up login --url https://up.example.com --token-stdin` logs in without the modal (the token goes through stdin, never as an argument).
-
 ## Contributing
 
 Run `go vet ./...` and `go test -race ./...` before opening a PR. Regenerate the demo with `sh docs/demo/record.sh` (needs vhs, ttyd and ffmpeg).
