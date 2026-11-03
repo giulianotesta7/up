@@ -43,7 +43,8 @@ together, or --no-tls to serve plain HTTP on any address when the network is
 already encrypted (VPN, Tailscale): the token is then not encrypted and a
 warning is printed. The
 access token hash is stored in <db>.token (0600); a new token is shown once
-on stderr. Use up token reset to replace it.
+on stderr. Use up token reset to replace it. GET /api/v1/snapshot returns the
+current monitoring snapshot without SMTP passwords.
 
 Every API flag also reads an environment variable, handy for containers:
 UP_API_LISTEN, UP_TLS_CERT, UP_TLS_KEY, UP_BEHIND_PROXY and UP_NO_TLS (true or
@@ -157,7 +158,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var apiDone <-chan error
 	if *apiListen != "" {
 		var err error
-		apiDone, err = startAPI(apiCtx, cancelAPI, *apiListen, *tlsCert, *tlsKey, *dbPath+".token", *noTLS, stderr)
+		apiDone, err = startAPI(apiCtx, cancelAPI, *apiListen, *tlsCert, *tlsKey, *dbPath+".token", *noTLS, stderr, s)
 		if err != nil {
 			fmt.Fprintf(stderr, "up: %v\n", err)
 			return 1

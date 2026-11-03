@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"github.com/giulianotesta7/up/internal/remote"
+	"github.com/giulianotesta7/up/internal/tui"
 )
 
-func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, tokenPath string, noTLS bool, stderr io.Writer) (<-chan error, error) {
+func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, tokenPath string, noTLS bool, stderr io.Writer, s tui.Store) (<-chan error, error) {
 	_, err := remote.LoadVerifier(tokenPath)
 	missing := errors.Is(err, remote.ErrNoToken)
 	if err != nil && !missing {
@@ -44,13 +45,16 @@ func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, t
 		fmt.Fprintln(stderr, "up: WARNING: API over plain HTTP; the token and data are not encrypted on the network")
 	}
 	fmt.Fprintf(stderr, "up: API listening on %s\n", listener.Addr())
+	routes := remote.SnapshotRoutes(func(ctx context.Context, now time.Time) (tui.Snapshot, error) {
+		return tui.Load(ctx, s, now)
+	})
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		verifier, err := remote.LoadVerifier(tokenPath)
 		if err != nil {
 			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		remote.NewHandler(remote.Options{Verifier: verifier}).ServeHTTP(w, r)
+		remote.NewHandler(remote.Options{Verifier: verifier, Routes: routes}).ServeHTTP(w, r)
 	})
 	server := remote.NewHTTPServer(addr, handler)
 	done := make(chan error, 1)

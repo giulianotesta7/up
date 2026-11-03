@@ -2,7 +2,10 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -13,7 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/remote"
+	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/giulianotesta7/up/internal/store"
 )
 
 func TestAPIRejectsUnsafeConfiguration(t *testing.T) {
@@ -139,6 +145,105 @@ func TestAPIServeAndReset(t *testing.T) {
 			t.Fatal("shutdown timed out")
 		}
 		reader.Close()
+	}
+}
+
+func TestAPISnapshotServe(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "up.db")
+	k, _, err := secret.LoadOrCreate(path + ".key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := secret.Seal(k.PublicKey(), "password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err = s.AddCheck(ctx, config.Check{Name: "snapshot-site", URL: "https://example.com", Interval: time.Hour, Timeout: time.Second, ExpectedStatus: 200}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.AddSMTPServer(ctx, config.SMTPServer{Name: "snapshot-smtp", Host: "smtp.example.com", Port: 465, TLS: config.TLSImplicit, Username: "user", Sender: "a@example.com", Password: sealed}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	serveCtx, cancel := context.WithCancel(ctx)
+	reader, writer := io.Pipe()
+	lines := make(chan string, 64)
+	done := make(chan int, 1)
+	go func() {
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		close(lines)
+	}()
+	go func() {
+		done <- run(serveCtx, []string{"serve", "--db", path, "--api-listen", "127.0.0.1:0"}, io.Discard, writer)
+		writer.Close()
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("shutdown timed out")
+		}
+		reader.Close()
+	}()
+	var token, address string
+	timeout := time.After(5 * time.Second)
+	for address == "" {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				t.Fatal("serve stopped")
+			}
+			if strings.HasPrefix(line, "up: access token (shown once): ") {
+				token = strings.TrimPrefix(line, "up: access token (shown once): ")
+			}
+			if strings.HasPrefix(line, "up: API listening on ") {
+				address = strings.TrimPrefix(line, "up: API listening on ")
+			}
+		case <-timeout:
+			t.Fatal("serve timeout")
+		}
+	}
+	req, _ := http.NewRequest("GET", "http://"+address+"/api/v1/snapshot", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	raw, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Services []struct {
+			Check struct {
+				Name string `json:"name"`
+			} `json:"check"`
+		} `json:"services"`
+		SMTP []struct {
+			Name          string `json:"name"`
+			PasswordState string `json:"password_state"`
+		} `json:"smtp_servers"`
+	}
+	if err = json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 || len(doc.Services) != 1 || doc.Services[0].Check.Name != "snapshot-site" || len(doc.SMTP) != 1 || doc.SMTP[0].Name != "snapshot-smtp" || doc.SMTP[0].PasswordState != "set" {
+		t.Fatalf("snapshot: %d %s", res.StatusCode, raw)
+	}
+	if bytes.Contains(raw, sealed.Data) || bytes.Contains(raw, []byte(base64.StdEncoding.EncodeToString(sealed.Data))) {
+		t.Fatal("ciphertext leaked")
 	}
 }
 
