@@ -44,16 +44,18 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	}
 }
 
-// maxDurationMS keeps the millisecond to time.Duration conversion from overflowing.
+// maxDurationMS keeps the millisecond to time.Duration conversion from
+// overflowing in either direction: a huge negative value would otherwise wrap
+// around to a valid positive duration.
 const maxDurationMS = math.MaxInt64 / int64(time.Millisecond)
 
 // checkOrError converts the wire form, refusing values that would overflow a
 // duration and names the router cannot address.
 func (d CheckDTO) checkOrError() (config.Check, error) {
 	switch {
-	case d.IntervalMS > maxDurationMS:
+	case d.IntervalMS > maxDurationMS || d.IntervalMS < -maxDurationMS:
 		return config.Check{}, errors.New("interval_ms is out of range")
-	case d.TimeoutMS > maxDurationMS:
+	case d.TimeoutMS > maxDurationMS || d.TimeoutMS < -maxDurationMS:
 		return config.Check{}, errors.New("timeout_ms is out of range")
 	case d.Name == "." || d.Name == "..":
 		return config.Check{}, errors.New(`name cannot be "." or ".." over the API`)

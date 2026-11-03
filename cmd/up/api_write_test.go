@@ -163,6 +163,9 @@ func TestAPIWriteLifecycleAndRejections(t *testing.T) {
 		{"unknown channel", "PUT", "/api/v1/checks/keep", strings.Replace(check("keep", site.URL, 200), `"expected_status"`, `"channel":"nope","expected_status"`, 1), 400, `channel "nope" does not exist`},
 		{"bad duration", "PUT", "/api/v1/checks/keep/mute", `{"duration_ms":1}`, 400, "duration must be between 1m and 7d"},
 		{"name mismatch", "PUT", "/api/v1/checks/keep", check("other", site.URL, 200), 400, "name must match path"},
+		{"negative interval wraps", "POST", "/api/v1/checks", `{"name":"neg","url":"https://example.com","interval_ms":-9223372036855,"timeout_ms":1000,"expected_status":200}`, 400, "interval_ms is out of range"},
+		{"min int64 timeout", "POST", "/api/v1/checks", `{"name":"neg","url":"https://example.com","interval_ms":60000,"timeout_ms":-9223372036854775808,"expected_status":200}`, 400, "timeout_ms is out of range"},
+		{"small negative interval", "POST", "/api/v1/checks", `{"name":"neg","url":"https://example.com","interval_ms":-1000,"timeout_ms":1000,"expected_status":200}`, 400, ""},
 	} {
 		code, body := call(tc.method, tc.path, tc.body)
 		if code != tc.status {
