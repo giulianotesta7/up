@@ -129,7 +129,7 @@ func loginFromStdin(ctx context.Context, urlSet bool, serverURL string, stdout, 
 		fmt.Fprintln(stderr, "up: WARNING: plain http: the token is sent unencrypted")
 	}
 	if err := client.Validate(ctx, serverURL, token); err != nil {
-		fmt.Fprintf(stderr, "up: %s\n", tui.DescribeLoginError(err, serverURL))
+		fmt.Fprintf(stderr, "up: %s\n", strings.ReplaceAll(tui.DescribeLoginError(err, serverURL), "\n", " "))
 		return 1
 	}
 	if err := connection.SaveProfile(connection.Profile{ServerURL: serverURL, Token: token}); err != nil {

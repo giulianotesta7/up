@@ -189,7 +189,7 @@ func describeLoginError(err error, serverURL string) string {
 	case errors.Is(err, connection.ErrTokenRejected):
 		return "Token rejected (401). Check it and retry."
 	case errors.Is(err, connection.ErrCertUntrusted):
-		return "Certificate not trusted (unknown authority)."
+		return "Certificate not trusted (unknown authority).\nUse a certificate from a trusted CA, or add this one to your system trust store."
 	case errors.Is(err, connection.ErrUnreachable):
 		detail := strings.TrimPrefix(err.Error(), connection.ErrUnreachable.Error())
 		detail = strings.TrimSpace(strings.TrimPrefix(detail, ":"))
@@ -245,7 +245,11 @@ func (m loginModel) renderBody() string {
 			b.WriteString("  " + warnStyle.Render("⚠ Plain http: the token is sent unencrypted") + "\n")
 		}
 		if m.err != "" {
-			b.WriteString("  " + downStyle.Render("✗ "+m.err) + "\n")
+			first, hint, _ := strings.Cut(m.err, "\n")
+			b.WriteString("  " + downStyle.Render("✗ "+first) + "\n")
+			if hint != "" {
+				b.WriteString("    " + helpStyle.Render(hint) + "\n")
+			}
 		}
 		b.WriteString("  " + renderHelp("tab focus · enter connect · esc cancel"))
 	}

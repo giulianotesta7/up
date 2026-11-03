@@ -267,3 +267,19 @@ func TestLoginStaleResultIgnored(t *testing.T) {
 		t.Error("late result after cancel must be ignored")
 	}
 }
+
+func TestLoginCertificateErrorSaysWhatToDo(t *testing.T) {
+	m := newTestLogin(func(context.Context, string, string) error { return connection.ErrCertUntrusted })
+	m = loginFill(m, "https://up.acme.com", "tok")
+	m, cmd := loginSubmit(t, m)
+	next, _ := m.Update(loginDone(cmd))
+	view := loginPlain(next.(loginModel))
+	for _, want := range []string{"✗ Certificate not trusted (unknown authority).", "trusted CA", "system trust store"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view missing %q:\n%s", want, view)
+		}
+	}
+	if next.(loginModel).Result().Connected {
+		t.Error("an untrusted certificate must not connect")
+	}
+}
