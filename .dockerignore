@@ -1,0 +1,15 @@
+.git
+.github
+.agents
+.atl
+odd
+design
+docs
+deploy
+up
+*.db
+*.db-wal
+*.db-shm
+*.db.key
+*.db.token
+.env

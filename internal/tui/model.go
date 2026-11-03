@@ -51,10 +51,12 @@ func (m Model) sweepTick() tea.Cmd {
 type Model struct {
 	hostname          string
 	databasePath      string
+	destination       string
 	store             Store
 	now               func() time.Time
 	snap              Snapshot
 	err               error
+	loaded            bool
 	width             int
 	height            int
 	selected          int
@@ -86,6 +88,10 @@ type Model struct {
 type Options struct {
 	DatabasePath string
 	Hostname     string
+	// Destination names a remote server. When set, the footer shows it
+	// instead of the database path, so a remote session is never mistaken
+	// for the local one.
+	Destination string
 }
 
 // New returns a model reading from s; now is the clock used for ages and
@@ -94,6 +100,7 @@ func New(s Store, now func() time.Time, options ...Options) Model {
 	m := Model{store: s, now: now}
 	if len(options) > 0 {
 		m.databasePath = options[0].DatabasePath
+		m.destination = options[0].Destination
 		m.hostname = options[0].Hostname
 	}
 	return m
@@ -107,7 +114,13 @@ func (m Model) Init() tea.Cmd {
 func (m Model) load() tea.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
-	snap, err := Load(ctx, m.store, m.now())
+	var snap Snapshot
+	var err error
+	if loader, ok := m.store.(SnapshotLoader); ok {
+		snap, err = loader.LoadSnapshot(ctx, m.now())
+	} else {
+		snap, err = Load(ctx, m.store, m.now())
+	}
 	return snapshotMsg{snap: snap, err: err, generation: m.generation}
 }
 
@@ -127,7 +140,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var frame tea.Cmd
 		// A failed read keeps the last good snapshot on screen.
 		m.err = msg.err
+		if m.destination != "" && msg.err != nil {
+			m.err = serverError{msg.err}
+		}
 		if msg.err == nil {
+			m.loaded = true
 			if !m.animationOff && shouldSweep(m.snap, msg.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
 				m.sweeping, m.sweepPosition = true, 0
 				// A restart supersedes any pending frame. Only this generation
@@ -384,6 +401,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch msg.String() {
+	case "r":
+		if m.destination != "" {
+			m.generation++
+			return m, m.load
+		}
 	case "?":
 		m.help = true
 	case "q":
@@ -450,7 +472,7 @@ func (m Model) View() tea.View {
 		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width)
 	}
 	if m.help && !helpPopupFits(m.width, m.height) {
-		content = renderKeys()
+		content = renderKeys(m.destination != "")
 	}
 	modal := ""
 	if m.form != nil || m.deletion != nil || m.mute != nil {
@@ -572,7 +594,20 @@ func (m Model) View() tea.View {
 	if modal != "" || stackParent != "" || stackChild != "" || (m.help && helpPopupFits(m.width, m.height)) {
 		content = padForPopup(content, m.height)
 	}
-	content += "\n" + helpStyle.Render("database: "+m.databasePath)
+	if m.destination != "" {
+		footer := helpStyle.Render("remote · " + displayText(m.destination))
+		if m.err != nil {
+			footer = warnStyle.Render("●") + helpStyle.Render(" disconnected · "+displayText(m.destination)+" — retrying (r retry · q quit)")
+		} else if m.loaded {
+			footer = upStyle.Render("●") + helpStyle.Render(" remote · "+displayText(m.destination))
+		}
+		if m.width > 0 {
+			footer = ansi.Truncate(footer, m.width, "")
+		}
+		content += "\n" + footer
+	} else {
+		content += "\n" + helpStyle.Render("database: "+m.databasePath)
+	}
 	if split {
 		content = truncateLines(content, m.width)
 	}
@@ -580,7 +615,7 @@ func (m Model) View() tea.View {
 		if m.width > 0 {
 			content = truncateLines(content, m.width)
 		}
-		content = overlayPopup(content, renderHelpPopup(m.splitMode()), m.width, m.height)
+		content = overlayPopup(content, renderHelpPopup(m.splitMode(), m.destination != ""), m.width, m.height)
 	}
 	if modal != "" {
 		if m.width > 0 {
@@ -622,6 +657,11 @@ func (m Model) View() tea.View {
 
 // Run shows the TUI until the user quits or ctx is done.
 func Run(ctx context.Context, s *store.Store, options ...Options) error {
+	return RunStore(ctx, s, options...)
+}
+
+// RunStore runs the TUI against any Store, such as a remote server client.
+func RunStore(ctx context.Context, s Store, options ...Options) error {
 	p := tea.NewProgram(New(s, time.Now, options...), tea.WithContext(ctx))
 	_, err := p.Run()
 	if err != nil && ctx.Err() != nil && errors.Is(err, tea.ErrProgramKilled) {

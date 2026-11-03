@@ -222,7 +222,7 @@ func (s *Store) SetChecks(ctx context.Context, checks []config.Check) error {
 // if its definition is identical. History and heartbeat are untouched.
 func (s *Store) AddCheck(ctx context.Context, c config.Check) error {
 	if err := config.ValidateCheck(c); err != nil {
-		return fmt.Errorf("store: add check: %w", err)
+		return classify(ErrValidation, fmt.Errorf("store: add check: %w", err))
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -234,7 +234,7 @@ func (s *Store) AddCheck(ctx context.Context, c config.Check) error {
 		return fmt.Errorf("store: add check: %w", err)
 	}
 	if exists {
-		return fmt.Errorf("store: add check: name %q already exists", c.Name)
+		return classify(ErrExists, fmt.Errorf("store: add check: name %q already exists", c.Name))
 	}
 	var next int
 	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(position), -1) + 1 FROM checks").Scan(&next); err != nil {

@@ -21,7 +21,7 @@ func (s *Store) SetMute(ctx context.Context, name string, until time.Time, wasAl
 		return fmt.Errorf("store: set mute: %w", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("store: set mute: name %q not found", name)
+		return classify(ErrNotFound, fmt.Errorf("store: set mute: name %q not found", name))
 	}
 	return nil
 }
