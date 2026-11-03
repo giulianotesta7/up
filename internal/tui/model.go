@@ -51,6 +51,7 @@ func (m Model) sweepTick() tea.Cmd {
 type Model struct {
 	hostname          string
 	databasePath      string
+	destination       string
 	store             Store
 	now               func() time.Time
 	snap              Snapshot
@@ -86,6 +87,10 @@ type Model struct {
 type Options struct {
 	DatabasePath string
 	Hostname     string
+	// Destination names a remote server. When set, the footer shows it
+	// instead of the database path, so a remote session is never mistaken
+	// for the local one.
+	Destination string
 }
 
 // New returns a model reading from s; now is the clock used for ages and
@@ -94,6 +99,7 @@ func New(s Store, now func() time.Time, options ...Options) Model {
 	m := Model{store: s, now: now}
 	if len(options) > 0 {
 		m.databasePath = options[0].DatabasePath
+		m.destination = options[0].Destination
 		m.hostname = options[0].Hostname
 	}
 	return m
@@ -107,7 +113,13 @@ func (m Model) Init() tea.Cmd {
 func (m Model) load() tea.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
-	snap, err := Load(ctx, m.store, m.now())
+	var snap Snapshot
+	var err error
+	if loader, ok := m.store.(SnapshotLoader); ok {
+		snap, err = loader.LoadSnapshot(ctx, m.now())
+	} else {
+		snap, err = Load(ctx, m.store, m.now())
+	}
 	return snapshotMsg{snap: snap, err: err, generation: m.generation}
 }
 
@@ -572,7 +584,11 @@ func (m Model) View() tea.View {
 	if modal != "" || stackParent != "" || stackChild != "" || (m.help && helpPopupFits(m.width, m.height)) {
 		content = padForPopup(content, m.height)
 	}
-	content += "\n" + helpStyle.Render("database: "+m.databasePath)
+	if m.destination != "" {
+		content += "\n" + helpStyle.Render("remote · "+displayText(m.destination))
+	} else {
+		content += "\n" + helpStyle.Render("database: "+m.databasePath)
+	}
 	if split {
 		content = truncateLines(content, m.width)
 	}
@@ -622,6 +638,11 @@ func (m Model) View() tea.View {
 
 // Run shows the TUI until the user quits or ctx is done.
 func Run(ctx context.Context, s *store.Store, options ...Options) error {
+	return RunStore(ctx, s, options...)
+}
+
+// RunStore runs the TUI against any Store, such as a remote server client.
+func RunStore(ctx context.Context, s Store, options ...Options) error {
 	p := tea.NewProgram(New(s, time.Now, options...), tea.WithContext(ctx))
 	_, err := p.Run()
 	if err != nil && ctx.Err() != nil && errors.Is(err, tea.ErrProgramKilled) {

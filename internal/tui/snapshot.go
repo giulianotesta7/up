@@ -137,6 +137,14 @@ type Store interface {
 
 var _ Store = (*store.Store)(nil)
 
+// SnapshotLoader is an optional capability of a Store: it returns a whole
+// snapshot in one call. The TUI uses it instead of many per-resource reads,
+// so a remote store costs one request per refresh and never falls back to
+// partial reads.
+type SnapshotLoader interface {
+	LoadSnapshot(ctx context.Context, now time.Time) (Snapshot, error)
+}
+
 // Load reads a snapshot from the store.
 func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 	var snap Snapshot

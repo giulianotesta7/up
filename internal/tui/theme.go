@@ -138,3 +138,17 @@ func renderHeader(snap Snapshot, width int) string {
 func renderSweepHeader(snap Snapshot, width, position int) string {
 	return renderTitle(snap) + "\n" + renderRule(width, position) + "\n"
 }
+
+// displayText strips terminal control sequences and line breaks from text that
+// comes from outside the program before it is drawn.
+func displayText(s string) string {
+	return ansi.Strip(strings.Map(func(r rune) rune {
+		if r == '\x1b' {
+			return r // let ansi.Strip remove the whole sequence
+		}
+		if r < 32 || r == 127 {
+			return -1
+		}
+		return r
+	}, s))
+}
