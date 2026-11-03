@@ -40,7 +40,7 @@ Use when drafting or revising release text. Do not use for building binaries, ma
 
 Return the version-only title and Markdown body, plus a separate private evidence summary: target/range, change sources and unresolved facts or links. Keep that summary out of the public text. Never claim publication.
 
-Once the owner approves the body, it is stored as `.github/release-notes/<version>.md`; the release workflow publishes that file for the pushed tag and falls back to generated notes when it is missing.
+Once the owner approves the body, it is stored as `.github/release-notes/<version>.md`; the release workflow requires that file for the pushed tag before testing or building. Missing, empty or whitespace-only notes fail the workflow. Publication uses the file only, with no generated-notes fallback.
 
 ## References
 

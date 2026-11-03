@@ -21,6 +21,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Validate release notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          notes=".github/release-notes/$RELEASE_TAG.md"
+          if ! python3 -c 'import pathlib, sys; notes = pathlib.Path(sys.argv[1]); sys.exit(0 if notes.is_file() and notes.read_text(encoding="utf-8").strip() else 1)' "$notes"; then
+            echo "::error::Release notes must exist and contain non-whitespace text: $notes" >&2
+            exit 1
+          fi
+
+      - name: Test release workflow
+        run: python3 .github/tests/test_release_workflow.py
+
       - name: Test
         run: go test ./... -count=1 -timeout 10m
 
@@ -39,13 +52,9 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          notes=".github/release-notes/$GITHUB_REF_NAME.md"
-          if [ -f "$notes" ]; then
-            notes_flag="--notes-file $notes"
-          else
-            notes_flag="--generate-notes"
-          fi
-          gh release create "$GITHUB_REF_NAME" \
+          notes=".github/release-notes/$RELEASE_TAG.md"
+          gh release create "$RELEASE_TAG" \
             dist/up_linux_amd64.tar.gz dist/up_linux_arm64.tar.gz dist/checksums.txt dist/up.service dist/up-system.service \
-            --title "$GITHUB_REF_NAME" $notes_flag --verify-tag
+            --title "$RELEASE_TAG" --notes-file "$notes" --verify-tag
