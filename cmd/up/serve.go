@@ -97,6 +97,10 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "up: --tls-cert and --tls-key must be provided together")
 		return 1
 	}
+	if *apiListen == "" && (*tlsCert != "" || *tlsKey != "" || *behindProxy) {
+		fmt.Fprintln(stderr, "up: --tls-cert, --tls-key and --behind-proxy require --api-listen")
+		return 1
+	}
 	if *apiListen != "" {
 		if err := remote.ValidateListen(*apiListen, *tlsCert != "", *behindProxy, *noTLS); err != nil {
 			fmt.Fprintf(stderr, "up: %v\n", err)
