@@ -133,6 +133,7 @@ up serve --api-listen :8443 --tls-cert cert.pem --tls-key key.pem
 - Without a mode it only listens on `127.0.0.1`. Choose one: HTTPS (`--tls-cert` and `--tls-key`), a TLS proxy in front (`--behind-proxy`), or plain HTTP on any address with `--no-tls` for networks that are already encrypted (VPN, Tailscale). With `--no-tls` the token is not encrypted on the network and `up serve` prints a warning.
 - There is one access token. The first start prints it once on stderr; only its hash is stored in `<db>.token` (mode 0600). Run `up token reset` to replace it; the old token stops working immediately.
 - The token travels only in the `Authorization: Bearer` header.
+- Every API flag has an environment variable, handy for containers: `UP_API_LISTEN`, `UP_TLS_CERT`, `UP_TLS_KEY`, `UP_BEHIND_PROXY` and `UP_NO_TLS` (`true` or `false`). A flag on the command line overrides its variable.
 
 ## Contributing
 

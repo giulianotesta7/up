@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/giulianotesta7/up/internal/alert"
@@ -44,17 +45,25 @@ warning is printed. The
 access token hash is stored in <db>.token (0600); a new token is shown once
 on stderr. Use up token reset to replace it.
 
+Every API flag also reads an environment variable, handy for containers:
+UP_API_LISTEN, UP_TLS_CERT, UP_TLS_KEY, UP_BEHIND_PROXY and UP_NO_TLS (true or
+false). A flag given on the command line overrides its variable.
+
 Flags:
 `
 
 func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	dbPath := databaseFlag(fs)
-	apiListen := fs.String("api-listen", "", "enable the API on this address")
-	tlsCert := fs.String("tls-cert", "", "TLS certificate file (requires --tls-key)")
-	tlsKey := fs.String("tls-key", "", "TLS private key file (requires --tls-cert)")
-	behindProxy := fs.Bool("behind-proxy", false, "allow HTTP behind a TLS proxy")
-	noTLS := fs.Bool("no-tls", false, "serve the API over plain HTTP on any address (the token is not encrypted on the network)")
+	// Each API flag defaults to its UP_* variable, so containers can be
+	// configured with environment alone; an explicit flag always wins.
+	proxyDefault, proxyErr := envBool("UP_BEHIND_PROXY")
+	noTLSDefault, noTLSErr := envBool("UP_NO_TLS")
+	apiListen := fs.String("api-listen", os.Getenv("UP_API_LISTEN"), "enable the API on this address (env UP_API_LISTEN)")
+	tlsCert := fs.String("tls-cert", os.Getenv("UP_TLS_CERT"), "TLS certificate file, requires --tls-key (env UP_TLS_CERT)")
+	tlsKey := fs.String("tls-key", os.Getenv("UP_TLS_KEY"), "TLS private key file, requires --tls-cert (env UP_TLS_KEY)")
+	behindProxy := fs.Bool("behind-proxy", proxyDefault, "allow HTTP behind a TLS proxy (env UP_BEHIND_PROXY)")
+	noTLS := fs.Bool("no-tls", noTLSDefault, "serve the API over plain HTTP on any address; the token is not encrypted on the network (env UP_NO_TLS)")
 	retention := fs.Duration("retention", 720*time.Hour, "how long to keep results, for example 720h (30 days); 0 keeps everything")
 	if code, ok := parseFlags(fs, serveHelp, args, stdout, stderr); !ok {
 		return code
@@ -64,6 +73,17 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	for _, bad := range []struct {
+		flag string
+		err  error
+	}{{"behind-proxy", proxyErr}, {"no-tls", noTLSErr}} {
+		if bad.err != nil && !set[bad.flag] {
+			fmt.Fprintf(stderr, "up: %v\n", bad.err)
+			return 1
+		}
+	}
 	if *noTLS && *apiListen == "" {
 		fmt.Fprintln(stderr, "up: --no-tls requires --api-listen")
 		return 1
@@ -172,4 +192,17 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return 0
+}
+
+// envBool reads a boolean variable; unset or empty means false.
+func envBool(name string) (bool, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return false, nil
+	}
+	b, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s: invalid value %q (use true or false)", name, value)
+	}
+	return b, nil
 }
