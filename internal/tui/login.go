@@ -177,6 +177,12 @@ func loginTick(generation uint64) tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return loginTickMsg{generation} })
 }
 
+// DescribeLoginError gives the one-line explanation the login modal shows for
+// a failed connection, so non-interactive commands print the same text.
+func DescribeLoginError(err error, serverURL string) string {
+	return describeLoginError(err, serverURL)
+}
+
 // describeLoginError turns a failure kind into one actionable line.
 func describeLoginError(err error, serverURL string) string {
 	switch {

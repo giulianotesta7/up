@@ -153,7 +153,7 @@ docker compose logs up        # the first start prints the access token once
 - Everything that must survive lives in the `/data` volume: the database, its encryption key (`up.db.key`) and the access token hash (`up.db.token`). Back the three up together; without the key, stored SMTP passwords have to be entered again.
 - The container runs as an unprivileged user (uid 10001). The example publishes the port on `127.0.0.1` only: put a TLS reverse proxy in front (`UP_BEHIND_PROXY`), or publish it on an already encrypted network such as Tailscale and set `UP_NO_TLS`.
 - Replace the token with `docker compose exec up up token reset`.
-- From your machine: `up login`, then `up tui --remote`.
+- From your machine: `up login`, then `up tui --remote`. For scripts, `echo "$UP_TOKEN" | up login --url https://up.example.com --token-stdin` logs in without the modal (the token goes through stdin, never as an argument).
 
 ## Contributing
 
