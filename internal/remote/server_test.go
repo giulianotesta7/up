@@ -212,3 +212,19 @@ func TestListenPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestOversizedChunkedBodyWithTrailingSpaceIsTooLarge(t *testing.T) {
+	h, _ := testHandler(t, nil)
+	// A valid object followed by whitespace past the limit: the limit is hit
+	// while checking for trailing data, which is still a size problem.
+	body := `{"name":"a"}` + strings.Repeat(" ", MaxBodyBytes+10)
+	req := httptest.NewRequest("POST", "/api/v1/echo", io.NopCloser(strings.NewReader(body)))
+	req.ContentLength = -1
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 413 {
+		t.Errorf("status = %d, want 413", rec.Code)
+	}
+}

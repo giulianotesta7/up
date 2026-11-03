@@ -80,8 +80,13 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec.DisallowUnknownFields()
 	err = dec.Decode(dst)
 	if err == nil {
+		// A size error found while looking for trailing data stays a size
+		// error; anything else after the value is just unexpected data.
 		if _, next := dec.Token(); next != io.EOF {
-			err = errors.New("unexpected data after the JSON value")
+			err = next
+			if err == nil {
+				err = errors.New("unexpected data after the JSON value")
+			}
 		}
 	}
 	if err != nil {
