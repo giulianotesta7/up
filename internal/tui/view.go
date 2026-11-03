@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -242,6 +243,13 @@ func renderTitleWidth(snap Snapshot, width int) string {
 	return line
 }
 
+// serverError marks a failed read from a remote server, so the banner names
+// the server instead of a database that is not on this machine.
+type serverError struct{ err error }
+
+func (e serverError) Error() string { return e.err.Error() }
+func (e serverError) Unwrap() error { return e.err }
+
 func renderBanners(snap Snapshot, now time.Time, loadErr error) string {
 	var b strings.Builder
 	if snap.Stale(now) {
@@ -252,7 +260,12 @@ func renderBanners(snap Snapshot, now time.Time, loadErr error) string {
 		b.WriteString(warnStyle.Render("daemon not responding: "+last+" — is `up serve` running?") + "\n")
 	}
 	if loadErr != nil {
-		b.WriteString(warnStyle.Render("error reading the database: "+loadErr.Error()) + "\n")
+		prefix := "error reading the database: "
+		var remote serverError
+		if errors.As(loadErr, &remote) {
+			prefix = "cannot reach the server: "
+		}
+		b.WriteString(warnStyle.Render(prefix+loadErr.Error()) + "\n")
 	}
 	return b.String()
 }
@@ -350,7 +363,7 @@ func orDash(s string) string {
 }
 
 // renderKeys is the full key map shown by "?" on the list and detail screens.
-func renderKeys() string {
+func renderKeys(remote ...bool) string {
 	row := func(key, left, key2, right string) string {
 		cell := accentStyle.Render(key) + strings.Repeat(" ", max(1, 9-ansi.StringWidth(key))) + helpStyle.Render(left)
 		if key2 == "" {
@@ -358,6 +371,10 @@ func renderKeys() string {
 		}
 		pad := strings.Repeat(" ", max(1, 28-9-ansi.StringWidth(left)))
 		return "  " + cell + pad + accentStyle.Render(key2) + strings.Repeat(" ", max(1, 4-ansi.StringWidth(key2))) + helpStyle.Render(right)
+	}
+	retryKey, retryDescription := "", ""
+	if len(remote) > 0 && remote[0] {
+		retryKey, retryDescription = "r", "retry"
 	}
 	lines := []string{
 		headerStyle.Render("MONITORS") + strings.Repeat(" ", 20) + headerStyle.Render("ALERTING"),
@@ -371,7 +388,7 @@ func renderKeys() string {
 		headerStyle.Render("VIEW"),
 		"",
 		row("a", "animation on/off", "", ""),
-		row("q", "quit", "", ""),
+		row("q", "quit", retryKey, retryDescription),
 		"",
 		"  " + accentStyle.Render("? or esc") + "  " + helpStyle.Render("close"),
 	}

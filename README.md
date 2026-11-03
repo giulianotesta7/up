@@ -130,6 +130,8 @@ Set `TLS expiry` to `off` in the monitor form to skip all of this for one monito
 up serve --api-listen :8443 --tls-cert cert.pem --tls-key key.pem
 ```
 
+On the client, run `up login` once to save the remote, then connect with `up tui --remote` or `UP_REMOTE=true up tui`.
+
 - Without a mode it only listens on `127.0.0.1`. Choose one: HTTPS (`--tls-cert` and `--tls-key`), a TLS proxy in front (`--behind-proxy`), or plain HTTP on any address with `--no-tls` for networks that are already encrypted (VPN, Tailscale). With `--no-tls` the token is not encrypted on the network and `up serve` prints a warning.
 - There is one access token. The first start prints it once on stderr; only its hash is stored in `<db>.token` (mode 0600). Run `up token reset` to replace it; the old token stops working immediately.
 - The token travels only in the `Authorization: Bearer` header.

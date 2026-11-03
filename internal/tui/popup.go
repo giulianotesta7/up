@@ -51,13 +51,13 @@ func helpPopupFits(width, height int) bool {
 
 // renderHelpPopup omits enter in split mode, where the detail is always shown
 // and enter does nothing. The box keeps its height so it does not jump.
-func renderHelpPopup(split bool) string {
+func renderHelpPopup(split bool, remote ...bool) string {
 	row := func(key, description, key2, description2 string) string {
 		left := accentStyle.Render(key) + strings.Repeat(" ", 9-ansi.StringWidth(key)) + helpStyle.Render(description)
 		if key2 == "" {
 			return left
 		}
-		return left + strings.Repeat(" ", 14-ansi.StringWidth(description)) + accentStyle.Render(key2) + strings.Repeat(" ", 4-ansi.StringWidth(key2)) + helpStyle.Render(description2)
+		return left + strings.Repeat(" ", max(0, 14-ansi.StringWidth(description))) + accentStyle.Render(key2) + strings.Repeat(" ", max(0, 4-ansi.StringWidth(key2))) + helpStyle.Render(description2)
 	}
 	monitors := [][2]string{{"↑/↓ k/j", "select"}, {"enter", "details"}, {"n", "new monitor"}, {"e", "edit"}, {"d", "delete"}}
 	alerting := [][2]string{{"m", "mute selected"}, {"u", "unmute"}, {"s", "SMTP servers"}, {"c", "channels"}}
@@ -75,11 +75,15 @@ func renderHelpPopup(split bool) string {
 		}
 		lines = append(lines, strings.TrimRight(row(left[0], left[1], right[0], right[1]), " "))
 	}
+	retryKey, retryDescription := "", ""
+	if len(remote) > 0 && remote[0] {
+		retryKey, retryDescription = "r", "retry"
+	}
 	lines = append(lines,
 		"",
 		headerStyle.Render("VIEW"),
 		row("a", "animation on/off", "", ""),
-		row("q", "quit", "", ""),
+		row("q", "quit", retryKey, retryDescription),
 		"",
 		accentStyle.Render("? or esc")+"  "+helpStyle.Render("close"),
 	)

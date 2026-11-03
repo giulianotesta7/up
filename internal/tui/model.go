@@ -56,6 +56,7 @@ type Model struct {
 	now               func() time.Time
 	snap              Snapshot
 	err               error
+	loaded            bool
 	width             int
 	height            int
 	selected          int
@@ -139,7 +140,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var frame tea.Cmd
 		// A failed read keeps the last good snapshot on screen.
 		m.err = msg.err
+		if m.destination != "" && msg.err != nil {
+			m.err = serverError{msg.err}
+		}
 		if msg.err == nil {
+			m.loaded = true
 			if !m.animationOff && shouldSweep(m.snap, msg.snap, m.now(), os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
 				m.sweeping, m.sweepPosition = true, 0
 				// A restart supersedes any pending frame. Only this generation
@@ -396,6 +401,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch msg.String() {
+	case "r":
+		if m.destination != "" {
+			m.generation++
+			return m, m.load
+		}
 	case "?":
 		m.help = true
 	case "q":
@@ -462,7 +472,7 @@ func (m Model) View() tea.View {
 		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width)
 	}
 	if m.help && !helpPopupFits(m.width, m.height) {
-		content = renderKeys()
+		content = renderKeys(m.destination != "")
 	}
 	modal := ""
 	if m.form != nil || m.deletion != nil || m.mute != nil {
@@ -585,7 +595,16 @@ func (m Model) View() tea.View {
 		content = padForPopup(content, m.height)
 	}
 	if m.destination != "" {
-		content += "\n" + helpStyle.Render("remote · "+displayText(m.destination))
+		footer := helpStyle.Render("remote · " + displayText(m.destination))
+		if m.err != nil {
+			footer = warnStyle.Render("●") + helpStyle.Render(" disconnected · "+displayText(m.destination)+" — retrying (r retry · q quit)")
+		} else if m.loaded {
+			footer = upStyle.Render("●") + helpStyle.Render(" remote · "+displayText(m.destination))
+		}
+		if m.width > 0 {
+			footer = ansi.Truncate(footer, m.width, "")
+		}
+		content += "\n" + footer
 	} else {
 		content += "\n" + helpStyle.Render("database: "+m.databasePath)
 	}
@@ -596,7 +615,7 @@ func (m Model) View() tea.View {
 		if m.width > 0 {
 			content = truncateLines(content, m.width)
 		}
-		content = overlayPopup(content, renderHelpPopup(m.splitMode()), m.width, m.height)
+		content = overlayPopup(content, renderHelpPopup(m.splitMode(), m.destination != ""), m.width, m.height)
 	}
 	if modal != "" {
 		if m.width > 0 {
