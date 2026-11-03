@@ -31,6 +31,11 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	case errors.Is(err, store.ErrExists):
 		status = http.StatusConflict
+	default:
+		var inUse *store.InUseError
+		if errors.As(err, &inUse) {
+			status = http.StatusConflict
+		}
 	}
 	if status == http.StatusInternalServerError {
 		writeError(w, status, "internal error")

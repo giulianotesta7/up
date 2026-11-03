@@ -9,6 +9,29 @@ import (
 	"github.com/giulianotesta7/up/internal/config"
 )
 
+func TestAlertWriteErrorKinds(t *testing.T) {
+	s, err := Open(t.TempDir() + "/alert.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	for _, tc := range []struct {
+		run  func() error
+		kind error
+		text string
+	}{
+		{func() error { return s.AddSMTPServer(ctx, config.SMTPServer{}) }, ErrValidation, ""},
+		{func() error { return s.DeleteSMTPServer(ctx, "missing") }, ErrNotFound, `store: delete SMTP server: name "missing" not found`},
+		{func() error { return s.DeleteChannel(ctx, "missing") }, ErrNotFound, `store: delete channel: name "missing" not found`},
+	} {
+		err := tc.run()
+		if !errors.Is(err, tc.kind) || (tc.text != "" && err.Error() != tc.text) {
+			t.Errorf("got %v, want kind %v and text %q", err, tc.kind, tc.text)
+		}
+	}
+}
+
 func TestWriteErrorKinds(t *testing.T) {
 	s, err := Open(t.TempDir() + "/checks.db")
 	if err != nil {

@@ -49,7 +49,7 @@ func requireSMTP(ctx context.Context, tx *sql.Tx, name string) error {
 		return err
 	}
 	if !exists {
-		return fmt.Errorf("SMTP server %q does not exist", name)
+		return classify(ErrValidation, fmt.Errorf("SMTP server %q does not exist", name))
 	}
 	return nil
 }
@@ -123,7 +123,7 @@ func (s *Store) writeSMTP(ctx context.Context, v config.SMTPServer, update bool)
 		}
 	}()
 	if err = config.ValidateSMTPServer(v); err != nil {
-		return
+		return classify(ErrValidation, err)
 	}
 	tx, e := s.db.BeginTx(ctx, nil)
 	if e != nil {
@@ -135,10 +135,10 @@ func (s *Store) writeSMTP(ctx context.Context, v config.SMTPServer, update bool)
 		return
 	}
 	if update && !exists {
-		return fmt.Errorf("name %q not found", v.Name)
+		return classify(ErrNotFound, fmt.Errorf("name %q not found", v.Name))
 	}
 	if !update && exists {
-		return fmt.Errorf("name %q already exists", v.Name)
+		return classify(ErrExists, fmt.Errorf("name %q already exists", v.Name))
 	}
 	data, key := blob(v.Password.Data), blob(v.Password.Key)
 	if update && v.Username == "" {
@@ -223,7 +223,7 @@ func (s *Store) writeChannel(ctx context.Context, c config.Channel, update bool)
 		}
 	}()
 	if err = config.ValidateChannel(c); err != nil {
-		return
+		return classify(ErrValidation, err)
 	}
 	tx, e := s.db.BeginTx(ctx, nil)
 	if e != nil {
@@ -235,10 +235,10 @@ func (s *Store) writeChannel(ctx context.Context, c config.Channel, update bool)
 		return
 	}
 	if update && !exists {
-		return fmt.Errorf("name %q not found", c.Name)
+		return classify(ErrNotFound, fmt.Errorf("name %q not found", c.Name))
 	}
 	if !update && exists {
-		return fmt.Errorf("name %q already exists", c.Name)
+		return classify(ErrExists, fmt.Errorf("name %q already exists", c.Name))
 	}
 	if err = requireSMTP(ctx, tx, c.SMTPServer); err != nil {
 		return
@@ -287,7 +287,7 @@ func (s *Store) deleteAlert(ctx context.Context, name, kind string) (err error) 
 		return
 	}
 	if !exists {
-		return fmt.Errorf("name %q not found", name)
+		return classify(ErrNotFound, fmt.Errorf("name %q not found", name))
 	}
 	rows, e := tx.QueryContext(ctx, query, name)
 	if e != nil {

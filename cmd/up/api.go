@@ -52,6 +52,10 @@ func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, t
 	writes := remote.WriteRoutes(s)
 	routes.Handle("/api/v1/checks", writes)
 	routes.Handle("/api/v1/checks/", writes)
+	alerts := remote.AlertWriteRoutes(s)
+	for _, path := range []string{"/api/v1/smtp-servers", "/api/v1/smtp-servers/", "/api/v1/channels", "/api/v1/channels/"} {
+		routes.Handle(path, alerts)
+	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		verifier, err := remote.LoadVerifier(tokenPath)
 		if err != nil {
