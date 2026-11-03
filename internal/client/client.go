@@ -13,10 +13,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/giulianotesta7/up/internal/check"
 	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/connection"
@@ -37,7 +39,17 @@ type Client struct {
 }
 
 func New(serverURL, token string) *Client {
-	return &Client{base: strings.TrimRight(serverURL, "/"), token: token, http: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	return &Client{base: strings.TrimRight(serverURL, "/"), token: token, http: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: proxyFor, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+}
+
+// proxyFor keeps a plain http request away from any proxy: its bearer token is
+// already unencrypted and a proxy would only widen who can read it. https
+// follows the usual environment rules, where a proxy only tunnels.
+func proxyFor(req *http.Request) (*url.URL, error) {
+	if req.URL.Scheme == "http" {
+		return nil, nil
+	}
+	return http.ProxyFromEnvironment(req)
 }
 
 var _ tui.Store = (*Client)(nil)
@@ -109,7 +121,7 @@ func (c *Client) responseError(status int, b []byte) error {
 		if c.token != "" && strings.Contains(e.Error, c.token) {
 			return errors.New("server returned an error")
 		}
-		return errors.New(e.Error)
+		return errors.New(clean(e.Error))
 	}
 	return fmt.Errorf("server returned %d", status)
 }
@@ -153,6 +165,7 @@ func (c *Client) LoadSnapshot(ctx context.Context, now time.Time) (tui.Snapshot,
 		return tui.Snapshot{}, errors.New("client: invalid snapshot")
 	}
 	s := d.Snapshot()
+	sanitize(reflect.ValueOf(&s).Elem())
 	skew := now.Sub(d.ServerTime)
 	shift := func(t time.Time) time.Time {
 		if t.IsZero() {
@@ -206,6 +219,9 @@ func addressable(name string) error {
 	return nil
 }
 func (c *Client) AddCheck(ctx context.Context, v config.Check) error {
+	if err := addressable(v.Name); err != nil {
+		return err
+	}
 	return c.write(ctx, "POST", "/api/v1/checks", checkDTO(v))
 }
 func (c *Client) UpdateCheck(ctx context.Context, v config.Check) error {
@@ -262,6 +278,9 @@ func smtpDTO(v config.SMTPServer) smtpWrite {
 	return d
 }
 func (c *Client) AddSMTPServer(ctx context.Context, v config.SMTPServer) error {
+	if err := addressable(v.Name); err != nil {
+		return err
+	}
 	return c.write(ctx, "POST", "/api/v1/smtp-servers", smtpDTO(v))
 }
 func (c *Client) UpdateSMTPServer(ctx context.Context, v config.SMTPServer) error {
@@ -280,6 +299,9 @@ func channelDTO(v config.Channel) remote.ChannelDTO {
 	return remote.ChannelDTO{Name: v.Name, Kind: v.Kind, SMTPServer: v.SMTPServer, Recipients: v.Recipients}
 }
 func (c *Client) AddChannel(ctx context.Context, v config.Channel) error {
+	if err := addressable(v.Name); err != nil {
+		return err
+	}
 	return c.write(ctx, "POST", "/api/v1/channels", channelDTO(v))
 }
 func (c *Client) UpdateChannel(ctx context.Context, v config.Channel) error {
@@ -293,4 +315,40 @@ func (c *Client) DeleteChannel(ctx context.Context, n string) error {
 		return err
 	}
 	return c.write(ctx, "DELETE", item("channels", n), nil)
+}
+
+// clean removes terminal escape sequences and control characters from text a
+// server sent, so a compromised server cannot repaint the screen, move the
+// cursor or reach the clipboard through a monitor name or an error message.
+// Ordinary text, including any language, is left as it is.
+func clean(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, ansi.Strip(s))
+}
+
+// sanitize cleans every string reachable from v. It walks by reflection so a
+// field added to the snapshot later is covered without remembering to list it.
+func sanitize(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.String:
+		if v.CanSet() {
+			v.SetString(clean(v.String()))
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			sanitize(v.Field(i))
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			sanitize(v.Index(i))
+		}
+	case reflect.Pointer:
+		if !v.IsNil() {
+			sanitize(v.Elem())
+		}
+	}
 }

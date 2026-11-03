@@ -197,6 +197,9 @@ func TestNamesThatCannotBeAddressedAreRefusedLocally(t *testing.T) {
 			"unmute":       c.Unmute(context.Background(), name, time.Now()),
 			"delete smtp":  c.DeleteSMTPServer(context.Background(), name),
 			"delete chan":  c.DeleteChannel(context.Background(), name),
+			"add check":    c.AddCheck(context.Background(), newCheck(name)),
+			"add smtp":     c.AddSMTPServer(context.Background(), config.SMTPServer{Name: name, Host: "h", Port: 25, TLS: config.TLSNone}),
+			"add channel":  c.AddChannel(context.Background(), config.Channel{Name: name, Kind: "email", SMTPServer: "m", Recipients: []string{"a@example.com"}}),
 		} {
 			if err == nil || !strings.Contains(err.Error(), `name cannot be "." or ".." over the API`) {
 				t.Errorf("%s %q: %v", label, name, err)
@@ -569,5 +572,19 @@ func TestInvalidHeaderValuesNeverLeakTheToken(t *testing.T) {
 	err := Validate(context.Background(), srv.URL, bad)
 	if err == nil || strings.Contains(err.Error(), "abc") {
 		t.Errorf("a malformed token must fail without echoing it: %v", err)
+	}
+}
+
+func TestPlainHTTPNeverUsesAProxy(t *testing.T) {
+	// A proxy would see the bearer token of a plain http request, which is
+	// already unencrypted; https goes through the usual environment rules.
+	plain, _ := http.NewRequest("GET", "http://up.acme.com/api/v1/ping", nil)
+	if got, err := proxyFor(plain); got != nil || err != nil {
+		t.Errorf("plain http must bypass any proxy: %v %v", got, err)
+	}
+	secure, _ := http.NewRequest("GET", "https://up.acme.com/api/v1/ping", nil)
+	want, wantErr := http.ProxyFromEnvironment(secure)
+	if got, err := proxyFor(secure); (got == nil) != (want == nil) || (err == nil) != (wantErr == nil) || (got != nil && got.String() != want.String()) {
+		t.Errorf("https must follow the environment: got %v %v, want %v %v", got, err, want, wantErr)
 	}
 }
