@@ -27,7 +27,6 @@ func TestAPIRejectsUnsafeConfiguration(t *testing.T) {
 		args    []string
 		message string
 	}{
-		{[]string{"--api-listen", "0.0.0.0:12345"}, "API address \"0.0.0.0:12345\" is reachable without TLS: add --tls-cert and --tls-key, use --behind-proxy behind a TLS proxy, use --no-tls to accept plain HTTP, or listen on 127.0.0.1"},
 		{[]string{"--api-listen", "127.0.0.1:0", "--tls-cert", "cert"}, "--tls-cert and --tls-key must be provided together"},
 		{[]string{"--api-listen", "127.0.0.1:0", "--tls-key", "key"}, "--tls-cert and --tls-key must be provided together"},
 	} {
@@ -82,7 +81,7 @@ func TestAPIServeAndReset(t *testing.T) {
 		}()
 		done := make(chan int, 1)
 		go func() {
-			code := run(ctx, []string{"serve", "--db", path, "--api-listen", "127.0.0.1:0"}, io.Discard, writer)
+			code := run(ctx, []string{"serve", "--db", path, "--api-listen", "0.0.0.0:0"}, io.Discard, writer)
 			writer.Close()
 			done <- code
 		}()
@@ -113,6 +112,11 @@ func TestAPIServeAndReset(t *testing.T) {
 		} else if foundToken != "" {
 			t.Fatalf("token printed again: %q", foundToken)
 		}
+		_, port, err := net.SplitHostPort(address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		address = net.JoinHostPort("127.0.0.1", port)
 		ping := func(tok string, want int) {
 			req, _ := http.NewRequest("GET", "http://"+address+"/api/v1/ping", nil)
 			req.Header.Set("Authorization", "Bearer "+tok)
@@ -251,7 +255,7 @@ func TestAPIHelp(t *testing.T) {
 	for _, tc := range []struct {
 		args     []string
 		contains []string
-	}{{[]string{"-h"}, []string{"token"}}, {[]string{"serve", "-h"}, []string{"api-listen", "tls-cert", "tls-key", "behind-proxy", "<db>.token"}}, {[]string{"token", "-h"}, []string{"reset", "shown once", "<db>.token"}}} {
+	}{{[]string{"-h"}, []string{"token"}}, {[]string{"serve", "-h"}, []string{"api-listen", "tls-cert", "tls-key", "<db>.token"}}, {[]string{"token", "-h"}, []string{"reset", "shown once", "<db>.token"}}} {
 		code, out, errout := runCmd(context.Background(), tc.args...)
 		if code != 0 || errout != "" {
 			t.Fatalf("%v: %d %q", tc.args, code, errout)
@@ -304,6 +308,18 @@ func TestAPIRefusesUnsafeOrCorruptTokenFile(t *testing.T) {
 	}
 }
 
+func TestAPIInvalidCertificatePairCreatesNoToken(t *testing.T) {
+	clearAPIEnv(t)
+	path := filepath.Join(t.TempDir(), "up.db")
+	code, out, errout := runCmd(context.Background(), "serve", "--db", path, "--api-listen", "127.0.0.1:0", "--tls-cert", filepath.Join(filepath.Dir(path), "missing-cert"), "--tls-key", filepath.Join(filepath.Dir(path), "missing-key"))
+	if code != 1 || out != "" || !strings.Contains(errout, "missing-cert") || strings.Contains(errout, "access token") {
+		t.Fatalf("got %d %q %q", code, out, errout)
+	}
+	if _, err := os.Stat(path + ".token"); !os.IsNotExist(err) {
+		t.Errorf("unexpected token: %v", err)
+	}
+}
+
 func TestAPIListenFailureCreatesNoToken(t *testing.T) {
 	busy, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -320,7 +336,7 @@ func TestAPIListenFailureCreatesNoToken(t *testing.T) {
 	}
 }
 
-func TestAPINoTLSIsExplicitAndWarns(t *testing.T) {
+func TestAPINonloopbackHTTP(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "up.db")
 	ctx, cancel := context.WithCancel(context.Background())
 	reader, writer := io.Pipe()
@@ -334,7 +350,7 @@ func TestAPINoTLSIsExplicitAndWarns(t *testing.T) {
 	}()
 	done := make(chan int, 1)
 	go func() {
-		code := run(ctx, []string{"serve", "--db", path, "--api-listen", "0.0.0.0:0", "--no-tls"}, io.Discard, writer)
+		code := run(ctx, []string{"serve", "--db", path, "--api-listen", "0.0.0.0:0"}, io.Discard, writer)
 		writer.Close()
 		done <- code
 	}()
@@ -359,8 +375,8 @@ func TestAPINoTLSIsExplicitAndWarns(t *testing.T) {
 			t.Fatal("serve did not listen")
 		}
 	}
-	if !warned {
-		t.Error("missing plain HTTP warning before listening")
+	if warned {
+		t.Error("unexpected plain HTTP warning")
 	}
 	cancel()
 	select {
@@ -374,24 +390,20 @@ func TestAPINoTLSIsExplicitAndWarns(t *testing.T) {
 	reader.Close()
 }
 
-func TestAPINoTLSConflictsWithCertificates(t *testing.T) {
-	for _, extra := range [][]string{{"--tls-cert", "c", "--tls-key", "k"}, {"--behind-proxy"}} {
-		dir := t.TempDir()
-		args := append([]string{"serve", "--db", filepath.Join(dir, "up.db"), "--api-listen", "127.0.0.1:0", "--no-tls"}, extra...)
-		code, out, errout := runCmd(context.Background(), args...)
-		if code != 1 || out != "" || errout != "up: --no-tls cannot be combined with --tls-cert, --tls-key or --behind-proxy\n" {
-			t.Errorf("%v: got %d %q %q", extra, code, out, errout)
+func TestRemovedTransportFlags(t *testing.T) {
+	clearAPIEnv(t)
+	_, help, _ := runCmd(context.Background(), "serve", "-h")
+	for _, name := range []string{"no-tls", "behind-proxy"} {
+		for _, suffix := range []string{"", "=false"} {
+			dir := t.TempDir()
+			code, out, errout := runCmd(context.Background(), "serve", "--db", filepath.Join(dir, "up.db"), "--"+name+suffix)
+			want := "up serve: flag provided but not defined: -" + name + "\n\n" + help
+			if code != 2 || out != "" || errout != want {
+				t.Errorf("%s%s: got %d %q %q", name, suffix, code, out, errout)
+			}
+			if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+				t.Errorf("changed files: %v", entries)
+			}
 		}
-		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-			t.Errorf("%v: changed files %v", extra, entries)
-		}
-	}
-}
-
-func TestNoTLSWithoutAPIListenIsRejected(t *testing.T) {
-	dir := t.TempDir()
-	code, _, errout := runCmd(context.Background(), "serve", "--db", filepath.Join(dir, "up.db"), "--no-tls")
-	if code != 1 || errout != "up: --no-tls requires --api-listen\n" {
-		t.Errorf("got %d %q", code, errout)
 	}
 }

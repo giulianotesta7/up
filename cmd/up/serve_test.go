@@ -173,32 +173,56 @@ func TestServeHelpDescribesSQLite(t *testing.T) {
 }
 
 func TestServeRetentionPrunesOldResults(t *testing.T) {
-	isolateDefaultDatabase(t)
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "up.db")
-	s, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	bg := context.Background()
-	c := config.Check{Name: "api", URL: "http://127.0.0.1:1", Interval: time.Hour, Timeout: time.Second, ExpectedStatus: 200}
-	if err := s.AddCheck(bg, c); err != nil {
-		t.Fatal(err)
-	}
-	for _, ago := range []time.Duration{3 * time.Hour, 150 * time.Minute, 2 * time.Hour} {
-		if err := s.Record(bg, check.Result{CheckName: "api", At: time.Now().Add(-ago), Status: check.StatusUp}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ctx, cancel := context.WithTimeout(bg, time.Second)
-	defer cancel()
-	if code, _, errOut := runCmd(ctx, "serve", "--db", dbPath, "--retention", "1h"); code != 0 {
-		t.Fatalf("serve exit %d: %s", code, errOut)
-	}
-	got, _ := s.Recent(bg, "api", 100)
-	if len(got) != 2 || got[0].Status != check.StatusDown || got[1].Status != check.StatusUp {
-		t.Fatalf("after retention got %+v, want the fresh check plus one boundary result", got)
+	for _, tc := range []struct {
+		name, env string
+		args      []string
+		count     int
+	}{
+		{"default absent", "absent", nil, 4},
+		{"default empty", "", nil, 4},
+		{"env one hour", "1h", nil, 2},
+		{"env zero", "0", nil, 5},
+		{"flag", "", []string{"--retention", "1h"}, 2},
+		{"override invalid", "broken", []string{"--retention", "1h"}, 2},
+		{"override negative", "-1h", []string{"--retention", "1h"}, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateDefaultDatabase(t)
+			clearAPIEnv(t)
+			t.Setenv("UP_RETENTION", tc.env)
+			if tc.env == "absent" {
+				if err := os.Unsetenv("UP_RETENTION"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dir := t.TempDir()
+			dbPath := filepath.Join(dir, "up.db")
+			s, err := store.Open(dbPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			bg := context.Background()
+			c := config.Check{Name: "api", URL: "http://127.0.0.1:1", Interval: time.Hour, Timeout: time.Second, ExpectedStatus: 200}
+			if err := s.AddCheck(bg, c); err != nil {
+				t.Fatal(err)
+			}
+			for _, ago := range []time.Duration{32 * 24 * time.Hour, 31 * 24 * time.Hour, 150 * time.Minute, 2 * time.Hour} {
+				if err := s.Record(bg, check.Result{CheckName: "api", At: time.Now().Add(-ago), Status: check.StatusUp}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ctx, cancel := context.WithTimeout(bg, time.Second)
+			defer cancel()
+			args := append([]string{"serve", "--db", dbPath}, tc.args...)
+			if code, _, errOut := runCmd(ctx, args...); code != 0 {
+				t.Fatalf("serve exit %d: %s", code, errOut)
+			}
+			got, _ := s.Recent(bg, "api", 100)
+			if len(got) != tc.count || got[0].Status != check.StatusDown || got[1].Status != check.StatusUp {
+				t.Fatalf("after retention got %+v, want %d results", got, tc.count)
+			}
+		})
 	}
 }
 

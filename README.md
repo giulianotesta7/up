@@ -65,7 +65,7 @@ up tui     # view and manage monitors (press n to add one)
 | Flag | Commands | Default |
 |---|---|---|
 | `--db PATH` | `serve`, `tui` | see below |
-| `--retention DURATION` | `serve` | `720h` (`0` keeps everything) |
+| `--retention DURATION` | `serve` | `720h` (`UP_RETENTION` sets the default; `0` keeps everything) |
 | `--remote` | `tui` | off (`UP_REMOTE=true` turns it on) |
 
 The database is resolved in this order: `--db`, `$UP_DB`, `/var/lib/up/up.db` if it exists, `~/.config/up/up.db`. The TUI footer shows which one is open.
@@ -136,15 +136,7 @@ Set `TLS expiry` to `off` in the monitor form to skip all of this for one monito
 up serve --api-listen :8443 --tls-cert cert.pem --tls-key key.pem
 ```
 
-Pick how the API is served. Without one of these it only accepts loopback addresses (`127.0.0.1`):
-
-| Mode | Flags | Use it when |
-|---|---|---|
-| HTTPS | `--tls-cert` and `--tls-key` | `up` terminates TLS itself |
-| Behind a proxy | `--behind-proxy` | a reverse proxy in front terminates TLS |
-| Plain HTTP | `--no-tls` | the network is already encrypted (a VPN, Tailscale). The token is **not** encrypted on the wire and `up serve` prints a warning. |
-
-`--tls-cert` and `--tls-key` go together. `--no-tls` needs `--api-listen` and cannot be combined with the other three. Setting any of them without `--api-listen` is refused at startup instead of being ignored.
+Without certificates the API serves HTTP, including on non-loopback addresses. The token and data are not encrypted on the wire. Prefer HTTPS using paired `--tls-cert` and `--tls-key`, or a TLS-terminating reverse proxy. Certificates without `--api-listen` are refused.
 
 Every API flag also reads an environment variable, handy for containers; a flag on the command line wins:
 
@@ -152,8 +144,6 @@ Every API flag also reads an environment variable, handy for containers; a flag 
 |---|---|
 | `--api-listen ADDR` | `UP_API_LISTEN` |
 | `--tls-cert FILE` / `--tls-key FILE` | `UP_TLS_CERT` / `UP_TLS_KEY` |
-| `--behind-proxy` | `UP_BEHIND_PROXY` (`true` or `false`) |
-| `--no-tls` | `UP_NO_TLS` (`true` or `false`) |
 
 There is one access token. The first start prints it once on stderr (`up: access token (shown once): up_...`) and keeps only its hash in `<db>.token` (mode `0600`). `up token reset [--db PATH]` creates a new one, prints it once on stdout and stops the old one working immediately, even while `up serve` is running. A token file that other users can read is refused.
 
@@ -203,7 +193,7 @@ docker compose logs up        # the first start prints the access token once
 
 - Configure it with the environment variables above; the flags work too.
 - Everything that must survive lives in the `/data` volume: the database, its encryption key (`up.db.key`) and the token hash (`up.db.token`). Back the three up together; without the key, stored SMTP passwords have to be entered again.
-- The container runs as an unprivileged user (uid 10001). The example publishes the port on `127.0.0.1` only: put a TLS reverse proxy in front (`UP_BEHIND_PROXY`), or publish it on an already encrypted network and set `UP_NO_TLS`.
+- The container runs as an unprivileged user (uid 10001). The example publishes the port on `127.0.0.1` only; use a reverse proxy or an encrypted network for remote access.
 - To replace the token: `docker compose exec up up token reset`.
 
 ## Contributing

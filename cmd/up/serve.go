@@ -37,18 +37,14 @@ with a key kept in <db>.key (mode 0600) next to the database; back it up with
 the database. Without it stored passwords must be entered again. up serve refuses
 a key file readable by group or others.
 
-The optional API is enabled with --api-listen. Choose how it is served: --tls-cert
-and --tls-key together (HTTPS), --behind-proxy (a proxy in front terminates TLS),
-or --no-tls (plain HTTP on any address, for networks that are already encrypted,
-such as a VPN or Tailscale; the token is then not encrypted and a warning is
-printed). Without one of them the API only accepts loopback addresses.
+The optional API is enabled with --api-listen. It serves HTTP without certificates
+or HTTPS with --tls-cert and --tls-key together.
 The access token hash is stored in <db>.token (0600); a new token is shown once on
 stderr. Use up token reset to replace it. GET /api/v1/snapshot returns the current
 monitoring snapshot without SMTP passwords.
 
-Every API flag also reads an environment variable, handy for containers:
-UP_API_LISTEN, UP_TLS_CERT, UP_TLS_KEY, UP_BEHIND_PROXY and UP_NO_TLS (true or
-false). A flag given on the command line overrides its variable.
+API and retention flags also read environment variables: UP_API_LISTEN,
+UP_TLS_CERT, UP_TLS_KEY and UP_RETENTION. An explicit flag overrides its variable.
 
 Flags:
 `
@@ -58,51 +54,41 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	dbPath := databaseFlag(fs)
 	// Each API flag defaults to its UP_* variable, so containers can be
 	// configured with environment alone; an explicit flag always wins.
-	proxyDefault, proxyErr := envBool("UP_BEHIND_PROXY")
-	noTLSDefault, noTLSErr := envBool("UP_NO_TLS")
 	apiListen := fs.String("api-listen", os.Getenv("UP_API_LISTEN"), "enable the API on this address (env UP_API_LISTEN)")
 	tlsCert := fs.String("tls-cert", os.Getenv("UP_TLS_CERT"), "TLS certificate file, requires --tls-key (env UP_TLS_CERT)")
 	tlsKey := fs.String("tls-key", os.Getenv("UP_TLS_KEY"), "TLS private key file, requires --tls-cert (env UP_TLS_KEY)")
-	behindProxy := fs.Bool("behind-proxy", proxyDefault, "allow HTTP behind a TLS proxy (env UP_BEHIND_PROXY)")
-	noTLS := fs.Bool("no-tls", noTLSDefault, "serve the API over plain HTTP on any address; the token is not encrypted on the network (env UP_NO_TLS)")
-	retention := fs.Duration("retention", 720*time.Hour, "how long to keep results, for example 720h (30 days); 0 keeps everything")
+	retention := fs.Duration("retention", 720*time.Hour, "how long to keep results, for example 720h (30 days); 0 keeps everything (env UP_RETENTION)")
 	if code, ok := parseFlags(fs, serveHelp, args, stdout, stderr); !ok {
 		return code
 	}
-	if *retention < 0 {
-		fmt.Fprintln(stderr, "up: --retention must not be negative")
-		return 1
-	}
-
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
-	for _, bad := range []struct {
-		flag string
-		err  error
-	}{{"behind-proxy", proxyErr}, {"no-tls", noTLSErr}} {
-		if bad.err != nil && !set[bad.flag] {
-			fmt.Fprintf(stderr, "up: %v\n", bad.err)
+	if value := os.Getenv("UP_RETENTION"); value != "" && !set["retention"] {
+		var err error
+		*retention, err = time.ParseDuration(value)
+		if err != nil {
+			fmt.Fprintf(stderr, "up: UP_RETENTION: invalid duration %q\n", value)
+			return 1
+		}
+		if *retention < 0 {
+			fmt.Fprintln(stderr, "up: UP_RETENTION must not be negative")
 			return 1
 		}
 	}
-	if *noTLS && *apiListen == "" {
-		fmt.Fprintln(stderr, "up: --no-tls requires --api-listen")
-		return 1
-	}
-	if *noTLS && (*tlsCert != "" || *tlsKey != "" || *behindProxy) {
-		fmt.Fprintln(stderr, "up: --no-tls cannot be combined with --tls-cert, --tls-key or --behind-proxy")
+	if *retention < 0 {
+		fmt.Fprintln(stderr, "up: --retention must not be negative")
 		return 1
 	}
 	if (*tlsCert == "") != (*tlsKey == "") {
 		fmt.Fprintln(stderr, "up: --tls-cert and --tls-key must be provided together")
 		return 1
 	}
-	if *apiListen == "" && (*tlsCert != "" || *tlsKey != "" || *behindProxy) {
-		fmt.Fprintln(stderr, "up: --tls-cert, --tls-key and --behind-proxy require --api-listen")
+	if *apiListen == "" && (*tlsCert != "" || *tlsKey != "") {
+		fmt.Fprintln(stderr, "up: --tls-cert and --tls-key require --api-listen")
 		return 1
 	}
 	if *apiListen != "" {
-		if err := remote.ValidateListen(*apiListen, *tlsCert != "", *behindProxy, *noTLS); err != nil {
+		if err := remote.ValidateListen(*apiListen); err != nil {
 			fmt.Fprintf(stderr, "up: %v\n", err)
 			return 1
 		}
@@ -162,7 +148,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var apiDone <-chan error
 	if *apiListen != "" {
 		var err error
-		apiDone, err = startAPI(apiCtx, cancelAPI, *apiListen, *tlsCert, *tlsKey, *dbPath+".token", *noTLS, stderr, s)
+		apiDone, err = startAPI(apiCtx, cancelAPI, *apiListen, *tlsCert, *tlsKey, *dbPath+".token", stderr, s)
 		if err != nil {
 			fmt.Fprintf(stderr, "up: %v\n", err)
 			return 1

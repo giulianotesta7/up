@@ -188,44 +188,15 @@ func TestServerIsHardened(t *testing.T) {
 }
 
 func TestListenPolicy(t *testing.T) {
-	cases := []struct {
-		addr        string
-		tls, proxy  bool
-		wantErr     bool
-		description string
-	}{
-		{"127.0.0.1:8443", false, false, false, "loopback needs no TLS"},
-		{"localhost:8443", false, false, false, "localhost needs no TLS"},
-		{"[::1]:8443", false, false, false, "ipv6 loopback needs no TLS"},
-		{"0.0.0.0:8443", false, false, true, "public plain http refused"},
-		{":8443", false, false, true, "all interfaces plain http refused"},
-		{"192.168.1.5:8443", false, false, true, "lan plain http refused"},
-		{"0.0.0.0:8443", true, false, false, "TLS allows any address"},
-		{":8443", false, true, false, "behind a proxy allows any address"},
-		{"", true, false, true, "empty address refused"},
-		{"bad", true, false, true, "address without port refused"},
-	}
-	for _, c := range cases {
-		err := ValidateListen(c.addr, c.tls, c.proxy, false)
-		if (err != nil) != c.wantErr {
-			t.Errorf("%s: ValidateListen(%q, tls=%v, proxy=%v) = %v", c.description, c.addr, c.tls, c.proxy, err)
-		}
-	}
-}
-
-func TestListenPolicyNoTLS(t *testing.T) {
-	for _, addr := range []string{"0.0.0.0:8443", ":8443", "192.168.1.5:8443", "100.64.0.5:8443", "127.0.0.1:8443"} {
-		if err := ValidateListen(addr, false, false, true); err != nil {
-			t.Errorf("--no-tls on %q refused: %v", addr, err)
+	for _, addr := range []string{"127.0.0.1:8443", "localhost:8443", "[::1]:8443", "0.0.0.0:8443", ":8443", "192.168.1.5:8443"} {
+		if err := ValidateListen(addr); err != nil {
+			t.Errorf("%q: %v", addr, err)
 		}
 	}
 	for _, addr := range []string{"", "bad"} {
-		if err := ValidateListen(addr, false, false, true); err == nil {
-			t.Errorf("--no-tls with invalid address %q accepted", addr)
+		if err := ValidateListen(addr); err == nil {
+			t.Errorf("invalid address %q accepted", addr)
 		}
-	}
-	if err := ValidateListen("0.0.0.0:8443", false, false, false); err == nil || !strings.Contains(err.Error(), "--no-tls") {
-		t.Errorf("the refusal must mention --no-tls, got %v", err)
 	}
 }
 
