@@ -8,6 +8,8 @@
   </picture>
 </h1>
 
+Before contributing, read [CONTRIBUTING.md](CONTRIBUTING.md) for the issue-first workflow.
+
 Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file: no database server, no agents, no YAML.
 
 [![Go quality](https://github.com/giulianotesta7/up/actions/workflows/quality.yml/badge.svg)](https://github.com/giulianotesta7/up/actions/workflows/quality.yml)
@@ -221,7 +223,7 @@ A command-line flag overrides its environment variable.
 
 ## Contributing
 
-Run `go vet ./...` and `go test -race ./...` before opening a PR. Regenerate the demo with `sh docs/demo/record.sh` (needs vhs, ttyd and ffmpeg).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the required issue-first workflow, development checks and PR conventions.
 
 ## License
 
