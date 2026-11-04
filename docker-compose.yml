@@ -1,9 +1,5 @@
-# Example deployment. The remote API is opt-in: it only exists because of the
-# UP_API_LISTEN line below. The port is published on 127.0.0.1 only; put a TLS
-# reverse proxy in front of it, or publish it on a network that is already
-# encrypted (VPN, Tailscale).
-# To serve HTTPS from the container itself, mount a certificate and use
-# UP_TLS_CERT and UP_TLS_KEY.
+# HTTP API on port 8080. HTTPS is recommended via a reverse proxy or
+# mounted certificates configured with UP_TLS_CERT and UP_TLS_KEY.
 services:
   up:
     build: .
@@ -11,7 +7,7 @@ services:
     environment:
       UP_API_LISTEN: ":8080"
     ports:
-      - "127.0.0.1:8080:8080"
+      - "8080:8080"
     volumes:
       # Database, encryption key and API token hash.
       - up-data:/data
