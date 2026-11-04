@@ -1,0 +1,53 @@
+name: PR issue
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: pr-issue-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-issue:
+    name: PR issue
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Never execute code from a pull request with the target workflow context.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test issue validator
+        run: node --test .github/scripts/pr-issue.test.cjs
+
+      - name: Validate linked issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { validateIssue } = require('./.github/scripts/pr-issue.cjs');
+            try {
+              const { data: pullRequest } = await github.rest.pulls.get({
+                ...context.repo,
+                pull_number: context.payload.pull_request.number,
+              });
+              const number = await validateIssue({
+                body: pullRequest.body,
+                github,
+                context,
+              });
+              core.info(`Linked issue: #${number}`);
+            } catch (error) {
+              core.setFailed(error.message);
+            }

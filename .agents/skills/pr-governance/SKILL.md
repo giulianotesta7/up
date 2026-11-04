@@ -15,14 +15,14 @@ Do not use for read-only Q&A or local work that will not become a PR. Loading th
 
 ## Precedence
 
-Generic `branch-pr` and `gentle-ai-branch-pr` skills do not apply here. up has no shellcheck or PR-validation workflows, and does not use their `type:*` labels. `.github/workflows/` contains `quality.yml`, `security.yml` and `release.yml`. Follow this project skill rather than importing checks from another repository.
+Generic `branch-pr` and `gentle-ai-branch-pr` skills do not apply here. up has no shellcheck workflow and does not use `type:*` labels. `.github/workflows/` contains `pr-issue.yml`, `quality.yml`, `security.yml` and `release.yml`. Follow this project skill rather than importing checks from another repository.
 
 ## Hard Rules
 
 - Every PR links its governing issue with `Closes #<n>`. The issue is required by `issue-governance`; creating it authorizes the work, without an approval label or approval step.
 - The PR body follows `.github/PULL_REQUEST_TEMPLATE.md`: Why, Summary, Verification, Not verified, and the issue-closing line. Describe observed verification, not intended checks.
 - PR labels are optional. Use only the existing GitHub defaults permitted by `issue-governance`; never invent `type:*` labels.
-- Every required check must pass before merge. Check definitions live under `.github/workflows/`: Go quality, Go security / staticcheck and Go security / govulncheck. Point at those definitions rather than duplicating their flags. Pending or failing required checks block merge, including on documentation-only PRs.
+- Every required check must pass before merge. Check definitions live under `.github/workflows/`: PR issue, Go quality, Go security / staticcheck and Go security / govulncheck. `PR issue` validates a standalone `Closes #<n>` against an existing same-repository issue (not a PR); comments and placeholders do not count. It runs trusted base code with read-only permissions. Making this check merge-blocking requires repository protection configuration; the workflow file alone does not establish that setting. Point at those definitions rather than duplicating their flags. Pending or failing required checks block merge, including on documentation-only PRs.
 - Preserve the merge-commit style used in this repository. With explicit merge authorization, use `gh pr merge --merge`, not squash or rebase. Never interpret readiness as permission to merge.
 
 ## Branch Naming
@@ -43,6 +43,8 @@ Branch and merge history show `feat/`, `docs/`, `chore/`, `ci/` and `refactor/`.
 
 ## What Proves A Pull Request Here
 
+- `CONTRIBUTING.md`: contributor-facing issue-first workflow and rollout requirements
+- `.github/workflows/pr-issue.yml`: issue-link validation using trusted base code
 - `.github/workflows/quality.yml`: formatting, dependency tidiness, vet, build and race tests
 - `.github/workflows/security.yml`: staticcheck and govulncheck
 - `.github/workflows/release.yml`: release publication, not a shellcheck or PR-validation gate
