@@ -58,10 +58,11 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           image="ghcr.io/giulianotesta7/up"
+          image_tag=$(printf '%s' "$RELEASE_TAG" | LC_ALL=C sed 's/[^a-zA-Z0-9_.-]/-/g' | cut -c1-128)
           {
             echo 'tags<<EOF'
-            printf '%s:%s\n' "$image" "$RELEASE_TAG"
-            if [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            printf '%s:%s\n' "$image" "$image_tag"
+            if [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
               printf '%s:latest\n' "$image"
             fi
             echo 'EOF'

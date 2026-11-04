@@ -27,7 +27,8 @@ class ReleaseNotesTest(unittest.TestCase):
         for contents in (None, "", " \n\t\n", "\u00a0\n", "## Fixes\n\nA verified fix.\n"):
             with self.subTest(contents=contents), tempfile.TemporaryDirectory() as scratch:
                 root = Path(scratch)
-                notes = root / ".github/release-notes/v9.9.9.md"
+                tag = 'v1.2.3+build.1' if contents and contents.strip() else 'v9.9.9'
+                notes = root / f".github/release-notes/{tag}.md"
                 notes.parent.mkdir(parents=True)
                 if contents is not None:
                     notes.write_text(contents)
@@ -35,7 +36,7 @@ class ReleaseNotesTest(unittest.TestCase):
                 stub.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$GH_LOG"\n')
                 stub.chmod(0o755)
                 log = root / "gh.log"
-                env = dict(os.environ, RELEASE_TAG="v9.9.9", GH_LOG=str(log), PATH=f"{root}:{os.environ['PATH']}")
+                env = dict(os.environ, RELEASE_TAG=tag, GH_LOG=str(log), PATH=f"{root}:{os.environ['PATH']}")
                 result = subprocess.run(
                     ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", validate + "\n" + publish],
                     cwd=root, env=env, capture_output=True, text=True,
@@ -49,11 +50,11 @@ class ReleaseNotesTest(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(result.stderr, "")
                     self.assertEqual(log.read_text().splitlines(), [
-                        "release", "create", "v9.9.9",
+                        "release", "create", tag,
                         "dist/up_linux_amd64.tar.gz", "dist/up_linux_arm64.tar.gz",
                         "dist/checksums.txt", "dist/up.service", "dist/up-system.service",
-                        "--title", "v9.9.9", "--notes-file",
-                        ".github/release-notes/v9.9.9.md", "--verify-tag",
+                        "--title", tag, "--notes-file",
+                        f".github/release-notes/{tag}.md", "--verify-tag",
                     ])
                 self.assertEqual(notes.read_text() if notes.exists() else None, contents)
 
@@ -93,7 +94,9 @@ class ContainerReleaseTest(unittest.TestCase):
         self.assertNotIn('${{', block)
         image = 'ghcr.io/giulianotesta7/up'
         for tag, latest in [('v1.2.3', True), ('v0.0.0', True), ('v1.2.3-rc.1', False),
-                            ('v1.2', False), ('v1.2.3.4', False), ('vabc', False)]:
+                            ('v1.2', False), ('v1.2.3.4', False), ('vabc', False),
+                            ('v1.2.3+build.1', True), ('v1.2.3-rc.1+build.1', False),
+                            ('v' + 'a' * 130, False)]:
             with self.subTest(tag=tag), tempfile.TemporaryDirectory() as scratch:
                 output = Path(scratch) / 'output'
                 output.touch()
@@ -101,8 +104,10 @@ class ContainerReleaseTest(unittest.TestCase):
                 result = subprocess.run(['bash', '--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', block],
                                         cwd=scratch, env=env, capture_output=True, text=True)
                 self.assertEqual((result.returncode, result.stdout, result.stderr), (0, '', ''))
-                expected = f'tags<<EOF\n{image}:{tag}\n' + (f'{image}:latest\n' if latest else '') + 'EOF\n'
+                image_tag = tag.replace('+', '-')[:128]
+                expected = f'tags<<EOF\n{image}:{image_tag}\n' + (f'{image}:latest\n' if latest else '') + 'EOF\n'
                 self.assertEqual(output.read_text(), expected)
+                self.assertRegex(output.read_text().splitlines()[1].split(':')[1], r'^[\w][\w.-]{0,127}$')
 
     def test_rejected_notes_do_not_publish_or_change_files(self):
         workflow = WORKFLOW.read_text()
