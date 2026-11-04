@@ -228,3 +228,5 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for the required issue-first workflow, d
 ## License
 
 MIT
+
+<!-- Temporary issue-first workflow verification; not for merge. -->
