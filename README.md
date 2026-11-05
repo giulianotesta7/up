@@ -28,6 +28,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 - **Email alerts** on down and recovery, with optional thresholds so a single timeout does not wake anyone up.
 - **TLS expiry warnings** at 14, 7 and 3 days.
 - **Maintenance mute** from 1 minute to 7 days, without stopping checks or history.
+- **Recurring maintenance windows** per monitor (weekdays, start, duration, time zone) that hold alerts and certificate warnings while checks, history and uptime keep going.
 - **Stale-daemon detection.** If the daemon stops, the TUI says so and keeps the last known statuses instead of marking everything DOWN.
 
 ## Install
@@ -118,7 +119,7 @@ The database is resolved in this order: `--db`, `$UP_DB`, `/var/lib/up/up.db` if
 
 ### Keys
 
-`j`/`k` move · `enter` details · `n` new · `e` edit · `d` delete · `m` mute · `u` unmute · `s` SMTP servers · `c` channels · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
+`j`/`k` move · `enter` details · `n` new · `e` edit · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` SMTP servers · `c` channels · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
 
 In forms: `tab`/`shift+tab` switch fields · `←`/`→` choose · `enter` save · `esc` cancel.
 
@@ -139,6 +140,16 @@ Run `up serve` once before entering SMTP passwords to create `up.db.key` (requir
 `m` offers presets and custom durations from 1 minute to 7 days; `u` ends the mute early. Checks and history keep running, and mutes survive restarts.
 
 When the mute ends, recipients only hear what they do not already know: a down email if it is still down and they were not told, or a recovery email if they were told about the outage before the mute. An outage that starts and ends during the mute sends nothing.
+
+### Maintenance windows
+
+`w` opens the selected monitor's windows: `a` adds, `e` edits, `d` deletes (up to 20 per monitor). A window repeats weekly on the weekdays you toggle (`←`/`→` move, `space` toggles), starting at a local `HH:MM` and lasting a duration in the same format as a custom mute (`45m`, `2h`, `1h30m`; 1 minute to 7 days) in an IANA zone such as `America/New_York` (new windows default to your zone). A window that runs past midnight is marked "crosses midnight" and keeps going into the next day; the weekdays are the days it starts.
+
+While a window is active, or the monitor is manually muted, alerts and certificate warnings are held. Checks, history and uptime are unchanged: downtime inside a window still counts in uptime. The list shows `◷ until HH:MM` (and `⏸` for a mute, both when both apply) and the detail shows the end time.
+
+When all of it ends (the later of the window and the mute; overlapping or back-to-back windows count as one), recipients hear only what they do not already know, exactly once, like after a mute. An outage that starts and ends inside a window sends nothing; one still going afterwards sends the down email then. Certificate warnings that came due inside a window are sent after it. Edits and deletions apply within about 2 seconds, and windows survive restarts.
+
+Daylight saving: durations are elapsed time. A start time that does not exist that day (the clock jumps over it) is skipped for that day; one that happens twice runs once, at its first occurrence. Overlapping windows, even in different zones, combine.
 
 ### Certificate expiry
 
@@ -196,7 +207,7 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 | `PUT`/`DELETE /api/v1/checks/{name}/mute` | mutes (`duration_ms`, 1 minute to 7 days) or unmutes |
 | `POST /api/v1/smtp-servers`, `PUT`/`DELETE /api/v1/smtp-servers/{name}` | manages SMTP servers |
 | `POST /api/v1/channels`, `PUT`/`DELETE /api/v1/channels/{name}` | manages channels |
-| `GET`/`POST /api/v1/checks/{name}/maintenance`, `PUT`/`DELETE .../maintenance/{id}` | lists, adds, edits or deletes a monitor's maintenance windows (stored only for now) |
+| `GET`/`POST /api/v1/checks/{name}/maintenance`, `PUT`/`DELETE .../maintenance/{id}` | lists, adds, edits or deletes a monitor's maintenance windows (`weekdays` 0=Sunday, `start_minute`, `duration_ms`, `zone`); active windows hold alerts and certificate warnings |
 | `POST`/`GET /api/v1/channels/{name}/test` | requests a channel test and reads the newest one (recorded only for now) |
 
 Bodies are strict JSON, limited to 1 MiB. Errors: `400` invalid input, `404` not found, `409` duplicate or still in use. Rejected requests change nothing.

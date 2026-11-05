@@ -102,6 +102,8 @@ type Options struct {
 	// PruneInterval defaults to DefaultPruneInterval when nonpositive.
 	PruneInterval time.Duration
 	Logger        *slog.Logger
+	// Now is the clock for mutes and maintenance windows; nil is time.Now.
+	Now func() time.Time
 }
 
 // Run reads the SQLite definitions, then starts each check
@@ -280,10 +282,44 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 	}
 	if opts.Alerter != nil {
 		streak = initialStreak(ctx, opts, c)
-		notified = streak.Alerting
 		if m, found := readMute(); found {
 			notified = m.WasAlerting
+		} else {
+			notified = initialNotified(ctx, opts, c, streak)
 		}
+	}
+	// suppressed is a manual mute or an active maintenance window.
+	suppressed := func() suppression {
+		m, found := readMute()
+		now := opts.now()
+		active := found && m.Until.After(now)
+		return suppression{mute: m, found: found, active: active || config.EvaluateMaintenance(windows(ctx, opts, c.Name), now).Active}
+	}
+	// settle sends what the recipients do not know once nothing holds alerts
+	// back, and forgets a mute that has ended with no window still running.
+	settle := func(res check.Result, s suppression) {
+		if c.Channel == "" {
+			notified = streak.Alerting
+		} else if !s.active && streak.Alerting != notified {
+			notified = streak.Alerting
+			opts.Alerter.Notify(c, res)
+		}
+		if s.found && !s.active {
+			clearCtx, clearCancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+			if err := muteStore.ClearMute(clearCtx, c.Name, s.mute.Until); err != nil {
+				opts.Logger.Error("clearing mute failed", "check", c.Name, "error", err)
+			}
+			clearCancel()
+		}
+	}
+	// Suppression can end between results (a window ends or is deleted), so
+	// it is rechecked every discovery interval against the last result.
+	var recheck <-chan time.Time
+	var latest check.Result
+	if opts.Alerter != nil {
+		t := time.NewTicker(opts.DiscoveryInterval)
+		defer t.Stop()
+		recheck = t.C
 	}
 	for {
 		res := opts.Runner.Run(ctx, c)
@@ -306,35 +342,28 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 		}
 		if opts.Alerter != nil {
 			streak.Observe(res.Status, c.AlertAfter, c.RecoverAfter)
-			m, found := readMute()
-			active := found && m.Until.After(time.Now())
+			sup := suppressed()
 			if res.Cert != nil {
-				observeCert(ctx, opts, c, res, active)
+				observeCert(ctx, opts, c, res, sup.active)
 			}
-			if c.Channel == "" {
-				notified = streak.Alerting
-			} else if !active {
-				if streak.Alerting != notified {
-					notified = streak.Alerting
-					opts.Alerter.Notify(c, res)
-				}
-			}
-			if found && !active {
-				clearCtx, clearCancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
-				if err := muteStore.ClearMute(clearCtx, c.Name, m.Until); err != nil {
-					opts.Logger.Error("clearing mute failed", "check", c.Name, "error", err)
-				}
-				clearCancel()
-			}
+			latest = res
+			settle(res, sup)
 		}
 		if res.Status != last {
 			logTransition(opts.Logger, c, res)
 			last = res.Status
 		}
-		select {
-		case <-ctx.Done():
-			return last
-		case <-ticker.C:
+		for waiting := true; waiting; {
+			select {
+			case <-ctx.Done():
+				return last
+			case <-ticker.C:
+				waiting = false
+			case <-recheck:
+				if latest.CheckName != "" {
+					settle(latest, suppressed())
+				}
+			}
 		}
 	}
 }

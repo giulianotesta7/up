@@ -26,7 +26,7 @@ Header values, HTTP body, webhook URL and webhook auth value are `secret.Sealed`
 
 ### Maintenance evaluation
 
-`config.EvaluateMaintenance(windows, at) Maintenance{Active, End}` is pure. Occurrence = `[start, start+Duration)`; a nonexistent local start (DST gap) is skipped that day, a repeated one runs once at its first occurrence; windows overlapping or touching union (`End` is the union's end, capped at `MaintenanceHorizon`, 366 days). Nothing calls it for suppression yet.
+`config.EvaluateMaintenance(windows, at) Maintenance{Active, End}` is pure. Occurrence = `[start, start+Duration)`; a nonexistent local start (DST gap) is skipped that day, a repeated one runs once at its first occurrence; windows overlapping or touching union (`End` is the union's end, capped at `MaintenanceHorizon`, 366 days). The monitor (`internal/monitor/maintenance.go`) is its only caller for suppression: alerts and certificate warnings are held while a manual mute or an active window applies, and the existing mute reconciliation sends what recipients do not know once, when both have ended (`monitor.Options.Now` injects the clock; `monitor.WindowStore` is the optional store API).
 
 ## Store (`internal/store`)
 

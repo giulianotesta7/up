@@ -40,6 +40,14 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		if anyCert {
 			certWidth = 9
 		}
+		// A held cell grows only for a maintenance window, alone or with a mute.
+		heldWidth, heldHeader := 13, "MUTED"
+		for _, s := range snap.Services {
+			if s.InMaintenance.Active {
+				heldHeader = "HELD"
+				heldWidth = max(heldWidth, ansi.StringWidth(heldCell(s, now)))
+			}
+		}
 		showTrend := width <= 0 || width >= max(78, nameWidth+55+statusWidth+certWidth)
 		row := func(marker, dot, name, status, latency, trend, cert, last, muted, reason string) string {
 			padding := strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name)))
@@ -51,13 +59,13 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 				middle += "  " + cert + strings.Repeat(" ", max(0, 7-ansi.StringWidth(cert)))
 			}
 			prefix := marker + " " + dot + " " + name + padding + "  " + status + fmt.Sprintf("  %8s", latency) + middle
-			last = fmt.Sprintf("%-10s  %s", last, muted+strings.Repeat(" ", max(0, 13-ansi.StringWidth(muted))))
+			last = fmt.Sprintf("%-10s  %s", last, muted+strings.Repeat(" ", max(0, heldWidth-ansi.StringWidth(muted))))
 			if showTrend {
 				return prefix + "  " + strings.TrimRight(fmt.Sprintf("%-10s  %s", last, reason), " ")
 			}
 			return strings.TrimRight(prefix+fmt.Sprintf("  %-10s  %s", last, reason), " ")
 		}
-		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", fmt.Sprintf("%-*s", statusWidth, "STATUS"), "LATENCY", "TREND (16)", "CERT", "LAST CHECK", "MUTED", "")) + "\n")
+		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", fmt.Sprintf("%-*s", statusWidth, "STATUS"), "LATENCY", "TREND (16)", "CERT", "LAST CHECK", heldHeader, "")) + "\n")
 		for i, s := range snap.Services {
 			marker := " "
 			if i == selected {
@@ -80,10 +88,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 				remaining := s.Cert.NotAfter.Sub(now)
 				cert = certStyle(remaining).Render(certLeft(remaining))
 			}
-			muted := ""
-			if s.Muted(now) {
-				muted = warnStyle.Render("⏸ " + timeLeft(s.Mute.Until.Sub(now)) + " left")
-			}
+			muted := heldCell(s, now)
 			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, statusWidth), latency, sparkline(s.Recent, 16), cert, last, muted, reason) + "\n")
 		}
 	}
@@ -131,6 +136,16 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		}
 		field("Muted", warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))+" · "+held)
 	}
+	if s.InMaintenance.Active {
+		held := "nothing pending"
+		switch s.heldPending(now) {
+		case "down":
+			held = "1 email pending (down since " + formatTime(s.DownSince, now) + ")"
+		case "recovery":
+			held = "1 email pending (recovery)"
+		}
+		field("Window", warnStyle.Render(fmt.Sprintf("until %s (%s left)", clockWithDay(s.InMaintenance.End, now), timeLeft(s.InMaintenance.End.Sub(now))))+" · "+held)
+	}
 	field("Last error", orDash(s.Latest.Error))
 	if streak := streakLine(s, now); streak != "" {
 		field("Streak", streak)
@@ -161,6 +176,9 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 			}
 		}
 		field("Channel", channel)
+		if n := len(s.Maintenance); n > 0 {
+			field("Windows", plural(n, "window")+helpStyle.Render(" (w to edit)"))
+		}
 		if !s.thresholdsDefault() {
 			field("Alerting", fmt.Sprintf("after %s · recovers after %s", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success")))
 		}
@@ -383,7 +401,7 @@ func renderKeys(remote ...bool) string {
 		row("enter", "details", "u", "unmute"),
 		row("n", "new monitor", "s", "SMTP servers"),
 		row("e", "edit", "c", "channels"),
-		row("d", "delete", "", ""),
+		row("d", "delete", "w", "maintenance"),
 		"",
 		headerStyle.Render("VIEW"),
 		"",

@@ -64,6 +64,7 @@ type Model struct {
 	form              *monitorForm
 	deletion          *deletePrompt
 	mute              *mutePrompt
+	maint             *maintenancePopup
 	notice            string
 	smtpScreen        bool
 	smtpSelected      int
@@ -284,6 +285,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.load
+	case maintenanceMsg:
+		return m.handleMaintenanceMsg(msg)
 	case smtpSaveMsg:
 		if msg.generation != m.generation || m.smtpForm == nil || !m.smtpForm.saving {
 			return m, nil
@@ -351,6 +354,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.load
 	case tea.PasteMsg:
+		if m.maint != nil {
+			return m.handleMaintenancePaste(msg.Content), nil
+		}
 		if m.channelForm != nil && !m.channelForm.saving {
 			f := *m.channelForm
 			f.insert(msg.Content)
@@ -393,6 +399,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mute != nil {
 		return m.handleMuteKey(msg)
 	}
+	if m.maint != nil {
+		return m.handleMaintenanceKey(msg)
+	}
 	m.notice = ""
 	if m.help {
 		if key := msg.String(); key == "?" || key == "esc" {
@@ -433,11 +442,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.deletion = &deletePrompt{name: c.Name}
 			}
 		}
+	case "w":
+		m = m.openMaintenance()
 	case "m", "u":
 		if m.selected < len(m.snap.Services) {
 			svc := m.snap.Services[m.selected]
 			if msg.String() == "m" {
-				m.mute = &mutePrompt{name: svc.Check.Name, wasAlerting: svc.Streak.Alerting}
+				m.mute = &mutePrompt{name: svc.Check.Name, wasAlerting: svc.knownAlerting(m.now())}
 			} else if svc.Muted(m.now()) {
 				m.generation++
 				return m, m.unmute(svc.Check.Name)
@@ -475,9 +486,11 @@ func (m Model) View() tea.View {
 		content = renderKeys(m.destination != "")
 	}
 	modal := ""
-	if m.form != nil || m.deletion != nil || m.mute != nil {
+	if m.form != nil || m.deletion != nil || m.mute != nil || m.maint != nil {
 		screen, minimum := "", 0
 		switch {
+		case m.maint != nil:
+			screen, minimum = m.maintenanceScreen(now), maintenanceMinWidth
 		case m.mute != nil:
 			screen = renderMute(*m.mute, m.snap, now, m.err)
 			p := *m.mute
