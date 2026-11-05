@@ -290,14 +290,10 @@ func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Maintenance · "+p.name) + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
-	switch held := heldLine(svc, now); {
-	case held != "":
+	if held := heldLine(svc, now); held != "" {
 		b.WriteString(held + "\n")
-	default:
-		b.WriteString(helpStyle.Render("Nothing is holding alerts right now.") + "\n")
 	}
-	b.WriteString(helpStyle.Render("Alerts are held while a window is active or the monitor is muted.") + "\n")
-	b.WriteString(helpStyle.Render("Checks and history continue; downtime still counts in uptime.") + "\n\n")
+	b.WriteString(helpStyle.Render("Alerts are held during a window or while muted. Checks and uptime keep counting.") + "\n\n")
 	if p.form != nil {
 		renderWindowForm(&b, *p.form)
 	} else {

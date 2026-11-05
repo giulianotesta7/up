@@ -60,7 +60,7 @@ func TestMaintenancePopupListsWindows(t *testing.T) {
 	requireText(t, m, "Maintenance · api",
 		"Mon, Fri 23:00 + 2h · America/New_York · crosses midnight",
 		"Sun 03:00 + 2h · UTC",
-		"Checks and history continue; downtime still counts in uptime.",
+		"Alerts are held during a window or while muted. Checks and uptime keep counting.",
 		"↑/↓ choose · a add · e edit · d delete · esc close")
 	if strings.Contains(view(m), "Sun 03:00 + 2h · UTC · crosses") {
 		t.Fatalf("a window inside the day is not crossing midnight:\n%s", view(m))
@@ -74,7 +74,7 @@ func TestMaintenancePopupListsWindows(t *testing.T) {
 func TestMaintenancePopupWithoutWindows(t *testing.T) {
 	_, m := maintenanceModel(t)
 	m, _ = press(t, m, keyW)
-	requireText(t, m, "No windows yet. Press a to add one.", "Nothing is holding alerts right now.")
+	requireText(t, m, "No windows yet. Press a to add one.")
 }
 
 func TestMaintenanceAddWindow(t *testing.T) {
@@ -284,7 +284,7 @@ func TestMaintenancePopupScrollsAtTheMaximumOfWindows(t *testing.T) {
 		t.Helper()
 		out := view(m)
 		row := fmt.Sprintf("Sun %02d:%02d + 2h · UTC", selected*10/60, selected*10%60)
-		for _, want := range []string{"Maintenance · api", "Checks and history continue", row, "↑/↓ choose · a add · e edit · d delete · esc close"} {
+		for _, want := range []string{"Maintenance · api", "Checks and uptime keep counting", row, "↑/↓ choose · a add · e edit · d delete · esc close"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("selected %d: missing %q:\n%s", selected, want, out)
 			}
