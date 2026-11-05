@@ -78,10 +78,7 @@ func TestEditPrefillSaveOriginAndFixedName(t *testing.T) {
 				m, _ = press(t, m, keyEnter)
 			}
 			m, _ = press(t, m, keyE)
-			requireText(t, m, "Edit monitor", "Name: api", "https://api.example.com/health", "30s", "5s", "200", "enter save", "esc cancel")
-			if detail { // in the list the form popup covers the database footer
-				requireText(t, m, "database: /shared/up.db")
-			}
+			requireText(t, m, "Edit monitor", "Name: api", "https://api.example.com/health", "30s", "5s", "200", "enter save", "esc cancel", "database: /shared/up.db")
 			// Focus wraps among editable fields only (Type and Advanced, never the name), including backwards from URL.
 			m, _ = press(t, m, keyShiftTab, keyShiftTab, keyShiftTab, keyShiftTab, keyShiftTab, keyShiftTab, keyShiftTab)
 			m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyHome})

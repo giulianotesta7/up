@@ -613,7 +613,7 @@ func (m Model) View() tea.View {
 	}
 	content = renderTitleWidth(m.snap, m.width) + "\n" + rule + "\n" + content
 	if modal != "" || stackParent != "" || stackChild != "" || (m.help && helpPopupFits(m.width, m.height)) {
-		content = padForPopup(content, m.height)
+		content = padForPopup(content, m.popupPadHeight(modal, stackParent, stackChild))
 	}
 	if m.destination != "" {
 		footer := helpStyle.Render("remote · " + displayText(m.destination))
@@ -674,6 +674,22 @@ func (m Model) View() tea.View {
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
+}
+
+// popupPadHeight is the height to pad the content to before a popup. Before
+// the terminal size is known it grows to hold the tallest box between the title
+// row and the footer, so the box covers neither.
+func (m Model) popupPadHeight(boxes ...string) int {
+	if m.height > 0 {
+		return m.height
+	}
+	height := 0
+	for _, box := range boxes {
+		if box != "" {
+			height = max(height, popupHeight+2, strings.Count(box, "\n")+1+3)
+		}
+	}
+	return height
 }
 
 // Run shows the TUI until the user quits or ctx is done.

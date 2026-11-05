@@ -123,6 +123,11 @@ func overlayPopup(content, popup string, width, height int) string {
 		height = len(lines)
 	}
 	left, top := max(0, (width-boxWidth)/2), max(0, (height-len(box))/2)
+	// The box never covers the title row ("▲ up …"): an unsized model, whose
+	// height is the content, would otherwise start a tall box at row 0.
+	if len(lines) > 1 {
+		top = max(1, top)
+	}
 	for len(lines) < top+len(box) {
 		lines = append(lines, "")
 	}

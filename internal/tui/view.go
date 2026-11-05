@@ -40,14 +40,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		if anyCert {
 			certWidth = 9
 		}
-		// A held cell grows only for a maintenance window, alone or with a mute.
-		heldWidth, heldHeader := 13, "MUTED"
-		for _, s := range snap.Services {
-			if s.InMaintenance.Active {
-				heldHeader = "HELD"
-				heldWidth = max(heldWidth, ansi.StringWidth(heldCell(s, now)))
-			}
-		}
+		heldWidth, heldHeader := heldColumn(snap, now)
 		showTrend := width <= 0 || width >= max(78, nameWidth+55+statusWidth+certWidth)
 		// A tcp tag follows the name when the list has room for it.
 		tcpTag := tcpTagWidth(snap, width, nameWidth, statusWidth, certWidth)

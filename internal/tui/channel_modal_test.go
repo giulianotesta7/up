@@ -98,6 +98,8 @@ func TestChannelSmallFallback(t *testing.T) {
 
 func TestChannelParentFallbackChildFits(t *testing.T) {
 	m := channelModalModel(t, 80, 24)
+	// A recipient this long makes the channel table wider than an 80-column popup.
+	m.snap.Channels[0].Recipients = []string{"operations-and-on-call-team@example.com"}
 	m, _ = press(t, m, keyC)
 	parent := view(m)
 	if strings.Contains(parent, "╭") || !strings.Contains(parent, "Channels") {

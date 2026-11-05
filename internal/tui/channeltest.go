@@ -7,6 +7,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/store"
@@ -21,6 +23,20 @@ const (
 	testAlready      = "A test is already running for this channel."
 	testNoDaemon     = "Daemon not running; start `up serve` (or reconnect to the server) and retry."
 )
+
+// testWrapWidth is the width of the intro line: longer messages (a daemon or
+// SMTP error can be any length) wrap to it so the popup stays as narrow as the
+// intro and still fits an 80-column terminal.
+const testWrapWidth = 72
+
+// wrapStyled wraps text to testWrapWidth and styles every line.
+func wrapStyled(style lipgloss.Style, text string) string {
+	lines := strings.Split(ansi.Wrap(text, testWrapWidth, ""), "\n")
+	for i := range lines {
+		lines[i] = style.Render(lines[i])
+	}
+	return strings.Join(lines, "\n")
+}
 
 // channelTestPrompt is the "Test channel" popup over the channel list. The
 // request is only enqueued here; the daemon sends it, and the outcome comes
@@ -122,11 +138,11 @@ func renderChannelTest(p channelTestPrompt, snap Snapshot, now time.Time, loadEr
 	t, seen := followedTest(snap, p)
 	switch {
 	case p.err != "":
-		b.WriteString(warnStyle.Render(p.err))
+		b.WriteString(wrapStyled(warnStyle, p.err))
 	case p.queuing || (p.id != 0 && !seen) || (seen && t.Status.Active()):
 		active = true
 		if (seen || p.id != 0) && !p.queuing && (snap.Stale(now) || loadErr != nil) {
-			b.WriteString(warnStyle.Render(testNoDaemon + " The request stays queued."))
+			b.WriteString(wrapStyled(warnStyle, testNoDaemon+" The request stays queued."))
 		} else {
 			b.WriteString(accentStyle.Render(testRunning))
 		}
@@ -137,7 +153,7 @@ func renderChannelTest(p channelTestPrompt, snap Snapshot, now time.Time, loadEr
 		}
 		b.WriteString(upStyle.Render("✓ " + text))
 	case seen:
-		b.WriteString(downStyle.Render("✗ Test failed: " + displayText(t.Error)))
+		b.WriteString(wrapStyled(downStyle, "✗ Test failed: "+displayText(t.Error)))
 	default:
 		b.WriteString(helpStyle.Render("Ready. Nothing is sent until you press enter."))
 	}

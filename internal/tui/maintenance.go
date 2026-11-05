@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/giulianotesta7/up/internal/config"
 )
 
@@ -507,4 +508,17 @@ func (s Service) heldPending() string {
 	default:
 		return "recovery"
 	}
+}
+
+// heldColumn is the width and title of the list's held column. It is MUTED at
+// 13 cells and grows only for a maintenance window, alone or with a mute.
+func heldColumn(snap Snapshot, now time.Time) (width int, header string) {
+	width, header = 13, "MUTED"
+	for _, s := range snap.Services {
+		if s.InMaintenance.Active {
+			header = "HELD"
+			width = max(width, ansi.StringWidth(heldCell(s, now)))
+		}
+	}
+	return width, header
 }
