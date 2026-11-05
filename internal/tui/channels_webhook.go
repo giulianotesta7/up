@@ -273,7 +273,6 @@ func (f channelForm) renderHookRows(b *strings.Builder, snap Snapshot) {
 }
 
 func (f channelForm) hookHelp() string {
-	b := "Sends a generic JSON POST (not a native Slack or Discord format). Any 2xx is delivered; no retries.\n" +
-		"The URL and auth value are stored encrypted and never shown again."
+	b := "Sends a JSON POST. Any 2xx counts as delivered; no retries."
 	return "\n" + helpStyle.Render(b) + "\n"
 }
