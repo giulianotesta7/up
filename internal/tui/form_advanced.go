@@ -344,9 +344,9 @@ func (f monitorForm) renderAdvanced(b *strings.Builder, hasKey bool, focusLine *
 		line(base+1, fmt.Sprintf("Header %d value", i+1), f.adv.valueView(row.value, f.focus == base+1, hasKey), "  ")
 		base += 2
 	}
-	add := helpStyle.Render("press space to add a header")
+	add := helpStyle.Render("space to add")
 	if f.focus == base {
-		add = "press space to add a header"
+		add = "space to add"
 	}
 	line(base, "+ Header", add, "  ")
 	line(base+1, "Request body", f.adv.valueView(f.adv.body, f.focus == base+1, hasKey), "  ")
