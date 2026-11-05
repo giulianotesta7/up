@@ -22,6 +22,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 ## Features
 
 - **HTTP checks** with per-monitor interval, timeout and expected status. Redirects are followed. Optional method, headers, body and expected text under Advanced.
+- **TCP checks** that connect to a host and port, for databases, SMTP or any service without an HTTP endpoint.
 - **Managed from the TUI.** Add, edit, delete and mute monitors; the daemon picks up changes within ~2s.
 - **Remote TUI.** Run the daemon on a server and manage it from your laptop over an authenticated API.
 - **Check history.** Every result is stored and outages are derived from it. Results are kept for 30 days by default; retention is configurable.
@@ -154,6 +155,12 @@ Run `up serve` once before entering SMTP passwords to create `up.db.key` (requir
 `m` offers presets and custom durations from 1 minute to 7 days; `u` ends the mute early. Checks and history keep running, and mutes survive restarts.
 
 When the mute ends, recipients only hear what they do not already know: a down email if it is still down and they were not told, or a recovery email if they were told about the outage before the mute. An outage that starts and ends during the mute sends nothing.
+
+### TCP monitors
+
+Choose `TCP` in the form's `Type` field (first field, `←`/`→`) and enter a host name or IP address (IPv6 accepted, without brackets) and a port. Every interval `up` opens a connection to `host:port` within the timeout and closes it at once. The connection opening is `up`; a refused connection, a DNS failure or a timeout is `down` with that reason. Latency is the time to connect, including name resolution.
+
+A TCP monitor proves a listener accepted the connection. It does **not** validate TLS, speak the protocol or check that the application behind the port is healthy: use an HTTP monitor for that. TCP monitors have no URL, expected status, `TLS expiry` or certificate column, and the list marks them `tcp`.
 
 ### Certificate expiry
 

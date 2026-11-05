@@ -153,9 +153,6 @@ func (a advancedForm) stops() []advStop {
 	return append(out, advStop{kind: stopAdd}, advStop{kind: stopBody}, advStop{kind: stopExpect})
 }
 
-// stopCount is the number of focus positions, including the fold row.
-func (f monitorForm) stopCount() int { return focusCount + len(f.adv.stops()) }
-
 func (f monitorForm) stop() (advStop, bool) {
 	stops := f.adv.stops()
 	if i := f.focus - focusCount; i >= 0 && i < len(stops) {
@@ -178,10 +175,7 @@ func (f *monitorForm) advText() *string {
 
 // focusCursor is where the cursor sits when the focus moves to a field.
 func (f *monitorForm) focusCursor() int {
-	if f.focus < len(f.values) {
-		return len([]rune(f.values[f.focus]))
-	}
-	if p := f.advText(); p != nil {
+	if p := f.text(); p != nil {
 		return len([]rune(*p))
 	}
 	return 0
