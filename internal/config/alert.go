@@ -29,10 +29,8 @@ const (
 	KindWebhook = "webhook"
 )
 
-// ChannelKinds lists the kinds the TUI offers, in display order. Webhook is
-// valid (ValidateChannel, the store and the API accept it) but stays out of
-// this list until the webhook feature adds its form.
-var ChannelKinds = []string{KindEmail}
+// ChannelKinds lists the kinds the TUI offers, in display order.
+var ChannelKinds = []string{KindEmail, KindWebhook}
 
 // SMTPServer is an SMTP server that email channels send through.
 type SMTPServer struct {
@@ -142,8 +140,7 @@ func ValidateChannel(c Channel) error {
 	case KindWebhook:
 		errs = append(errs, validateWebhookChannel(c)...)
 	default:
-		// Webhook is also accepted; the wording changes with its form.
-		errs = append(errs, fmt.Errorf("kind %q is not supported (use email)", c.Kind))
+		errs = append(errs, fmt.Errorf("kind %q is not supported (use email or webhook)", c.Kind))
 	}
 	return errors.Join(errs...)
 }

@@ -152,11 +152,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		}
 		for _, c := range snap.Channels {
 			if c.Name == s.Check.Channel && s.Check.Channel != "" {
-				noun := "recipients"
-				if len(c.Recipients) == 1 {
-					noun = "recipient"
-				}
-				channel += " " + helpStyle.Render(fmt.Sprintf("(%s via %s → %d %s)", c.Kind, c.SMTPServer, len(c.Recipients), noun))
+				channel += " " + helpStyle.Render(channelSummary(c))
 				break
 			}
 		}
