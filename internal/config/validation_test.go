@@ -45,7 +45,7 @@ func TestValidateCheck(t *testing.T) {
 			} else if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("ValidateCheck() = %v, want %q", err, tt.want)
 			}
-			if c != before {
+			if !c.SameDefinition(before) {
 				t.Fatal("validation changed input")
 			}
 		})

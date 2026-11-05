@@ -149,7 +149,7 @@ func TestAlertStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	checks, err := s.Checks(ctx)
-	if err != nil || len(checks) != 3 || checks[0].Channel != "a" || checks[2] != vcheck {
+	if err != nil || len(checks) != 3 || checks[0].Channel != "a" || !checks[2].SameDefinition(vcheck) {
 		t.Fatal(checks, err)
 	}
 	r := check.Result{CheckName: "api", At: at, Status: check.StatusUp}

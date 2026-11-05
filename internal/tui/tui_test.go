@@ -91,7 +91,7 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("got %d services, want 3 in config order", len(snap.Services))
 	}
 	api, pay, fresh := snap.Services[0], snap.Services[1], snap.Services[2]
-	if api.Check != testChecks[0] || !api.HasResult || api.Latest != up("api", "03:44:30") || api.Label() != "UP" {
+	if !api.Check.SameDefinition(testChecks[0]) || !api.HasResult || api.Latest != up("api", "03:44:30") || api.Label() != "UP" {
 		t.Errorf("api = %+v, want the latest up result", api)
 	}
 	if pay.Label() != "DOWN" || !pay.DownSince.Equal(at("03:44:00")) || pay.Latest.Error != reason {

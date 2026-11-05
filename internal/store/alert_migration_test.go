@@ -51,14 +51,14 @@ func TestCheckAlertThresholdsPersist(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := s.Checks(ctx)
-	if err != nil || len(got) != 1 || got[0] != c {
+	if err != nil || len(got) != 1 || !got[0].SameDefinition(c) {
 		t.Fatalf("Checks() = %+v, %v, want %+v", got, err, c)
 	}
 	c.AlertAfter, c.RecoverAfter = 5, 1
 	if err := s.UpdateCheck(ctx, c); err != nil {
 		t.Fatal(err)
 	}
-	if got, err = s.Checks(ctx); err != nil || got[0] != c {
+	if got, err = s.Checks(ctx); err != nil || !got[0].SameDefinition(c) {
 		t.Fatalf("after update = %+v, %v, want %+v", got, err, c)
 	}
 	c.AlertAfter = 11
