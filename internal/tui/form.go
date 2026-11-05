@@ -42,6 +42,9 @@ type monitorForm struct {
 	saving       bool
 	editing      bool
 	returnDetail bool
+	// base is the monitor being edited. The form shows only some fields, so
+	// the rest (request options, host, port) carry over unchanged.
+	base config.Check
 }
 
 func newMonitorForm() *monitorForm {
@@ -52,13 +55,14 @@ func editMonitorForm(c config.Check, detail bool) *monitorForm {
 	return &monitorForm{
 		values:  [5]string{c.Name, c.URL, c.Interval.String(), c.Timeout.String(), strconv.Itoa(c.ExpectedStatus)},
 		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: tlsChoice(c.TLSOff),
-		focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail,
+		focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail, base: c,
 	}
 }
 
 // check converts text only; all semantic rules belong to config.ValidateCheck.
 func (f monitorForm) check() (config.Check, error) {
-	c := config.Check{Name: f.values[0], URL: f.values[1], Channel: f.channel}
+	c := f.base
+	c.Name, c.URL, c.Channel = f.values[0], f.values[1], f.channel
 	var err error
 	if c.Interval, err = time.ParseDuration(f.values[2]); err != nil {
 		return c, fmt.Errorf("interval: %w", err)
