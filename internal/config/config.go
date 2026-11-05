@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"time"
+
+	"github.com/giulianotesta7/up/internal/secret"
 )
 
 // Cert is the last observed TLS certificate and its notification state.
@@ -25,13 +27,35 @@ type Mute struct {
 	WasAlerting bool
 }
 
-// Check is one validated HTTP check.
+// Check is one validated check, HTTP (the default) or TCP.
+//
+// A Check holds a slice, so it is not comparable with ==; use SameDefinition.
+// Build one from external input (API, form) and call Canonical before storing
+// or comparing it; the store does so on every write.
 type Check struct {
-	Name           string
+	Name string
+	// Kind is CheckHTTP or CheckTCP; empty means HTTP.
+	Kind           string
 	URL            string
 	Interval       time.Duration
 	Timeout        time.Duration
 	ExpectedStatus int
+	// Method is the HTTP method; empty means GET. HTTP checks only.
+	Method string
+	// Headers are sent in order. Names are plain; values are sealed (see
+	// Header). HTTP checks only.
+	Headers []Header
+	// Body is the sealed request body and BodyEdit says how a write treats
+	// it (see Edit). HTTP checks only.
+	Body     secret.Sealed
+	BodyEdit Edit
+	// ExpectText is a literal, case-sensitive text the response body must
+	// contain. HTTP checks only.
+	ExpectText string
+	// Host and Port are the TCP target. Host has no brackets for IPv6.
+	// TCP checks only.
+	Host string
+	Port int
 	// Channel is the name of the channel that receives this check's alerts;
 	// empty means no alerts.
 	Channel string
@@ -62,13 +86,31 @@ type rawCheck struct {
 	Interval       string
 	Timeout        string
 	ExpectedStatus *int
+	// TCP skips the URL and status rules, which only apply to HTTP.
+	TCP bool
 }
 
-// ValidateCheck validates a check definition.
-// All fields are required; durations must be positive, timeout must not exceed
-// interval, and the expected HTTP status must be between 100 and 599.
+// ValidateCheck validates a check definition and is the single validation
+// entry point for every writer. For HTTP all of name, URL, interval, timeout
+// and expected status are required; durations must be positive, timeout must
+// not exceed interval, and the expected status must be between 100 and 599.
+// See validateHTTPFields and validateTCPFields for the rest.
 func ValidateCheck(c Check) error {
-	_, errs := parseCheck(rawFromCheck(c))
+	var errs []error
+	switch c.Kind {
+	case "", CheckHTTP, CheckTCP:
+	default:
+		errs = append(errs, fmt.Errorf("kind %q must be http or tcp", c.Kind))
+	}
+	raw := rawFromCheck(c)
+	raw.TCP = c.Kind == CheckTCP
+	_, parsed := parseCheck(raw)
+	errs = append(errs, parsed...)
+	if raw.TCP {
+		errs = append(errs, validateTCPFields(c)...)
+	} else {
+		errs = append(errs, validateHTTPFields(c)...)
+	}
 	if c.AlertAfter < 0 || c.AlertAfter > MaxAlertThreshold {
 		errs = append(errs, fmt.Errorf("alert after %d must be between 1 and %d", c.AlertAfter, MaxAlertThreshold))
 	}
@@ -93,8 +135,10 @@ func parseCheck(rc rawCheck) (Check, []error) {
 		errs = append(errs, errors.New("name is required"))
 	}
 
-	if err := validateURL(rc.URL); err != nil {
-		errs = append(errs, err)
+	if !rc.TCP {
+		if err := validateURL(rc.URL); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	interval, err := parsePositiveDuration("interval", rc.Interval)
@@ -114,6 +158,7 @@ func parseCheck(rc rawCheck) (Check, []error) {
 	}
 
 	switch {
+	case rc.TCP:
 	case rc.ExpectedStatus == nil:
 		errs = append(errs, errors.New("expected status is required"))
 	case *rc.ExpectedStatus < 100 || *rc.ExpectedStatus > 599:

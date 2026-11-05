@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 5
+const schemaVersion = 6
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -86,6 +86,48 @@ ALTER TABLE checks ADD COLUMN recover_after INTEGER NOT NULL DEFAULT 0;
 	`
 CREATE TABLE certs (check_name TEXT PRIMARY KEY, host TEXT NOT NULL, issuer TEXT NOT NULL, serial TEXT NOT NULL, not_after_ns INTEGER NOT NULL, observed_ns INTEGER NOT NULL, notified INTEGER NOT NULL);
 ALTER TABLE checks ADD COLUMN tls_off INTEGER NOT NULL DEFAULT 0;
+`,
+	// v5 -> v6: shared foundation for HTTP request options, TCP checks,
+	// webhook channels, maintenance windows and channel test requests.
+	// Existing rows keep today's behavior: kind http, empty method (GET), no
+	// headers, body or expected text, and email channels without webhook
+	// fields. Headers are a JSON list of {n, v, k} (name, sealed value, key);
+	// body, webhook URL and webhook auth value are sealed like SMTP
+	// passwords. Window weekdays are a bit set (bit 0 is Sunday).
+	`
+ALTER TABLE checks ADD COLUMN kind        TEXT    NOT NULL DEFAULT 'http';
+ALTER TABLE checks ADD COLUMN method      TEXT    NOT NULL DEFAULT '';
+ALTER TABLE checks ADD COLUMN headers     TEXT    NOT NULL DEFAULT '';
+ALTER TABLE checks ADD COLUMN body        BLOB    NOT NULL DEFAULT x'';
+ALTER TABLE checks ADD COLUMN body_key    BLOB    NOT NULL DEFAULT x'';
+ALTER TABLE checks ADD COLUMN expect_text TEXT    NOT NULL DEFAULT '';
+ALTER TABLE checks ADD COLUMN host        TEXT    NOT NULL DEFAULT '';
+ALTER TABLE checks ADD COLUMN port        INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE channels ADD COLUMN webhook_origin    TEXT NOT NULL DEFAULT '';
+ALTER TABLE channels ADD COLUMN webhook_url       BLOB NOT NULL DEFAULT x'';
+ALTER TABLE channels ADD COLUMN webhook_url_key   BLOB NOT NULL DEFAULT x'';
+ALTER TABLE channels ADD COLUMN webhook_auth_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE channels ADD COLUMN webhook_auth      BLOB NOT NULL DEFAULT x'';
+ALTER TABLE channels ADD COLUMN webhook_auth_key  BLOB NOT NULL DEFAULT x'';
+CREATE TABLE maintenance_windows (
+	id           INTEGER PRIMARY KEY AUTOINCREMENT,
+	check_name   TEXT    NOT NULL,
+	weekdays     INTEGER NOT NULL,
+	start_minute INTEGER NOT NULL,
+	duration_ns  INTEGER NOT NULL,
+	zone         TEXT    NOT NULL
+);
+CREATE INDEX maintenance_windows_by_check ON maintenance_windows (check_name);
+CREATE TABLE channel_tests (
+	id           INTEGER PRIMARY KEY AUTOINCREMENT,
+	channel      TEXT    NOT NULL,
+	status       TEXT    NOT NULL CHECK (status IN ('pending', 'sending', 'ok', 'error')),
+	error        TEXT    NOT NULL,
+	requested_ns INTEGER NOT NULL,
+	started_ns   INTEGER NOT NULL,
+	finished_ns  INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX channel_tests_one_active ON channel_tests (channel) WHERE status IN ('pending', 'sending');
 `,
 }
 
@@ -253,9 +295,14 @@ func insertCheck(ctx context.Context, tx *sql.Tx, position int, c config.Check) 
 	if err := requireChannel(ctx, tx, c.Channel); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx,
-		"INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after, tls_off) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		position, c.Name, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter, c.TLSOff)
+	c = c.Canonical()
+	f, err := checkFields(c, nil)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx,
+		"INSERT INTO checks (position, "+checkColumns+") VALUES (?, "+checkPlaceholders+")",
+		append([]any{position}, f.values(c)...)...)
 	return err
 }
 
@@ -269,19 +316,17 @@ type checkReader interface {
 }
 
 func readChecks(ctx context.Context, reader checkReader) ([]config.Check, error) {
-	rows, err := reader.QueryContext(ctx, "SELECT name, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after, tls_off FROM checks ORDER BY position")
+	rows, err := reader.QueryContext(ctx, "SELECT "+checkColumns+" FROM checks ORDER BY position")
 	if err != nil {
 		return nil, fmt.Errorf("store: checks: %w", err)
 	}
 	defer rows.Close()
 	var checks []config.Check
 	for rows.Next() {
-		var c config.Check
-		var interval, timeout int64
-		if err := rows.Scan(&c.Name, &c.URL, &interval, &timeout, &c.ExpectedStatus, &c.Channel, &c.AlertAfter, &c.RecoverAfter, &c.TLSOff); err != nil {
+		c, err := scanCheck(rows)
+		if err != nil {
 			return nil, fmt.Errorf("store: checks: %w", err)
 		}
-		c.Interval, c.Timeout = time.Duration(interval), time.Duration(timeout)
 		checks = append(checks, c)
 	}
 	if err := rows.Err(); err != nil {

@@ -21,13 +21,48 @@ import (
 	"github.com/giulianotesta7/up/internal/store"
 )
 
+// A stop requested while serve is still starting is a clean shutdown, not an
+// error: the startup reads that take the context must not turn it into exit 1.
+func TestServeStopsCleanlyWhenCanceledDuringStartup(t *testing.T) {
+	isolateDefaultDatabase(t)
+	path := filepath.Join(t.TempDir(), "up.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	code, out, errOut := runCmd(ctx, "serve", "--db", path)
+	if code != 0 || out != "" || strings.Contains(errOut, "up:") {
+		t.Fatalf("serve = %d, stdout %q, stderr %q; want a clean stop", code, out, errOut)
+	}
+	if _, err := os.Stat(path + ".key"); err != nil {
+		t.Fatalf("key not created: %v", err)
+	}
+}
+
 func TestServeCreatesKey(t *testing.T) {
 	isolateDefaultDatabase(t)
 	path := filepath.Join(t.TempDir(), "up.db")
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	// Stop serve once startup has stored the public key, not after a fixed
+	// delay: startup time depends on the machine and the migrations it runs.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if code, _, errOut := runCmd(ctx, "serve", "--db", path); code != 0 {
-		t.Fatalf("%d %s", code, errOut)
+	type exit struct {
+		code   int
+		errOut string
+	}
+	done := make(chan exit, 1)
+	go func() { code, _, errOut := runCmd(ctx, "serve", "--db", path); done <- exit{code, errOut} }()
+	deadline := time.Now().Add(5 * time.Second)
+	for stored := false; !stored; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("serve did not store the public key within 5s")
+		}
+		if s, err := store.OpenReadOnly(path); err == nil {
+			_, stored, _ = s.PublicKey(context.Background())
+			s.Close()
+		}
+	}
+	cancel()
+	if got := <-done; got.code != 0 {
+		t.Fatalf("%d %s", got.code, got.errOut)
 	}
 	info, err := os.Stat(path + ".key")
 	if err != nil || info.Mode().Perm() != 0600 {

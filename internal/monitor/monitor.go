@@ -112,6 +112,10 @@ type Options struct {
 func Run(ctx context.Context, opts Options) error {
 	checks, err := opts.Store.Checks(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			// Shutdown before the first read is a clean stop.
+			return nil
+		}
 		return err
 	}
 	if opts.DiscoveryInterval <= 0 {
@@ -154,7 +158,7 @@ func Run(ctx context.Context, opts Options) error {
 		for name, active := range running {
 			select {
 			case <-active.done:
-				if c, exists := definitions[name]; exists && c == active.definition {
+				if c, exists := definitions[name]; exists && c.SameDefinition(active.definition) {
 					previous[name] = active.last
 				}
 				delete(running, name)
@@ -164,12 +168,12 @@ func Run(ctx context.Context, opts Options) error {
 		// Cancel all obsolete loops before joining any one of them.
 		// Joining means a Runner that ignores cancellation can stall discovery.
 		for name, active := range running {
-			if c, exists := definitions[name]; !exists || c != active.definition {
+			if c, exists := definitions[name]; !exists || !c.SameDefinition(active.definition) {
 				active.cancel()
 			}
 		}
 		for name, active := range running {
-			if c, exists := definitions[name]; !exists || c != active.definition {
+			if c, exists := definitions[name]; !exists || !c.SameDefinition(active.definition) {
 				<-active.done
 				if exists {
 					previous[name] = active.last

@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"net/url"
@@ -50,21 +51,38 @@ func writeStoreError(w http.ResponseWriter, err error) {
 const maxDurationMS = math.MaxInt64 / int64(time.Millisecond)
 
 // checkOrError converts the wire form, refusing values that would overflow a
-// duration and names the router cannot address.
-func (d CheckDTO) checkOrError() (config.Check, error) {
+// duration and names the router cannot address. The returned message is a
+// client error (400); err is a server error (500). Protected values are
+// checked against the server key when s can supply it (every real store can).
+func (d CheckDTO) checkOrError(ctx context.Context, s any) (c config.Check, msg string, err error) {
 	switch {
 	case d.IntervalMS > maxDurationMS || d.IntervalMS < -maxDurationMS:
-		return config.Check{}, errors.New("interval_ms is out of range")
+		return config.Check{}, "interval_ms is out of range", nil
 	case d.TimeoutMS > maxDurationMS || d.TimeoutMS < -maxDurationMS:
-		return config.Check{}, errors.New("timeout_ms is out of range")
+		return config.Check{}, "timeout_ms is out of range", nil
 	case d.Name == "." || d.Name == "..":
-		return config.Check{}, errors.New(`name cannot be "." or ".." over the API`)
+		return config.Check{}, `name cannot be "." or ".." over the API`, nil
 	}
-	return d.check(), nil
+	keys, _ := s.(keyReader)
+	c = d.check()
+	if c.Body, c.BodyEdit, msg, err = protectedEdit(ctx, keys, d.Body, "body", config.MaxSealedBody); msg != "" || err != nil {
+		return config.Check{}, msg, err
+	}
+	c.Headers = make([]config.Header, len(d.Headers))
+	for i, h := range d.Headers {
+		out := config.Header{Name: h.Name}
+		if out.Value, out.Edit, msg, err = protectedEdit(ctx, keys, h.Value, fmt.Sprintf("headers[%d].value", i), config.MaxSealedHeaderValue); msg != "" || err != nil {
+			return config.Check{}, msg, err
+		}
+		c.Headers[i] = out
+	}
+	return c, "", nil
 }
 
+// check converts the plain fields; protected values are filled by checkOrError.
 func (d CheckDTO) check() config.Check {
-	return config.Check{Name: d.Name, URL: d.URL, Interval: time.Duration(d.IntervalMS) * time.Millisecond, Timeout: time.Duration(d.TimeoutMS) * time.Millisecond, ExpectedStatus: d.ExpectedStatus, Channel: d.Channel, AlertAfter: d.AlertAfter, RecoverAfter: d.RecoverAfter, TLSOff: d.TLSOff}
+	return config.Check{Name: d.Name, URL: d.URL, Interval: time.Duration(d.IntervalMS) * time.Millisecond, Timeout: time.Duration(d.TimeoutMS) * time.Millisecond, ExpectedStatus: d.ExpectedStatus, Channel: d.Channel, AlertAfter: d.AlertAfter, RecoverAfter: d.RecoverAfter, TLSOff: d.TLSOff,
+		Kind: d.Kind, Method: d.Method, ExpectText: d.ExpectText, Host: d.Host, Port: d.Port}
 }
 
 // WriteRoutes handles check and mute mutations after authentication.
@@ -81,16 +99,20 @@ func WriteRoutes(s WriteStore) http.Handler {
 			if !DecodeJSON(w, r, &d) {
 				return
 			}
-			c, err := d.checkOrError()
+			c, msg, err := d.checkOrError(r.Context(), s)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
+				writeStoreError(w, err)
+				return
+			}
+			if msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
 				return
 			}
 			if err := s.AddCheck(r.Context(), c); err != nil {
 				writeStoreError(w, err)
 				return
 			}
-			writeJSON(w, 201, d)
+			writeJSON(w, 201, checkDTO(c.Canonical()))
 			return
 		}
 		rest, ok := strings.CutPrefix(path, "/api/v1/checks/")
@@ -149,9 +171,13 @@ func WriteRoutes(s WriteStore) http.Handler {
 					return
 				}
 				raw.CheckDTO.Name = name
-				var c config.Check
-				if c, err = raw.CheckDTO.checkOrError(); err != nil {
-					writeError(w, http.StatusBadRequest, err.Error())
+				c, msg, e := raw.CheckDTO.checkOrError(r.Context(), s)
+				if e != nil {
+					writeStoreError(w, e)
+					return
+				}
+				if msg != "" {
+					writeError(w, http.StatusBadRequest, msg)
 					return
 				}
 				err = s.UpdateCheck(r.Context(), c)

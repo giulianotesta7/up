@@ -102,7 +102,7 @@ func TestEditPrefillSaveOriginAndFixedName(t *testing.T) {
 			}
 			m = finishCommand(t, busy, cmd)
 			want := config.Check{Name: "api", URL: "https://changed.example.com", Interval: time.Minute, Timeout: 10 * time.Second, ExpectedStatus: 204, AlertAfter: 1, RecoverAfter: 1}
-			if s.updates != 1 || s.updated != want {
+			if s.updates != 1 || !s.updated.SameDefinition(want) {
 				t.Fatalf("updates=%d definition=%+v", s.updates, s.updated)
 			}
 			if strings.Contains(view(m), "Edit monitor") || strings.Contains(view(m), "Status      ") != detail {

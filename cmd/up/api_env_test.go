@@ -48,9 +48,29 @@ func TestAPIEnvironmentListenStartsTheAPI(t *testing.T) {
 	t.Setenv("UP_NO_TLS", "invalid")
 	t.Setenv("UP_BEHIND_PROXY", "invalid")
 	path := filepath.Join(t.TempDir(), "up.db")
-	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	// Stop serve once the API has started (its token file exists), not after
+	// a fixed delay that a slow startup can outlast.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	code, out, errout := runCmd(ctx, "serve", "--db", path)
+	type exit struct {
+		code        int
+		out, errout string
+	}
+	done := make(chan exit, 1)
+	go func() { code, out, errout := runCmd(ctx, "serve", "--db", path); done <- exit{code, out, errout} }()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(path + ".token"); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the API did not start within 5s")
+		}
+	}
+	// The listening line follows the token file; give it a moment.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	got := <-done
+	code, out, errout := got.code, got.out, got.errout
 	if code != 0 || out != "" || !strings.Contains(errout, "up: API listening on ") || strings.Contains(errout, "WARNING: API over plain HTTP") {
 		t.Fatalf("got %d %q %q", code, out, errout)
 	}

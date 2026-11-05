@@ -114,7 +114,7 @@ func TestRunAppliesEveryDefinitionFieldWithoutRestartingSibling(t *testing.T) {
 			}
 			waitFor(t, "edited definition to run immediately", func() bool {
 				calls, starts := r.observed("api")
-				return starts == 2 && calls[len(calls)-1].def == changed
+				return starts == 2 && calls[len(calls)-1].def.SameDefinition(changed)
 			})
 			waitFor(t, "edited result", func() bool { rs, _ := s.Recent(bg, "api", 100); return len(rs) >= 2 })
 			time.Sleep(40 * time.Millisecond)
@@ -126,7 +126,7 @@ func TestRunAppliesEveryDefinitionFieldWithoutRestartingSibling(t *testing.T) {
 				t.Fatal("new interval not used")
 			}
 			for _, call := range calls[1:] {
-				if call.def != changed {
+				if !call.def.SameDefinition(changed) {
 					t.Fatalf("old definition still running: %+v", call.def)
 				}
 			}
@@ -199,7 +199,7 @@ func TestRunDeleteInFlightAndReaddFresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, "fresh loop result", func() bool { _, ok, _ := tui.Latest(bg, "api"); return ok })
-	if calls, starts := r.observed("api"); len(calls) != 2 || starts != 2 || calls[1].def != c {
+	if calls, starts := r.observed("api"); len(calls) != 2 || starts != 2 || !calls[1].def.SameDefinition(c) {
 		t.Fatalf("not a fresh loop: %v, %d", calls, starts)
 	}
 	stop()

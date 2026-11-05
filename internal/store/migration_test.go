@@ -106,7 +106,7 @@ func tables(t *testing.T, path string) []string {
 	return names
 }
 
-var v2Tables = []string{"certs", "channels", "checks", "daemon", "mutes", "results", "secret_key", "smtp_servers"}
+var v2Tables = []string{"certs", "channel_tests", "channels", "checks", "daemon", "maintenance_windows", "mutes", "results", "secret_key", "smtp_servers", "sqlite_sequence"}
 
 func TestOpenMigratesV1AndKeepsData(t *testing.T) {
 	path := v1Database(t)
@@ -118,8 +118,8 @@ func TestOpenMigratesV1AndKeepsData(t *testing.T) {
 	}
 	defer s.Close()
 
-	if got := version(t, path); got != 5 {
-		t.Fatalf("user_version after Open = %d, want 5", got)
+	if got := version(t, path); got != 6 {
+		t.Fatalf("user_version after Open = %d, want 6", got)
 	}
 	if got := tables(t, path); !reflect.DeepEqual(got, v2Tables) {
 		t.Fatalf("tables after migration = %v, want %v", got, v2Tables)
@@ -158,8 +158,8 @@ func TestOpenCreatesV2AndReopenIsIdempotent(t *testing.T) {
 	s, path := openTemp(t)
 	record(t, s, result("api", 0, check.StatusUp))
 	s.Close()
-	if got := version(t, path); got != 5 {
-		t.Fatalf("user_version of a new database = %d, want 5", got)
+	if got := version(t, path); got != 6 {
+		t.Fatalf("user_version of a new database = %d, want 6", got)
 	}
 
 	again, err := Open(path)
@@ -179,10 +179,84 @@ func TestOpenReadOnlyRejectsV1WithUpgradeHint(t *testing.T) {
 	path := v1Database(t)
 
 	_, err := OpenReadOnly(path)
-	if err == nil || !strings.Contains(err.Error(), "database schema version 1 is older than this up (5); open it with `up serve` or `up tui` to upgrade it") {
+	if err == nil || !strings.Contains(err.Error(), "database schema version 1 is older than this up (6); open it with `up serve` or `up tui` to upgrade it") {
 		t.Fatalf("OpenReadOnly(v1) error = %v, want upgrade hint", err)
 	}
 	if got := version(t, path); got != 1 {
 		t.Fatalf("user_version after read-only open = %d, want 1 (unchanged)", got)
 	}
+}
+
+// v5Database writes a database exactly as the previous release left it, by
+// running the frozen migrations 0 to 4, with a monitor, a channel and its
+// SMTP server.
+func v5Database(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "up.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, m := range migrations[:5] {
+		if _, err := db.Exec(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 5;
+INSERT INTO smtp_servers VALUES ('smtp', 'mail.example.com', 587, 'starttls', 'u', x'0102', x'0304', 'a@example.com');
+INSERT INTO channels VALUES ('ops', 'email', 'smtp', 'b@example.com');
+INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after, tls_off) VALUES (0, 'api', 'https://api.example.com', 30000000000, 5000000000, 200, 'ops', 2, 3, 1);`); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestOpenMigratesV5KeepingBehavior(t *testing.T) {
+	path := v5Database(t)
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(v5) error = %v", err)
+	}
+	defer s.Close()
+	if got := version(t, path); got != 6 {
+		t.Fatalf("user_version = %d, want 6", got)
+	}
+	ctx := context.Background()
+	checks, err := s.Checks(ctx)
+	want := config.Check{Name: "api", URL: "https://api.example.com", Interval: 30 * time.Second, Timeout: 5 * time.Second, ExpectedStatus: 200, Channel: "ops", AlertAfter: 2, RecoverAfter: 3, TLSOff: true}
+	if err != nil || len(checks) != 1 || !reflect.DeepEqual(checks[0], want) {
+		t.Fatalf("Checks() = %+v, %v, want %+v", checks, err, want)
+	}
+	channels, err := s.Channels(ctx)
+	wantChannel := config.Channel{Name: "ops", Kind: config.KindEmail, SMTPServer: "smtp", Recipients: []string{"b@example.com"}}
+	if err != nil || len(channels) != 1 || !reflect.DeepEqual(channels[0], wantChannel) {
+		t.Fatalf("Channels() = %+v, %v, want %+v", channels, err, wantChannel)
+	}
+	if ok, err := s.RecordDefined(ctx, want, result("api", 0, check.StatusUp)); err != nil || !ok {
+		t.Fatalf("RecordDefined(migrated definition) = %v, %v, want stored", ok, err)
+	}
+	if windows, err := s.AllMaintenanceWindows(ctx); err != nil || len(windows) != 0 {
+		t.Fatalf("new windows table = %v, %v", windows, err)
+	}
+	if tests, err := s.LatestChannelTests(ctx); err != nil || len(tests) != 0 {
+		t.Fatalf("new channel tests table = %v, %v", tests, err)
+	}
+}
+
+func TestOpenReadOnlyRejectsV5AndOpenUpgradesIt(t *testing.T) {
+	path := v5Database(t)
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 5 is older than this up (6)") {
+		t.Fatalf("OpenReadOnly(v5) error = %v", err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	ro, err := OpenReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly after upgrade: %v", err)
+	}
+	ro.Close()
 }

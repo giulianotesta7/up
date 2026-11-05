@@ -116,7 +116,7 @@ func TestRunRejectsObsoleteInflightAndRestartsFinishedLoop(t *testing.T) {
 				return ok
 			})
 			calls, starts := r.observed("api")
-			if len(calls) != 2 || starts != 2 || calls[1].def != changed {
+			if len(calls) != 2 || starts != 2 || !calls[1].def.SameDefinition(changed) {
 				t.Fatalf("not a fresh loop: %+v, starts %d", calls, starts)
 			}
 			rs, err := s.Recent(bg, original.Name, 100)
