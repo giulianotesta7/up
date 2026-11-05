@@ -51,7 +51,7 @@ func TestChannelTestPopupExplainsAndWaitsForEnter(t *testing.T) {
 	s, m := testChannelModel(t, true)
 	requireText(t, m, "t test")
 	m, _ = press(t, m, keyT)
-	requireText(t, m, "Test channel", "changes no monitor data", "mail", "Nothing is sent until you press enter", "enter send test")
+	requireText(t, m, "Test channel", "mail", "Press enter to send a test.", "enter send test")
 	if _, ok, _ := s.LatestChannelTest(context.Background(), "mail"); ok {
 		t.Fatal("opening the popup enqueued a test")
 	}
@@ -70,8 +70,8 @@ func TestChannelTestSendsAndShowsOutcomes(t *testing.T) {
 		errMsg string
 		want   string
 	}{
-		{"email accepted", 0, "", "Accepted by the SMTP server; inbox delivery is not confirmed"},
-		{"webhook accepted", 1, "", "Webhook accepted: HTTP 2xx"},
+		{"email accepted", 0, "", "Accepted by the mail server; inbox delivery is not confirmed."},
+		{"webhook accepted", 1, "", "Accepted (HTTP 2xx)"},
 		{"failure", 0, "535 authentication failed", "Test failed: 535 authentication failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
