@@ -63,6 +63,7 @@ func hostileSnapshot() tui.Snapshot {
 		}},
 		SMTPServers: []config.SMTPServer{{Name: "smtp" + h, Host: "smtp.example.com" + h, Username: "user" + h, Sender: "a@example.com" + h}},
 		Channels:    []config.Channel{{Name: "chan" + h, Kind: "email" + h, SMTPServer: "smtp" + h, Recipients: []string{"a@example.com" + h}}},
+		Defaults:    config.Defaults{Zone: "Europe/Madrid" + h, Channel: "chan" + h},
 	}
 }
 
@@ -82,7 +83,7 @@ func TestServerTextCannotInjectTerminalSequences(t *testing.T) {
 			t.Errorf("%s keeps control characters: %q", path, s)
 		}
 	})
-	if seen < 15 {
+	if seen < 17 {
 		t.Fatalf("the walk saw only %d strings: the test is not covering the snapshot", seen)
 	}
 	// Readable text survives: only the sequences and control characters go.

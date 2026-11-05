@@ -1,7 +1,8 @@
 # Foundation contracts
 
 What the five feature branches (advanced HTTP, TCP, webhooks, channel test,
-maintenance) share. Schema version 6. Do not add another migration without
+maintenance) share, plus the defaults added after them. Schema version 7 (v7
+adds the single-row `defaults` table). Do not add another migration without
 rebasing on this one; migrations are append-only.
 
 ## Types (`internal/config`)
@@ -10,6 +11,7 @@ rebasing on this one; migrations are append-only.
 |---|---|
 | `Check` | `Kind` (`""`/`"http"` = HTTP, `"tcp"`), `Method` (`""` = GET), `Headers []Header`, `Body secret.Sealed`, `BodyEdit Edit`, `ExpectText`, `Host`, `Port` |
 | `Header` | `Name`, `Value secret.Sealed`, `Edit Edit` |
+| `Defaults` | `Zone`, `Channel` (`""` = none), `Interval`, `Timeout`, `ExpectedStatus`, `AlertAfter`, `RecoverAfter`; `BuiltinDefaults()` is UTC, no channel, 30s, 5s, 200, 1, 1; `ValidateDefaults` reuses `ValidateZone` and `ValidateCheck` and requires thresholds 1..10 |
 | `Channel` | `WebhookOrigin`, `WebhookURL`/`WebhookURLEdit`, `WebhookAuthName`, `WebhookAuth`/`WebhookAuthEdit`; `Kind` is `KindEmail` or `KindWebhook` |
 | `MaintenanceWindow` | `ID`, `Check`, `Weekdays []time.Weekday` (local start day), `StartMinute` 0..1439, `Duration`, `Zone` (IANA) |
 | `ChannelTest` | `ID`, `Channel`, `Status` (`TestPending`/`TestSending`/`TestOK`/`TestError`), `Error`, `Requested`, `Started`, `Finished` |
@@ -33,6 +35,7 @@ Header values, HTTP body, webhook URL and webhook auth value are `secret.Sealed`
 - Checks: `AddCheck`, `UpdateCheck`, `SetChecks`, `Checks` carry every field above; `RecordDefined` compares URL, kind, method, headers, body, expect text, host, port, interval, timeout, status.
 - Channels: `AddChannel`, `UpdateChannel`, `Channels`, `Channel` carry the webhook fields (sealed values come back sealed). `DeleteChannel` also deletes its test requests.
 - Windows (max `MaxMaintenanceWindows` = 20 per check): `AddMaintenanceWindow(ctx, w) (w with ID, error)`, `UpdateMaintenanceWindow(ctx, w)`, `DeleteMaintenanceWindow(ctx, check, id)`, `MaintenanceWindows(ctx, check)`, `AllMaintenanceWindows(ctx)`. `DeleteCheck` deletes its windows. Unknown check/window is `ErrNotFound`, invalid input `ErrValidation`.
+- Defaults (v7 `defaults`, one row with `id = 1`; no row reads as `BuiltinDefaults`): `Defaults(ctx)`, `SetDefaults(ctx, d)` (invalid input or a channel that does not exist is `ErrValidation`; nothing is stored). `DeleteChannel` sets a default channel of that name to none, so reads never name a deleted channel.
 - Alert state (v6 `alert_state`, a trigger deletes it with its check): `AlertState(ctx, check) (known, found, err)`, `SetAlertState(ctx, check, known)` (`ErrNotFound` unknown check), `AlertStates(ctx)`. It records whether recipients were last told the check is down; the monitor writes it when it sends or settles and reads it on loop start (a live mute's `was_alerting` first, no row falls back to the streak). Snapshot: `Service.KnownAlerting`, `services[].known_alerting`.
 - Channel tests (one active per channel, enforced by a unique index): `EnqueueChannelTest(ctx, channel, at)` (`ErrNotFound` unknown channel, `ErrExists` if pending/sending), `ClaimChannelTest(ctx, at)` (oldest pending to sending), `CompleteChannelTest(ctx, id, errText, at)` (empty text = ok; text is cleaned by `SafeTestError`; only a sending test completes), `FailSendingChannelTests(ctx, reason, at)` (call at daemon start), `LatestChannelTest(ctx, channel)`, `LatestChannelTests(ctx)`. History per channel is capped at 20.
 
@@ -42,7 +45,7 @@ Header values, HTTP body, webhook URL and webhook auth value are `secret.Sealed`
 
 ## TUI (`internal/tui`)
 
-`Snapshot.ChannelTests`, `Service.Maintenance`, `Service.InMaintenance` are filled by `Load` when the store implements the optional readers (`MaintenanceReader`, `ChannelTestReader`; `*store.Store` does). Optional writers, implemented by `*store.Store` and `*client.Client`: `tui.MaintenanceStore` (add/update/delete window) and `tui.ChannelTester` (`EnqueueChannelTest`). Type-assert them; `tui.Store` is unchanged.
+`Snapshot.ChannelTests`, `Service.Maintenance`, `Service.InMaintenance` are filled by `Load` when the store implements the optional readers (`MaintenanceReader`, `ChannelTestReader`; `*store.Store` does). Optional writers, implemented by `*store.Store` and `*client.Client`: `tui.MaintenanceStore` (add/update/delete window), `tui.ChannelTester` (`EnqueueChannelTest`) and `tui.DefaultsStore` (`SetDefaults`); `Load` fills `Snapshot.Defaults` through the optional `tui.DefaultsReader` (zero value means built-in, see `Snapshot.NewItemDefaults`). Type-assert them; `tui.Store` is unchanged.
 
 ## API (`internal/remote`)
 
@@ -57,6 +60,8 @@ All routes need the bearer token; bodies are strict JSON (unknown fields are 400
 | `PUT`/`DELETE /api/v1/checks/{name}/maintenance/{id}` | `MaintenanceWriteDTO` / none; 204 |
 | `POST /api/v1/channels/{name}/test` | none; 202 `ChannelTestDTO` (404 unknown channel, 409 one already active) |
 | `GET /api/v1/channels/{name}/test` | 200 `ChannelTestDTO`, 404 if none |
+| `GET /api/v1/defaults` | 200 `DefaultsDTO` |
+| `PUT /api/v1/defaults` | `DefaultsDTO` (every field); 200 `DefaultsDTO`, 400 on invalid input or an unknown channel |
 
 JSON shapes:
 
@@ -68,8 +73,9 @@ PROT            {"action":"keep|replace|clear","sealed":{"key":b64,"data":b64}} 
 channel (write) {"name","kind":"email|webhook","smtp_server","recipients","webhook_origin","webhook_url":PROT,"webhook_auth_name","webhook_auth":PROT}
 channel (read)  {"name","kind","smtp_server","recipients","webhook_origin","webhook_url_set","webhook_auth_name","webhook_auth_set"}
 window          {"id","weekdays":[0..6],"start_minute","duration_ms","zone"}   (write omits id)
+defaults        {"zone","channel","interval_ms","timeout_ms","expected_status","alert_after","recover_after"}
 channel test    {"id","channel","status":"pending|sending|ok|error","error","requested","started","finished"}
-snapshot adds   services[].maintenance [window], services[].in_maintenance, services[].maintenance_end, channel_tests [channel test]
+snapshot adds   services[].maintenance [window], services[].in_maintenance, services[].maintenance_end, channel_tests [channel test], defaults
 ```
 
 Sealed values must be sealed to the key in the snapshot's `public_key`; `sealed.key` must equal it (400 otherwise). `cmd/up/api.go` mounts the wildcard routes; `internal/client` implements the matching methods and `LoadSnapshot` shifts `in_maintenance`'s end and channel test times by clock skew.

@@ -65,7 +65,9 @@ type Model struct {
 	deletion          *deletePrompt
 	mute              *mutePrompt
 	maint             *maintenancePopup
+	defaults          *defaultsPopup
 	notice            string
+	noticeOK          bool // notice is a confirmation, not a warning
 	smtpScreen        bool
 	smtpSelected      int
 	smtpSelectName    string
@@ -288,6 +290,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.load
 	case maintenanceMsg:
 		return m.handleMaintenanceMsg(msg)
+	case defaultsMsg:
+		return m.handleDefaultsMsg(msg)
 	case smtpSaveMsg:
 		if msg.generation != m.generation || m.smtpForm == nil || !m.smtpForm.saving {
 			return m, nil
@@ -357,6 +361,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case channelTestMsg:
 		return m.channelTestResult(msg)
 	case tea.PasteMsg:
+		if m.defaults != nil {
+			return m.handleDefaultsPaste(msg.Content), nil
+		}
 		if m.maint != nil {
 			return m.handleMaintenancePaste(msg.Content), nil
 		}
@@ -405,7 +412,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.maint != nil {
 		return m.handleMaintenanceKey(msg)
 	}
-	m.notice = ""
+	if m.defaults != nil {
+		return m.handleDefaultsKey(msg)
+	}
+	m.notice, m.noticeOK = "", false
 	if m.help {
 		if key := msg.String(); key == "?" || key == "esc" {
 			m.help = false
@@ -435,7 +445,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.sweepGeneration++
 		}
 	case "n":
-		m.form = newMonitorForm()
+		m.form = newMonitorForm(m.snap)
+	case "f":
+		m.defaults = newDefaultsPopup(m.snap)
 	case "e", "d":
 		if m.selected < len(m.snap.Services) {
 			c := m.snap.Services[m.selected].Check
@@ -481,7 +493,7 @@ func (m Model) View() tea.View {
 	content := renderList(m.snap, m.selected, now, m.err, m.width)
 	split := m.splitMode()
 	if split {
-		content = renderSplit(m.snap, m.selected, now, m.err, m.width, m.height, m.notice)
+		content = renderSplit(m.snap, m.selected, now, m.err, m.width, m.height, m.noticeLine())
 	} else if m.detail && m.selected < len(m.snap.Services) {
 		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width)
 	}
@@ -489,9 +501,12 @@ func (m Model) View() tea.View {
 		content = renderKeys(m.destination != "")
 	}
 	modal := ""
-	if m.form != nil || m.deletion != nil || m.mute != nil || m.maint != nil {
+	if m.form != nil || m.deletion != nil || m.mute != nil || m.maint != nil || m.defaults != nil {
 		screen, minimum := "", 0
 		switch {
+		case m.defaults != nil:
+			screen = renderDefaults(*m.defaults, m.snap, now, m.err)
+			minimum = defaultsMinWidth(*m.defaults, m.snap, now, m.err)
 		case m.maint != nil:
 			screen, minimum = m.maintenanceScreen(now), maintenanceMinWidth
 		case m.mute != nil:
@@ -523,7 +538,7 @@ func (m Model) View() tea.View {
 		}
 	}
 	if m.notice != "" && !split {
-		content += "\n" + warnStyle.Render(m.notice)
+		content += "\n" + m.noticeLine()
 	}
 	stackParent, stackChild := "", ""
 	if m.smtpScreen {

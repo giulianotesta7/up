@@ -367,6 +367,10 @@ func (s *Store) deleteAlert(ctx context.Context, name, kind string) (err error) 
 		if _, err = tx.ExecContext(ctx, "DELETE FROM channel_tests WHERE channel=?", name); err != nil {
 			return
 		}
+		// A deleted default channel makes the default "none".
+		if _, err = tx.ExecContext(ctx, "UPDATE defaults SET channel='' WHERE channel=?", name); err != nil {
+			return
+		}
 	}
 	return tx.Commit()
 }

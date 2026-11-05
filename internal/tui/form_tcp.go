@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
 	"strconv"
 	"strings"
@@ -75,7 +76,7 @@ func (f *monitorForm) setKind(kind string) {
 	f.values[1], f.port, f.tlsExpiry = "", "", "on"
 	f.values[4] = ""
 	if !f.isTCP() {
-		f.values[4] = "200"
+		f.values[4] = cmp.Or(f.status, "200")
 	}
 	f.base = config.Check{Name: f.base.Name}
 	f.adv = advancedForm{}

@@ -400,6 +400,7 @@ func renderKeys(remote ...bool) string {
 		row("n", "new monitor", "s", "SMTP servers"),
 		row("e", "edit", "c", "channels"),
 		row("d", "delete", "w", "maintenance"),
+		row("", "", "f", "defaults"),
 		"",
 		headerStyle.Render("VIEW"),
 		"",

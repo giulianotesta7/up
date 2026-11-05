@@ -113,12 +113,36 @@ type Snapshot struct {
 	Uptime    float64
 	HasUptime bool
 	Incidents int
+	// Defaults are the values new monitors and maintenance windows start
+	// from. The zero value (no Zone) means config.BuiltinDefaults; use
+	// Snapshot.NewItemDefaults.
+	Defaults config.Defaults
+}
+
+// NewItemDefaults returns the defaults, or the built-in ones for a snapshot
+// that carries none (for example from an older server).
+func (s Snapshot) NewItemDefaults() config.Defaults {
+	if s.Defaults.Zone == "" {
+		return config.BuiltinDefaults()
+	}
+	return s.Defaults
 }
 
 // Stale reports whether the daemon stopped writing heartbeats. Service
 // statuses stay as last stored; staleness never turns a service down.
 func (s Snapshot) Stale(now time.Time) bool {
 	return !s.HasBeat || now.Sub(s.LastBeat) > StaleAfter
+}
+
+// existingChannel returns name when a channel of that name exists, else none
+// (""): a default channel that was deleted must not be offered.
+func (s Snapshot) existingChannel(name string) string {
+	for _, c := range s.Channels {
+		if c.Name == name {
+			return name
+		}
+	}
+	return ""
 }
 
 // Store is the database boundary used by the TUI.
@@ -169,6 +193,17 @@ type MaintenanceStore interface {
 // returns store.ErrExists.
 type ChannelTester interface {
 	EnqueueChannelTest(ctx context.Context, channel string, at time.Time) (config.ChannelTest, error)
+}
+
+// DefaultsStore saves the defaults. Both the local *store.Store and the
+// remote client implement it; the values arrive back in Snapshot.Defaults.
+type DefaultsStore interface {
+	SetDefaults(context.Context, config.Defaults) error
+}
+
+// DefaultsReader lets Load fill Snapshot.Defaults.
+type DefaultsReader interface {
+	Defaults(context.Context) (config.Defaults, error)
 }
 
 // MaintenanceReader lets Load fill Service.Maintenance.
@@ -241,6 +276,11 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 	}
 	if r, ok := s.(ChannelTestReader); ok {
 		if snap.ChannelTests, err = r.LatestChannelTests(ctx); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	if r, ok := s.(DefaultsReader); ok {
+		if snap.Defaults, err = r.Defaults(ctx); err != nil {
 			return Snapshot{}, err
 		}
 	}

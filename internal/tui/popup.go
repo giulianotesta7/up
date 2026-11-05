@@ -43,7 +43,7 @@ func renderModal(title string, body string, width, height int, minimum ...int) (
 }
 
 const popupWidth = 46
-const popupHeight = 14
+const popupHeight = 15
 
 func helpPopupFits(width, height int) bool {
 	return (width <= 0 || width >= popupWidth+2) && (height <= 0 || height >= popupHeight+2)
@@ -60,12 +60,12 @@ func renderHelpPopup(split bool, remote ...bool) string {
 		return left + strings.Repeat(" ", max(0, 14-ansi.StringWidth(description))) + accentStyle.Render(key2) + strings.Repeat(" ", max(0, 4-ansi.StringWidth(key2))) + helpStyle.Render(description2)
 	}
 	monitors := [][2]string{{"↑/↓ k/j", "select"}, {"enter", "details"}, {"n", "new monitor"}, {"e", "edit"}, {"d", "delete"}}
-	alerting := [][2]string{{"m", "mute selected"}, {"u", "unmute"}, {"s", "SMTP servers"}, {"c", "channels"}, {"w", "maintenance"}}
+	alerting := [][2]string{{"m", "mute selected"}, {"u", "unmute"}, {"s", "SMTP servers"}, {"c", "channels"}, {"w", "maintenance"}, {"f", "defaults"}}
 	if split {
 		monitors = append(monitors[:1:1], monitors[2:]...)
 	}
 	lines := []string{headerStyle.Render("MONITORS") + strings.Repeat(" ", 15) + headerStyle.Render("ALERTING")}
-	for i := range 5 {
+	for i := range 6 {
 		var left, right [2]string
 		if i < len(monitors) {
 			left = monitors[i]

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -185,7 +184,7 @@ func (m Model) handleMaintenanceKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		p.selected = min(max(0, len(windows)-1), p.selected+1)
 	case "a":
 		p.err = nil
-		p.form = newWindowForm(localZone(m.now().Location()))
+		p.form = newWindowForm(m.snap.NewItemDefaults().Zone)
 	case "e", "enter":
 		if len(windows) > 0 {
 			p.err = nil
@@ -466,28 +465,6 @@ func shortDuration(d time.Duration) string {
 		s = strings.TrimSuffix(s, "0m")
 	}
 	return s
-}
-
-// localZone names the viewer's IANA zone, which is the default for a new
-// window. A Local location carries no name, so the TZ variable and then the
-// /etc/localtime link are consulted; UTC is the last resort.
-func localZone(loc *time.Location) string {
-	if name := loc.String(); name != "" && name != "Local" {
-		return name
-	}
-	if name := os.Getenv("TZ"); name != "" {
-		if _, err := config.LoadZone(strings.TrimPrefix(name, ":")); err == nil {
-			return strings.TrimPrefix(name, ":")
-		}
-	}
-	if target, err := os.Readlink("/etc/localtime"); err == nil {
-		if _, name, ok := strings.Cut(target, "zoneinfo/"); ok {
-			if _, err := config.LoadZone(name); err == nil {
-				return name
-			}
-		}
-	}
-	return "UTC"
 }
 
 // heldPending is what the recipients will be told when nothing holds alerts:

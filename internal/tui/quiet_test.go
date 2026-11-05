@@ -102,7 +102,7 @@ func TestMonitorFormThresholds(t *testing.T) {
 		t.Fatalf("hint shown for the default threshold:\n%s", view(m))
 	}
 	m, _ = press(t, m, keyRight, keyRight)
-	requireText(t, m, "Alert after: ‹ 3 › failures in a row", "Detection time ≈ 3 × 30s = 1m30s before the first email")
+	requireText(t, m, "Alert after: ‹ 3 › failures in a row", "Detection time ≈ 3 × 30s = 1m30s before the first alert")
 	m, _ = press(t, m, keyTab, keyRight)
 	requireText(t, m, "Recover after: ‹ 2 › successes in a row")
 	m, cmd := press(t, m, keyEnter)
