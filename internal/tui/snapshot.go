@@ -46,6 +46,10 @@ type Service struct {
 	// Both stay empty with a store that cannot read windows.
 	Maintenance   []config.MaintenanceWindow
 	InMaintenance config.Maintenance
+	// KnownAlerting is whether the recipients were last told the monitor is
+	// down: what the daemon recorded, or the streak when it recorded nothing
+	// yet. A mute taken now starts from it.
+	KnownAlerting bool
 }
 
 // Muted reports whether the service's alerts are being held at now.
@@ -172,6 +176,11 @@ type MaintenanceReader interface {
 	AllMaintenanceWindows(context.Context) ([]config.MaintenanceWindow, error)
 }
 
+// AlertStateReader lets Load fill Service.KnownAlerting.
+type AlertStateReader interface {
+	AlertStates(context.Context) (map[string]bool, error)
+}
+
 // ChannelTestReader lets Load fill Snapshot.ChannelTests.
 type ChannelTestReader interface {
 	LatestChannelTests(context.Context) ([]config.ChannelTest, error)
@@ -224,6 +233,12 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 			return Snapshot{}, err
 		}
 	}
+	var states map[string]bool
+	if r, ok := s.(AlertStateReader); ok {
+		if states, err = r.AlertStates(ctx); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	if r, ok := s.(ChannelTestReader); ok {
 		if snap.ChannelTests, err = r.LatestChannelTests(ctx); err != nil {
 			return Snapshot{}, err
@@ -259,6 +274,10 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 			svc.Latest, svc.HasResult = svc.Recent[0], true
 		}
 		svc.Streak = check.Replay(svc.Recent, c.FailuresToAlert(), c.SuccessesToRecover())
+		svc.KnownAlerting = svc.Streak.Alerting
+		if known, ok := states[c.Name]; ok {
+			svc.KnownAlerting = known
+		}
 		if svc.Outages, err = s.Outages(ctx, c.Name, outageLimit); err != nil {
 			return Snapshot{}, err
 		}

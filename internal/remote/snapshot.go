@@ -141,6 +141,8 @@ type ServiceDTO struct {
 	Maintenance    []MaintenanceDTO `json:"maintenance"`
 	InMaintenance  bool             `json:"in_maintenance"`
 	MaintenanceEnd time.Time        `json:"maintenance_end"`
+	// KnownAlerting is whether the recipients were last told it is down.
+	KnownAlerting bool `json:"known_alerting"`
 }
 type SMTPServerDTO struct {
 	Name          string         `json:"name"`
@@ -240,6 +242,7 @@ func NewSnapshotDTO(s tui.Snapshot, now time.Time) SnapshotDTO {
 			x.Maintenance = append(x.Maintenance, maintenanceDTO(w))
 		}
 		x.InMaintenance, x.MaintenanceEnd = v.InMaintenance.Active, v.InMaintenance.End.UTC()
+		x.KnownAlerting = v.KnownAlerting
 		d.Services = append(d.Services, x)
 	}
 	for _, v := range s.SMTPServers {
@@ -290,6 +293,7 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 		if !v.InMaintenance {
 			x.InMaintenance.End = time.Time{}
 		}
+		x.KnownAlerting = v.KnownAlerting
 		s.Services = append(s.Services, x)
 	}
 	for _, v := range d.SMTPServers {

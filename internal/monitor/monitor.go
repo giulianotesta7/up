@@ -282,11 +282,8 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 	}
 	if opts.Alerter != nil {
 		streak = initialStreak(ctx, opts, c)
-		if m, found := readMute(); found {
-			notified = m.WasAlerting
-		} else {
-			notified = initialNotified(ctx, opts, c, streak)
-		}
+		m, found := readMute()
+		notified = loadNotified(ctx, opts, c, streak, m, found)
 	}
 	// suppressed is a manual mute or an active maintenance window.
 	suppressed := func() suppression {
@@ -299,10 +296,14 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 	// back, and forgets a mute that has ended with no window still running.
 	settle := func(res check.Result, s suppression) {
 		if c.Channel == "" {
-			notified = streak.Alerting
+			if notified != streak.Alerting {
+				notified = streak.Alerting
+				saveNotified(ctx, opts, c, notified)
+			}
 		} else if !s.active && streak.Alerting != notified {
 			notified = streak.Alerting
 			opts.Alerter.Notify(c, res)
+			saveNotified(ctx, opts, c, notified)
 		}
 		if s.found && !s.active {
 			clearCtx, clearCancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)

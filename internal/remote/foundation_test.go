@@ -340,7 +340,7 @@ func TestSnapshotDTOCarriesTheFoundationFieldsWithoutSecrets(t *testing.T) {
 			{Check: config.Check{Name: "api", URL: "https://example.com", Interval: time.Minute, Timeout: time.Second, ExpectedStatus: 200, Method: "POST",
 				Headers: []config.Header{{Name: "X-Token", Value: sealed(1)}, {Name: "Empty"}}, Body: sealed(2), ExpectText: "pong"},
 				Maintenance:   []config.MaintenanceWindow{{ID: 4, Check: "api", Weekdays: []time.Weekday{1, 3}, StartMinute: 540, Duration: time.Hour, Zone: "UTC"}},
-				InMaintenance: config.Maintenance{Active: true, End: now.Add(time.Hour)}},
+				InMaintenance: config.Maintenance{Active: true, End: now.Add(time.Hour)}, KnownAlerting: true},
 			{Check: config.Check{Name: "db", Kind: config.CheckTCP, Host: "::1", Port: 5432, Interval: time.Minute, Timeout: time.Second}},
 		},
 		Channels: []config.Channel{{Name: "hook", Kind: config.KindWebhook, WebhookOrigin: "https://hooks.example.com",
@@ -364,7 +364,7 @@ func TestSnapshotDTOCarriesTheFoundationFieldsWithoutSecrets(t *testing.T) {
 	}
 	for _, want := range []string{`"kind":"http"`, `"method":"POST"`, `"body_set":true`, `"value_set":true`, `"value_set":false`, `"expect_text":"pong"`,
 		`"kind":"tcp"`, `"host":"::1"`, `"port":5432`, `"webhook_origin":"https://hooks.example.com"`, `"webhook_url_set":true`, `"webhook_auth_name":"Authorization"`, `"webhook_auth_set":true`, `"webhook_auth_set":false`,
-		`"in_maintenance":true`, `"maintenance_end":"2026-03-02T15:30:00Z"`, `"weekdays":[1,3]`, `"duration_ms":3600000`, `"channel_tests":[`, `"status":"error"`, `"error":"refused"`} {
+		`"in_maintenance":true`, `"known_alerting":true`, `"maintenance_end":"2026-03-02T15:30:00Z"`, `"weekdays":[1,3]`, `"duration_ms":3600000`, `"channel_tests":[`, `"status":"error"`, `"error":"refused"`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("snapshot lacks %s:\n%s", want, raw)
 		}
@@ -379,7 +379,7 @@ func TestSnapshotDTOCarriesTheFoundationFieldsWithoutSecrets(t *testing.T) {
 	if api.Check.Method != "POST" || api.Check.ExpectText != "pong" || len(api.Check.Headers) != 2 || api.Check.Headers[0].Name != "X-Token" || api.Check.Headers[0].Value.Empty() || !api.Check.Headers[1].Value.Empty() || api.Check.Body.Empty() || api.Check.Kind != "" {
 		t.Fatalf("check = %+v", api.Check)
 	}
-	if !reflect.DeepEqual(api.Maintenance, snap.Services[0].Maintenance) || !api.InMaintenance.Active || !api.InMaintenance.End.Equal(now.Add(time.Hour)) {
+	if !reflect.DeepEqual(api.Maintenance, snap.Services[0].Maintenance) || !api.KnownAlerting || !api.InMaintenance.Active || !api.InMaintenance.End.Equal(now.Add(time.Hour)) {
 		t.Fatalf("maintenance = %+v %+v", api.Maintenance, api.InMaintenance)
 	}
 	if db := got.Services[1].Check; db.Kind != config.CheckTCP || db.Host != "::1" || db.Port != 5432 || db.Method != "" {

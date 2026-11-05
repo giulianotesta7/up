@@ -138,7 +138,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 	}
 	if s.InMaintenance.Active {
 		held := "nothing pending"
-		switch s.heldPending(now) {
+		switch s.heldPending() {
 		case "down":
 			held = "1 email pending (down since " + formatTime(s.DownSince, now) + ")"
 		case "recovery":

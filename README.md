@@ -147,7 +147,7 @@ When the mute ends, recipients only hear what they do not already know: a down e
 
 While a window is active, or the monitor is manually muted, alerts and certificate warnings are held. Checks, history and uptime are unchanged: downtime inside a window still counts in uptime. The list shows `◷ until HH:MM` (and `⏸` for a mute, both when both apply) and the detail shows the end time.
 
-When all of it ends (the later of the window and the mute; overlapping or back-to-back windows count as one), recipients hear only what they do not already know, exactly once, like after a mute. An outage that starts and ends inside a window sends nothing; one still going afterwards sends the down email then. Certificate warnings that came due inside a window are sent after it. Edits and deletions apply within about 2 seconds, and windows survive restarts.
+When all of it ends (the later of the window and the mute; overlapping or back-to-back windows count as one), recipients hear only what they do not already know, exactly once, like after a mute. An outage that starts and ends inside a window sends nothing; one still going afterwards sends the down email then. Certificate warnings that came due inside a window are sent after it. Edits and deletions apply within about 2 seconds, and windows survive restarts. What recipients were last told is stored per monitor, so a restart or an edit of the monitor, even in the middle of a long window, never repeats or drops an email. With 20 windows the list scrolls.
 
 Daylight saving: durations are elapsed time. A start time that does not exist that day (the clock jumps over it) is skipped for that day; one that happens twice runs once, at its first occurrence. Overlapping windows, even in different zones, combine.
 

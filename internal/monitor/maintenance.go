@@ -47,26 +47,50 @@ func windows(ctx context.Context, opts Options, name string) []config.Maintenanc
 	return ws
 }
 
-// initialNotified is what the recipients know after a restart in the middle
-// of a window: the state before the contiguous run of results the window has
-// held back, because those were never reported.
-func initialNotified(ctx context.Context, opts Options, c config.Check, streak check.Streak) bool {
-	reader, ok := opts.Store.(RecentReader)
+// AlertStateStore is the optional API that persists what the recipients were
+// last told (whether the check is down), so a restart, a definition edit or a
+// window that held results back never has to guess it from history.
+// *store.Store implements it.
+type AlertStateStore interface {
+	AlertState(context.Context, string) (known, found bool, err error)
+	SetAlertState(context.Context, string, bool) error
+}
+
+// loadNotified is what the recipients know when a loop starts: the live mute's
+// snapshot of it, else the persisted state, else the streak rebuilt from
+// history (databases from before the state was kept). A rebuilt value is
+// persisted at once, so later restarts do not depend on it.
+func loadNotified(ctx context.Context, opts Options, c config.Check, streak check.Streak, mute config.Mute, hasMute bool) bool {
+	if hasMute {
+		return mute.WasAlerting
+	}
+	states, ok := opts.Store.(AlertStateStore)
 	if !ok {
 		return streak.Alerting
 	}
-	ws := windows(ctx, opts, c.Name)
-	if !config.EvaluateMaintenance(ws, opts.now()).Active {
-		return streak.Alerting
-	}
-	readCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 	defer cancel()
-	results, err := reader.Recent(readCtx, c.Name, replayLimit)
+	known, found, err := states.AlertState(readCtx, c.Name)
 	if err != nil {
+		opts.Logger.Error("reading alert state failed", "check", c.Name, "error", err)
 		return streak.Alerting
 	}
-	for len(results) > 0 && config.EvaluateMaintenance(ws, results[0].At).Active {
-		results = results[1:]
+	if !found {
+		saveNotified(ctx, opts, c, streak.Alerting)
+		return streak.Alerting
 	}
-	return check.Replay(results, c.AlertAfter, c.RecoverAfter).Alerting
+	return known
+}
+
+// saveNotified persists what the recipients now know.
+func saveNotified(ctx context.Context, opts Options, c config.Check, known bool) {
+	states, ok := opts.Store.(AlertStateStore)
+	if !ok {
+		return
+	}
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	if err := states.SetAlertState(wctx, c.Name, known); err != nil {
+		opts.Logger.Error("saving alert state failed", "check", c.Name, "error", err)
+	}
 }

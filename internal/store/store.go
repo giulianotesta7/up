@@ -93,7 +93,9 @@ ALTER TABLE checks ADD COLUMN tls_off INTEGER NOT NULL DEFAULT 0;
 	// headers, body or expected text, and email channels without webhook
 	// fields. Headers are a JSON list of {n, v, k} (name, sealed value, key);
 	// body, webhook URL and webhook auth value are sealed like SMTP
-	// passwords. Window weekdays are a bit set (bit 0 is Sunday).
+	// passwords. Window weekdays are a bit set (bit 0 is Sunday). alert_state
+	// is what the recipients were last told about each check (down or not);
+	// deleting a check deletes its row.
 	`
 ALTER TABLE checks ADD COLUMN kind        TEXT    NOT NULL DEFAULT 'http';
 ALTER TABLE checks ADD COLUMN method      TEXT    NOT NULL DEFAULT '';
@@ -128,6 +130,8 @@ CREATE TABLE channel_tests (
 	finished_ns  INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX channel_tests_one_active ON channel_tests (channel) WHERE status IN ('pending', 'sending');
+CREATE TABLE alert_state (check_name TEXT PRIMARY KEY, known_alerting INTEGER NOT NULL);
+CREATE TRIGGER alert_state_with_check AFTER DELETE ON checks BEGIN DELETE FROM alert_state WHERE check_name = OLD.name; END;
 `,
 }
 

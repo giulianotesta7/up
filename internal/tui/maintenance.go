@@ -10,7 +10,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/giulianotesta7/up/internal/check"
 	"github.com/giulianotesta7/up/internal/config"
 )
 
@@ -281,10 +280,12 @@ func (m Model) handleMaintenancePaste(content string) Model {
 
 func (m Model) maintenanceScreen(now time.Time) string {
 	svc, _ := m.maintenanceService(m.maint.name)
-	return renderMaintenance(*m.maint, svc, m.snap, now, m.err)
+	return renderMaintenance(*m.maint, svc, m.snap, now, m.err, m.height)
 }
 
-func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.Time, loadErr error) string {
+// renderMaintenance draws the popup. With a known terminal height the window
+// list scrolls to keep the selected row, the header and the footer on screen.
+func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.Time, loadErr error, height int) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Maintenance · "+p.name) + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
@@ -302,13 +303,38 @@ func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.
 		if len(svc.Maintenance) == 0 {
 			b.WriteString(helpStyle.Render("No windows yet. Press a to add one.") + "\n")
 		}
-		for i, w := range svc.Maintenance {
-			row := describeWindow(w)
+		first, last := 0, len(svc.Maintenance)
+		if height > 0 {
+			// renderModal needs the body plus 4 rows; the rest of the body is
+			// fixed text, a blank row and the footer, plus the confirmation
+			// and error rows when shown.
+			fixed := strings.Count(b.String(), "\n") - 1 + 2
+			if p.confirm {
+				fixed += 2
+			}
+			if p.err != nil {
+				fixed += 1 + strings.Count(p.err.Error(), "\n") + 1
+			}
+			if room := height - 4 - fixed; room < last {
+				// Two rows are reserved for the "more" markers.
+				visible := max(1, room-2)
+				first = min(max(0, p.selected-visible/2), last-visible)
+				last = first + visible
+			}
+		}
+		if first > 0 {
+			b.WriteString(helpStyle.Render(fmt.Sprintf("  ↑ %d more", first)) + "\n")
+		}
+		for i := first; i < last; i++ {
+			row := describeWindow(svc.Maintenance[i])
 			if i == p.selected {
 				fmt.Fprintf(&b, "  %s %s\n", accentStyle.Render(">"), accentStyle.Render(row))
 			} else {
 				fmt.Fprintf(&b, "    %s\n", row)
 			}
+		}
+		if last < len(svc.Maintenance) {
+			b.WriteString(helpStyle.Render(fmt.Sprintf("  ↓ %d more", len(svc.Maintenance)-last)) + "\n")
 		}
 	}
 	if p.confirm && p.selected < len(svc.Maintenance) {
@@ -466,24 +492,10 @@ func localZone(loc *time.Location) string {
 	return "UTC"
 }
 
-// knownAlerting is whether the recipients already know the monitor is down:
-// the streak at the instant the active window began, since results inside it
-// were never reported. Outside a window it is the current streak.
-func (s Service) knownAlerting(now time.Time) bool {
-	if !s.InMaintenance.Active {
-		return s.Streak.Alerting
-	}
-	results := s.Recent
-	for len(results) > 0 && config.EvaluateMaintenance(s.Maintenance, results[0].At).Active {
-		results = results[1:]
-	}
-	return check.Replay(results, s.Check.FailuresToAlert(), s.Check.SuccessesToRecover()).Alerting
-}
-
 // heldPending is what the recipients will be told when nothing holds alerts:
 // "down", "recovery" or "" (nothing).
-func (s Service) heldPending(now time.Time) string {
-	known := s.knownAlerting(now)
+func (s Service) heldPending() string {
+	known := s.KnownAlerting
 	if s.HasMute {
 		known = s.Mute.WasAlerting
 	}

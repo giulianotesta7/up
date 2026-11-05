@@ -106,7 +106,7 @@ func tables(t *testing.T, path string) []string {
 	return names
 }
 
-var v2Tables = []string{"certs", "channel_tests", "channels", "checks", "daemon", "maintenance_windows", "mutes", "results", "secret_key", "smtp_servers", "sqlite_sequence"}
+var v2Tables = []string{"alert_state", "certs", "channel_tests", "channels", "checks", "daemon", "maintenance_windows", "mutes", "results", "secret_key", "smtp_servers", "sqlite_sequence"}
 
 func TestOpenMigratesV1AndKeepsData(t *testing.T) {
 	path := v1Database(t)

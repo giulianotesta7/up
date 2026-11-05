@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -215,24 +216,95 @@ func TestMaintenanceKeyDoesNotChangeMuteKeysAndIsInHelp(t *testing.T) {
 	requireText(t, m, "w", "maintenance")
 }
 
-// A mute started inside a window must still owe the recipients the outage
-// that began inside the window.
-func TestMuteInsideWindowKeepsTheDownAlertOwed(t *testing.T) {
+// A mute started inside a window starts from what the recipients were told,
+// however many results the window holds back.
+func TestMuteInsideWindowStartsFromWhatRecipientsKnow(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		known bool
+	}{{"reported down", true}, {"nothing reported", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, m := maintenanceModel(t, sundayNight)
+			ctx := context.Background()
+			for i := 0; i < 80; i++ {
+				r := check.Result{CheckName: "api", At: at("03:10:00").Add(time.Duration(i) * 20 * time.Second), Status: check.StatusDown, Latency: time.Millisecond}
+				if err := s.Record(ctx, r); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := s.SetAlertState(ctx, "api", tc.known); err != nil {
+				t.Fatal(err)
+			}
+			next, _ := m.Update(m.Init()())
+			m = next.(Model)
+			if got := m.snap.Services[0].KnownAlerting; got != tc.known {
+				t.Fatalf("snapshot KnownAlerting = %v, want %v", got, tc.known)
+			}
+			m, cmd := press(t, m, keyM, keyEnter)
+			finishCommand(t, m, cmd)
+			mute, ok, err := s.Mute(ctx, "api")
+			if err != nil || !ok || mute.WasAlerting != tc.known {
+				t.Fatalf("mute = %+v %v %v, want WasAlerting %v", mute, ok, err, tc.known)
+			}
+		})
+	}
+}
+
+func TestMaintenanceDetailPendingUsesRecordedState(t *testing.T) {
 	s, m := maintenanceModel(t, sundayNight)
 	ctx := context.Background()
-	for i, st := range []check.Status{check.StatusUp, check.StatusDown} {
-		r := check.Result{CheckName: "api", At: at("03:10:00").Add(time.Duration(i) * time.Minute), Status: st, Latency: time.Millisecond}
-		if err := s.Record(ctx, r); err != nil {
-			t.Fatal(err)
-		}
+	if err := s.Record(ctx, check.Result{CheckName: "api", At: at("03:10:00"), Status: check.StatusDown}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAlertState(ctx, "api", true); err != nil {
+		t.Fatal(err)
 	}
 	next, _ := m.Update(m.Init()())
+	m, _ = press(t, next.(Model), keyEnter)
+	requireText(t, m, "nothing pending")
+	if err := s.SetAlertState(ctx, "api", false); err != nil {
+		t.Fatal(err)
+	}
+	next, _ = m.Update(m.Init()())
+	requireText(t, next.(Model), "1 email pending (down since")
+}
+
+// The popup list scrolls: with the maximum of windows the selected row, the
+// header and the footer stay on screen at 80x24.
+func TestMaintenancePopupScrollsAtTheMaximumOfWindows(t *testing.T) {
+	var windows []config.MaintenanceWindow
+	for i := 0; i < store.MaxMaintenanceWindows; i++ {
+		w := sundayNight
+		w.StartMinute = i * 10
+		windows = append(windows, w)
+	}
+	_, m := maintenanceModel(t, windows...)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = next.(Model)
-	m, cmd := press(t, m, keyM, keyEnter)
-	finishCommand(t, m, cmd)
-	mute, ok, err := s.Mute(ctx, "api")
-	if err != nil || !ok || mute.WasAlerting {
-		t.Fatalf("mute = %+v %v %v, want WasAlerting false: the window held the outage back", mute, ok, err)
+	m, _ = press(t, m, keyW)
+	verify := func(selected int) {
+		t.Helper()
+		out := view(m)
+		row := fmt.Sprintf("Sun %02d:%02d + 2h · UTC", selected*10/60, selected*10%60)
+		for _, want := range []string{"Maintenance · api", "Checks and history continue", row, "↑/↓ choose · a add · e edit · d delete · esc close"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("selected %d: missing %q:\n%s", selected, want, out)
+			}
+		}
+		if lines := strings.Count(out, "\n") + 1; lines > 24 {
+			t.Fatalf("selected %d: %d lines at height 24:\n%s", selected, lines, out)
+		}
+	}
+	verify(0)
+	for i := 1; i < store.MaxMaintenanceWindows; i++ {
+		m, _ = press(t, m, keyDown)
+		verify(i)
+	}
+	// The delete confirmation adds rows and must still fit.
+	m, _ = press(t, m, keyD)
+	out := view(m)
+	if !strings.Contains(out, "y delete · n cancel") || strings.Count(out, "\n")+1 > 24 {
+		t.Fatalf("confirmation does not fit:\n%s", out)
 	}
 }
 

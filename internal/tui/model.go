@@ -448,7 +448,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.selected < len(m.snap.Services) {
 			svc := m.snap.Services[m.selected]
 			if msg.String() == "m" {
-				m.mute = &mutePrompt{name: svc.Check.Name, wasAlerting: svc.knownAlerting(m.now())}
+				m.mute = &mutePrompt{name: svc.Check.Name, wasAlerting: svc.KnownAlerting}
 			} else if svc.Muted(m.now()) {
 				m.generation++
 				return m, m.unmute(svc.Check.Name)
