@@ -121,7 +121,7 @@ func TestSplitActivity(t *testing.T) {
 		services     []Service
 		want, absent []string
 	}{
-		{name: "outage ordering and ongoing", services: []Service{{Check: config.Check{Name: "api"}, Outages: []store.Outage{{Start: now.Add(-4 * time.Minute), End: now.Add(-3 * time.Minute), Error: "failure"}, {Start: now.Add(-time.Minute), Ongoing: true, Error: "again"}}}}, want: []string{"03:44  ● api went DOWN again", "03:42  ● api recovered after 1m0s", "03:41  ● api went DOWN failure"}, absent: []string{"recovered after -"}},
+		{name: "outage ordering and ongoing", services: []Service{{Check: config.Check{Name: "api"}, Outages: []store.Outage{{Start: now.Add(-4 * time.Minute), End: now.Add(-3 * time.Minute), Error: "failure"}, {Start: now.Add(-time.Minute), Ongoing: true, Error: "again"}}}}, want: []string{"03:44  ● api went DOWN again", "03:42  ● api recovered after 1m", "03:41  ● api went DOWN failure"}, absent: []string{"recovered after -"}},
 		{name: "certificate threshold", services: []Service{{Check: config.Check{Name: "near"}, HasCert: true, Cert: config.Cert{Observed: now.Add(-time.Minute), NotAfter: now.Add(29 * day)}}, {Check: config.Check{Name: "boundary"}, HasCert: true, Cert: config.Cert{Observed: now, NotAfter: now.Add(30 * day)}}}, want: []string{"03:44  ! near certificate expires in 29d"}, absent: []string{"! boundary"}},
 		{name: "cap five", services: []Service{{Check: config.Check{Name: "api"}, Outages: []store.Outage{{Start: now.Add(-6 * time.Minute), End: now.Add(-5 * time.Minute)}, {Start: now.Add(-4 * time.Minute), End: now.Add(-3 * time.Minute)}, {Start: now.Add(-2 * time.Minute), End: now.Add(-time.Minute)}}}}, want: []string{"03:44", "03:43", "03:42", "03:41", "03:40"}, absent: []string{"03:39"}},
 	}

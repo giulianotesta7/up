@@ -55,7 +55,7 @@ func activity(snap Snapshot, now time.Time) []activityEvent {
 			}
 			events = append(events, activityEvent{o.Start, svc.Check.Name, text, "down"})
 			if !o.Ongoing {
-				events = append(events, activityEvent{o.End, svc.Check.Name, "recovered after " + o.End.Sub(o.Start).String(), "up"})
+				events = append(events, activityEvent{o.End, svc.Check.Name, "recovered after " + outageDuration(o.End.Sub(o.Start)), "up"})
 			}
 		}
 		if svc.HasCert && svc.Cert.NotAfter.Sub(now) < 30*day {

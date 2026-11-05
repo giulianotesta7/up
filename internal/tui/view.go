@@ -221,7 +221,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 				fmt.Fprintf(&b, "  %s → ongoing   %s\n", formatTime(o.Start, now), o.Error)
 				continue
 			}
-			fmt.Fprintf(&b, "  %s → %s (%s)   %s\n", formatTime(o.Start, now), formatTime(o.End, now), o.End.Sub(o.Start), o.Error)
+			fmt.Fprintf(&b, "  %s → %s (%s)   %s\n", formatTime(o.Start, now), formatTime(o.End, now), outageDuration(o.End.Sub(o.Start)), o.Error)
 		}
 	}
 	b.WriteString("\n" + renderHelp("esc back · e edit · d delete · m mute · ? more · q quit"))
