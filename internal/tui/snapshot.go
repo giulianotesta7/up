@@ -274,7 +274,7 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 			svc.Latest, svc.HasResult = svc.Recent[0], true
 		}
 		svc.Streak = check.Replay(svc.Recent, c.FailuresToAlert(), c.SuccessesToRecover())
-		svc.KnownAlerting = svc.Streak.Alerting
+		svc.KnownAlerting = svc.Streak.Alerting && c.Channel != ""
 		if known, ok := states[c.Name]; ok {
 			svc.KnownAlerting = known
 		}

@@ -145,7 +145,7 @@ Header values and the request body are protected like SMTP passwords: they are s
 2. `c`: add a channel. An **email** channel uses that server and one or more comma-separated recipients; a **webhook** channel posts to a URL (see below).
 3. `e` on a monitor: pick the channel. Monitors without a channel never alert.
 
-`up serve` sends one email when a monitor goes down and one when it recovers, never one per failed check. **Alert after** and **Recover after** (default 1) set how many consecutive failures or successes are needed; meanwhile the list shows `FAILING 2/3` or `RECOVERING 1/2`. Restarting the daemon preserves the streak and does not resend alerts.
+`up serve` sends one email when a monitor goes down and one when it recovers, never one per failed check. **Alert after** and **Recover after** (default 1) set how many consecutive failures or successes are needed; meanwhile the list shows `FAILING 2/3` or `RECOVERING 1/2`. Restarting the daemon preserves the streak and does not resend alerts. Recipients only know what was actually sent: if you pick a channel for a monitor that is already down, the down alert is sent right then (once a mute or maintenance window ends, if one holds it) and the recovery follows normally.
 
 TLS modes: `starttls` (default, usually port 587), `tls` (usually 465) and `none` for relays without login. `none` cannot be combined with a username.
 

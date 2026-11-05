@@ -296,8 +296,10 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 	// back, and forgets a mute that has ended with no window still running.
 	settle := func(res check.Result, s suppression) {
 		if c.Channel == "" {
-			if notified != streak.Alerting {
-				notified = streak.Alerting
+			// Nothing can be handed over, so recipients learn nothing. A
+			// recovery nobody could be told about owes no later alert.
+			if notified && !streak.Alerting {
+				notified = false
 				saveNotified(ctx, opts, c, notified)
 			}
 		} else if !s.active && streak.Alerting != notified {
@@ -318,9 +320,15 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 	var recheck <-chan time.Time
 	var latest check.Result
 	if opts.Alerter != nil {
+		// What is owed from before this loop started (a channel just attached
+		// to a monitor that is down) goes out now, not after the first check.
+		latest = lastResult(ctx, opts, c)
 		t := time.NewTicker(opts.DiscoveryInterval)
 		defer t.Stop()
 		recheck = t.C
+	}
+	if latest.CheckName != "" {
+		settle(latest, suppressed())
 	}
 	for {
 		res := opts.Runner.Run(ctx, c)
@@ -429,6 +437,22 @@ func initialStreak(ctx context.Context, opts Options, c config.Check) check.Stre
 		}
 	}
 	return check.Streak{}
+}
+
+// lastResult is the newest stored result, or the zero value when none is
+// known, so a loop can reconcile before its first check finishes.
+func lastResult(ctx context.Context, opts Options, c config.Check) check.Result {
+	reader, ok := opts.Store.(LatestReader)
+	if !ok {
+		return check.Result{}
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	res, found, err := reader.Latest(readCtx, c.Name)
+	if err != nil || !found {
+		return check.Result{}
+	}
+	return res
 }
 
 func logTransition(logger *slog.Logger, c config.Check, res check.Result) {
