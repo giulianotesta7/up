@@ -559,7 +559,7 @@ func (m Model) View() tea.View {
 		minimum := 0
 		if m.channelForm != nil {
 			f := *m.channelForm
-			for focus := range f.values {
+			for focus := 0; focus < f.fieldCount(); focus++ {
 				if f.editing && focus == 0 {
 					continue
 				}

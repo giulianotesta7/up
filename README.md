@@ -141,7 +141,7 @@ Header values and the request body are protected like SMTP passwords: they are s
 ## Alerts
 
 1. `s`: add an SMTP server. For a relay without authentication, set **No login required** to **Yes**.
-2. `c`: add a channel with that server and one or more comma-separated recipients.
+2. `c`: add a channel. An **email** channel uses that server and one or more comma-separated recipients; a **webhook** channel posts to a URL (see below).
 3. `e` on a monitor: pick the channel. Monitors without a channel never alert.
 
 `up serve` sends one email when a monitor goes down and one when it recovers, never one per failed check. **Alert after** and **Recover after** (default 1) set how many consecutive failures or successes are needed; meanwhile the list shows `FAILING 2/3` or `RECOVERING 1/2`. Restarting the daemon preserves the streak and does not resend alerts.
@@ -149,6 +149,24 @@ Header values and the request body are protected like SMTP passwords: they are s
 TLS modes: `starttls` (default, usually port 587), `tls` (usually 465) and `none` for relays without login. `none` cannot be combined with a username.
 
 Run `up serve` once before entering SMTP passwords to create `up.db.key` (required mode `0600`). **Back up the key with the database**; losing it requires re-entering passwords.
+
+### Webhook channels
+
+In `c`, choose **Kind** `webhook` with `←`/`→`, then enter the URL and, optionally, an auth header name and value (for example `Authorization` and `Bearer …`). The URL and auth value are encrypted with the daemon key like SMTP passwords, so run `up serve` once first. They are never shown again: the list shows only the origin (scheme and host) and an edit shows `set` with **keep**, **replace** or **clear** (the URL cannot be cleared). This is a generic JSON webhook, not a native Slack or Discord integration.
+
+`up serve` sends one `POST` with `Content-Type: application/json` and `User-Agent: up/webhooks`:
+
+```json
+{
+  "version": 1,
+  "event": "monitor.down",
+  "occurred_at": "2025-01-02T18:04:05Z",
+  "monitor": {"name": "api", "type": "http"},
+  "result": {"status": "down", "reason": "status 500", "status_code": 500, "latency_ms": 1500}
+}
+```
+
+`event` is `monitor.down`, `monitor.recovered`, `cert.expiring` (the result carries `days_remaining` instead of a status) or `test` (no monitor or result; it carries the `channel` name and a `message` saying it is a test). Any `2xx` response means delivered; any other status, a network error or a timeout (10 seconds) is a failed delivery. Redirects are not followed, the response body is read only up to 4 KiB and discarded, and a failed delivery is logged without the URL, auth value or response body. Webhooks are not retried: the next state change sends the next event.
 
 ### Muting
 

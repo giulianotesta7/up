@@ -32,6 +32,8 @@ check keeps its newest result older than the cutoff, so a current outage keeps
 its start. Monitor definitions are never removed.
 
 Alerts are sent when a monitor with a channel goes DOWN and when it recovers.
+A webhook channel POSTs a versioned JSON body; a 2xx answer is delivered, anything
+else is an error, redirects are not followed and there are no retries.
 SMTP servers and channels are managed in up tui. SMTP passwords are encrypted
 with a key kept in <db>.key (mode 0600) next to the database; back it up with
 the database. Without it stored passwords must be entered again. up serve refuses

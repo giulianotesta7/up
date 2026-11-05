@@ -26,9 +26,9 @@ func TestChannelsCreateEdit(t *testing.T) {
 	m := channelServers(t)
 	s := m.store
 	m, _ = press(t, m, keyC, keyN)
-	requireText(t, m, "New channel", "Kind: ‹ email ›", "recipients separated by commas")
+	requireText(t, m, "New channel", "Kind: ‹ email ›", "comma-separated")
 	m = typeText(t, m, "ops-team")
-	m, _ = press(t, m, keyTab, keyRight, keyTab, keyRight, keyTab)
+	m, _ = press(t, m, keyTab, keyTab, keyRight, keyTab)
 	next, _ := m.Update(tea.PasteMsg{Content: " ana@example.com, , oncall@example.com "})
 	m = next.(Model)
 	m, cmd := press(t, m, keyEnter)
