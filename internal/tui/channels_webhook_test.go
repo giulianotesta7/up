@@ -2,11 +2,18 @@ package tui
 
 import (
 	"context"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/giulianotesta7/up/internal/alert"
+	"github.com/giulianotesta7/up/internal/check"
 	"github.com/giulianotesta7/up/internal/config"
+	"github.com/giulianotesta7/up/internal/store"
 )
 
 var keyLeft = tea.KeyPressMsg{Code: tea.KeyLeft}
@@ -178,4 +185,69 @@ func TestWebhookKindSelectorIsOfferedAndEmailStillWorks(t *testing.T) {
 	requireText(t, m, "Kind: ‹ webhook ›")
 	m, _ = press(t, m, keyLeft)
 	requireText(t, m, "Kind: ‹ email ›", "Recipients")
+}
+
+func TestEditAddsAuthToHookWithoutAuth(t *testing.T) {
+	k, m := smtpSetup(t)
+	got := make(chan string, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- r.Header.Get("Authorization")
+	}))
+	defer srv.Close()
+	m, _ = press(t, m, keyC, keyN)
+	m = typeText(t, m, "ops-hook")
+	m, _ = press(t, m, keyTab, keyRight, keyTab)
+	m = typeText(t, m, srv.URL+"/hook")
+	m, cmd := press(t, m, keyEnter)
+	m = finishCommand(t, m, cmd)
+	if c := hookChannelFromStore(t, m); !c.WebhookAuth.Empty() {
+		t.Fatalf("auth stored on create: %+v", c)
+	}
+
+	m, _ = press(t, m, keyE, keyTab, keyTab)
+	m = typeText(t, m, "Authorization")
+	m, _ = press(t, m, keyTab)
+	m = typeText(t, m, "tok3n")
+	m, cmd = press(t, m, keyEnter)
+	m = finishCommand(t, m, cmd)
+	c := hookChannelFromStore(t, m)
+	if c.WebhookAuthName != "Authorization" || c.WebhookAuth.Empty() {
+		t.Fatalf("typed auth value was dropped: %+v", c)
+	}
+	if v, err := k.Open(c.WebhookAuth); err != nil || v != "tok3n" {
+		t.Fatalf("auth value = %q %v", v, err)
+	}
+	n := alert.NewNotifier(alert.Options{Store: m.store.(*store.Store), Key: k, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	ch := config.Check{Name: "api", Channel: "ops-hook"}
+	if err := n.Deliver(context.Background(), ch, check.Result{Status: check.StatusDown, At: now}); err != nil {
+		t.Fatal(err)
+	}
+	if h := <-got; h != "tok3n" {
+		t.Fatalf("Authorization header = %q", h)
+	}
+}
+
+func TestEditHookReplaceURL(t *testing.T) {
+	k, m := smtpSetup(t)
+	m, _ = press(t, m, keyC, keyN)
+	m = typeText(t, m, "ops-hook")
+	m, _ = press(t, m, keyTab, keyRight, keyTab)
+	m = typeText(t, m, hookURL)
+	m, cmd := press(t, m, keyEnter)
+	m = finishCommand(t, m, cmd)
+
+	m, _ = press(t, m, keyE, keyTab)
+	m = typeText(t, m, "http://other.example.org:8080/NEWPATH")
+	m, cmd = press(t, m, keyEnter)
+	m = finishCommand(t, m, cmd)
+	c := hookChannelFromStore(t, m)
+	if c.WebhookOrigin != "http://other.example.org:8080" {
+		t.Fatalf("origin = %q", c.WebhookOrigin)
+	}
+	if v, err := k.Open(c.WebhookURL); err != nil || v != "http://other.example.org:8080/NEWPATH" {
+		t.Fatalf("url = %q %v", v, err)
+	}
+	if strings.Contains(string(c.WebhookURL.Data), "NEWPATH") {
+		t.Fatal("URL not sealed")
+	}
 }

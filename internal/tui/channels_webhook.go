@@ -121,6 +121,21 @@ func (f *channelForm) hookEdit(msg tea.KeyPressMsg) {
 	editor.edit(msg)
 	*text = editor.values[0]
 	f.cursor = editor.cursor
+	f.hookTyped()
+}
+
+// hookTyped makes typed text a replacement, whether or not a value is stored,
+// so a typed value is never ignored on save. Nothing stored and nothing typed
+// stays keep (no value).
+func (f *channelForm) hookTyped() {
+	p := f.hookProtected()
+	switch {
+	case p == nil:
+	case p.text != "" && p.edit != config.EditReplace:
+		p.edit = config.EditReplace
+	case p.text == "" && !p.set:
+		p.edit = config.EditKeep
+	}
 }
 
 func (f *channelForm) hookInsert(text string) {
@@ -136,6 +151,7 @@ func (f *channelForm) hookInsert(text string) {
 	editor.insert(text)
 	*t = editor.values[0]
 	f.cursor = editor.cursor
+	f.hookTyped()
 }
 
 // webhookChannel builds the channel to save, sealing new protected values to
@@ -155,7 +171,7 @@ func (f channelForm) webhookChannel(snap Snapshot) (config.Channel, error) {
 	}
 	var err error
 	switch {
-	case f.editing && h.url.edit == config.EditKeep:
+	case f.editing && h.url.edit == config.EditKeep && h.url.text == "":
 		c.WebhookOrigin, c.WebhookURLEdit = h.origin, config.EditKeep
 	default:
 		if h.url.text == "" {
@@ -173,7 +189,7 @@ func (f channelForm) webhookChannel(snap Snapshot) (config.Channel, error) {
 	case c.WebhookAuthName == "" && f.editing && h.auth.set:
 		// No header name leaves nowhere to send the value.
 		c.WebhookAuthEdit = config.EditClear
-	case h.auth.edit == config.EditReplace || (!f.editing && h.auth.text != ""):
+	case h.auth.edit == config.EditReplace || h.auth.text != "":
 		if h.auth.text == "" {
 			return c, errors.New("new auth value is empty (switch to keep or clear)")
 		}

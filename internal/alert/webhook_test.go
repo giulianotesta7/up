@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -211,5 +212,52 @@ func TestEmailChannelUnchangedByWebhookTransport(t *testing.T) {
 	m := <-sender.messages
 	if m.Subject != "[up] api is DOWN" || !strings.Contains(m.Body, "Error:  boom") || len(m.To) != 1 || m.To[0] != "a@example.com" {
 		t.Fatalf("email changed: %+v", m)
+	}
+}
+
+// A redirect to another server is not followed and never sees the auth header.
+func TestWebhookRedirectToOtherServerNotFollowed(t *testing.T) {
+	for _, status := range []int{301, 302, 303, 307, 308} {
+		var hits int32
+		var leaked atomic.Value
+		other := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			leaked.Store(r.Header.Get("Authorization"))
+		}))
+		n, _, _ := hookNotifier(t, status, "Authorization", "AUTHVALUE", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Location", other.URL+"/landing")
+			w.WriteHeader(status)
+		})
+		err := n.Deliver(context.Background(), config.Check{Name: "api", Channel: "hook"}, check.Result{Status: check.StatusDown, At: deliverAt})
+		other.Close()
+		if err == nil {
+			t.Fatalf("status %d: no error", status)
+		}
+		if atomic.LoadInt32(&hits) != 0 {
+			t.Fatalf("status %d: second server was contacted (auth %v)", status, leaked.Load())
+		}
+	}
+}
+
+// A failing answer that echoes the path and Authorization never reaches the
+// returned error or the logs.
+func TestWebhookEchoedSecretsNeverLeakToErrorOrLogs(t *testing.T) {
+	n, _, _ := hookNotifier(t, 500, "Authorization", "AUTHVALUE", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		_, _ = io.WriteString(w, r.URL.String()+" "+r.Header.Get("Authorization"))
+	})
+	var logs strings.Builder
+	n.opts.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	err := n.Deliver(context.Background(), config.Check{Name: "api", Channel: "hook"}, check.Result{Status: check.StatusDown, At: deliverAt})
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, leak := range []string{"SECRETPATH", "SECRETQUERY", "AUTHVALUE"} {
+		if strings.Contains(err.Error(), leak) || strings.Contains(logs.String(), leak) {
+			t.Fatalf("leaks %q: err %v logs %s", leak, err, logs.String())
+		}
+	}
+	if logs.Len() == 0 {
+		t.Fatal("failure not logged")
 	}
 }
