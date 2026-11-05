@@ -174,6 +174,17 @@ func (c *Client) LoadSnapshot(ctx context.Context, now time.Time) (tui.Snapshot,
 		}
 		return t.Add(skew)
 	}
+	// now is read before the request, so the skew can be a few milliseconds
+	// negative; a boundary that sat on a whole minute (a window end, the end
+	// of a mute, a certificate expiry) would then show as the previous minute.
+	// Such a boundary stays on its minute.
+	boundary := func(t time.Time) time.Time {
+		shifted := shift(t)
+		if !t.IsZero() && t.Equal(t.Truncate(time.Minute)) {
+			return shifted.Round(time.Minute)
+		}
+		return shifted
+	}
 	s.LastBeat = shift(s.LastBeat)
 	for i := range s.ChannelTests {
 		t := &s.ChannelTests[i]
@@ -181,11 +192,11 @@ func (c *Client) LoadSnapshot(ctx context.Context, now time.Time) (tui.Snapshot,
 	}
 	for i := range s.Services {
 		v := &s.Services[i]
-		v.InMaintenance.End = shift(v.InMaintenance.End)
+		v.InMaintenance.End = boundary(v.InMaintenance.End)
 		v.Latest.At = shift(v.Latest.At)
 		v.DownSince = shift(v.DownSince)
-		v.Mute.Until = shift(v.Mute.Until)
-		v.Cert.NotAfter = shift(v.Cert.NotAfter)
+		v.Mute.Until = boundary(v.Mute.Until)
+		v.Cert.NotAfter = boundary(v.Cert.NotAfter)
 		v.Cert.Observed = shift(v.Cert.Observed)
 		for j := range v.Recent {
 			v.Recent[j].At = shift(v.Recent[j].At)

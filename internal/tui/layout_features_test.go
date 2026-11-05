@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -105,6 +106,43 @@ func TestSplitListKeepsHeldCellWhole(t *testing.T) {
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "◷") && !strings.Contains(line, "│") {
 			t.Fatalf("detail pane lost beside the held cell: %q", line)
+		}
+	}
+}
+
+// Every line of the channel-test popup has the same width in the failed state,
+// so the right border stays aligned whatever the error text.
+func TestFailedChannelTestPopupKeepsBorderAligned(t *testing.T) {
+	model := popupScreens(t)["test failed with a long error"]
+	for _, w := range []int{80, 140} {
+		next, _ := model.Update(tea.WindowSizeMsg{Width: w, Height: 40})
+		var widths []int
+		in := false
+		for _, line := range strings.Split(ansi.Strip(view(next.(Model))), "\n") {
+			if strings.Contains(line, "╭─ Test channel") {
+				in = true
+			}
+			if !in {
+				continue
+			}
+			start := strings.IndexAny(line, "╭│╰")
+			end := strings.LastIndexAny(line, "╮│╯")
+			if start < 0 || end < start {
+				break
+			}
+			_, size := utf8.DecodeRuneInString(line[end:])
+			widths = append(widths, ansi.StringWidth(line[start:end+size]))
+			if strings.Contains(line, "╯") {
+				break
+			}
+		}
+		if len(widths) < 5 {
+			t.Fatalf("popup not found at width %d: %v", w, widths)
+		}
+		for _, x := range widths {
+			if x != widths[0] {
+				t.Fatalf("popup lines differ in width at %d: %v", w, widths)
+			}
 		}
 	}
 }

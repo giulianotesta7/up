@@ -203,3 +203,29 @@ func TestClockSkewShiftsMaintenanceEndAndChannelTests(t *testing.T) {
 		t.Fatalf("test times = %+v", got)
 	}
 }
+
+// The client reads its clock before the request, so the skew is slightly
+// negative; a boundary on a whole minute still displays that minute.
+func TestWholeMinuteBoundariesSurviveSmallClockSkew(t *testing.T) {
+	server := time.Date(2026, 3, 2, 9, 50, 0, 0, time.UTC)
+	end := server.Add(30 * time.Minute)
+	body := `{"server_time":"` + server.Format(time.RFC3339) + `","services":[{"check":{"name":"api"},"in_maintenance":true,"maintenance_end":"` + end.Format(time.RFC3339) +
+		`","mute":{"until":"` + end.Format(time.RFC3339) + `"},"cert":{"not_after":"` + end.Format(time.RFC3339) + `"},"maintenance":[]}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	for _, skew := range []time.Duration{-37 * time.Millisecond, -1500 * time.Millisecond, 20 * time.Millisecond} {
+		snap, err := New(srv.URL, testToken).LoadSnapshot(context.Background(), server.Add(skew))
+		if err != nil {
+			t.Fatal(err)
+		}
+		v := snap.Services[0]
+		for name, got := range map[string]time.Time{"maintenance end": v.InMaintenance.End, "mute until": v.Mute.Until, "certificate expiry": v.Cert.NotAfter} {
+			if got.Format("15:04") != "10:20" {
+				t.Errorf("skew %v: %s shows %s, want 10:20 (%v)", skew, name, got.Format("15:04"), got)
+			}
+		}
+	}
+}

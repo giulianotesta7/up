@@ -264,7 +264,7 @@ func TestMaintenanceDetailPendingUsesRecordedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	next, _ = m.Update(m.Init()())
-	requireText(t, next.(Model), "1 email pending (down since")
+	requireText(t, next.(Model), "1 alert pending (down since")
 }
 
 // The popup list scrolls: with the maximum of windows the selected row, the

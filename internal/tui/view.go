@@ -127,9 +127,9 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		held := "nothing pending"
 		switch s.Pending() {
 		case "down":
-			held = "1 email pending (down since " + formatTime(s.DownSince, now) + ")"
+			held = "1 alert pending (down since " + formatTime(s.DownSince, now) + ")"
 		case "recovery":
-			held = "1 email pending (recovery)"
+			held = "1 alert pending (recovery)"
 		}
 		field("Muted", warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))+" · "+held)
 	}
@@ -137,9 +137,9 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		held := "nothing pending"
 		switch s.heldPending() {
 		case "down":
-			held = "1 email pending (down since " + formatTime(s.DownSince, now) + ")"
+			held = "1 alert pending (down since " + formatTime(s.DownSince, now) + ")"
 		case "recovery":
-			held = "1 email pending (recovery)"
+			held = "1 alert pending (recovery)"
 		}
 		field("Window", warnStyle.Render(fmt.Sprintf("until %s (%s left)", clockWithDay(s.InMaintenance.End, now), timeLeft(s.InMaintenance.End.Sub(now))))+" · "+held)
 	}
