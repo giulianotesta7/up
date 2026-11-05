@@ -140,6 +140,11 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = s.SetPublicKey(ctx, key.PublicKey())
 	}
 	if err != nil {
+		// A stop requested while starting is a clean shutdown, like one
+		// requested later, not a failure to start.
+		if ctx.Err() != nil {
+			return 0
+		}
 		fmt.Fprintf(stderr, "up: %v\n", err)
 		return 1
 	}
