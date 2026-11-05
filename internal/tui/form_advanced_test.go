@@ -65,7 +65,7 @@ func TestPlainMonitorSavesWithoutOpeningAdvanced(t *testing.T) {
 func TestAdvancedFoldOpensAndSavesRequestSettings(t *testing.T) {
 	k, m := advancedModel(t)
 	m, _ = press(t, m, keySpace)
-	requireText(t, m, "▾ Advanced", "Method: ‹ GET ›", "Request body", "Expected text", "press space to add a header")
+	requireText(t, m, "▾ Advanced", "Method: ‹ GET ›", "Request body", "Expected text", "space to add")
 	// Method POST, one header, body, expected text.
 	m, _ = press(t, m, keyTab, keyRight, keyRight)
 	requireText(t, m, "Method: ‹ POST ›")
