@@ -332,3 +332,36 @@ func TestShortDurationMatchesWhatMuteAccepts(t *testing.T) {
 		}
 	}
 }
+
+// Without a recorded state, recipients can only know a down that had a channel
+// to be sent to.
+func TestKnownAlertingFallbackNeedsAChannel(t *testing.T) {
+	for _, channel := range []string{"", "mail"} {
+		t.Run("channel="+channel, func(t *testing.T) {
+			s, m := maintenanceModel(t)
+			ctx := context.Background()
+			if err := s.AddSMTPServer(ctx, config.SMTPServer{Name: "smtp", Host: "example.com", Port: 25, TLS: config.TLSNone, Sender: "a@example.com"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.AddChannel(ctx, config.Channel{Name: "mail", Kind: config.KindEmail, SMTPServer: "smtp", Recipients: []string{"a@example.com"}}); err != nil {
+				t.Fatal(err)
+			}
+			c := testChecks[0]
+			c.Channel = channel
+			if err := s.UpdateCheck(ctx, c); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Record(ctx, check.Result{CheckName: "api", At: at("03:10:00"), Status: check.StatusDown}); err != nil {
+				t.Fatal(err)
+			}
+			if _, found, err := s.AlertState(ctx, "api"); err != nil || found {
+				t.Fatalf("alert state found = %v, %v; want none", found, err)
+			}
+			next, _ := m.Update(m.Init()())
+			m = next.(Model)
+			if got, want := m.snap.Services[0].KnownAlerting, channel != ""; got != want {
+				t.Fatalf("KnownAlerting = %v, want %v", got, want)
+			}
+		})
+	}
+}

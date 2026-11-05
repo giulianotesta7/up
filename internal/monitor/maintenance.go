@@ -58,26 +58,28 @@ type AlertStateStore interface {
 
 // loadNotified is what the recipients know when a loop starts: the live mute's
 // snapshot of it, else the persisted state, else the streak rebuilt from
-// history (databases from before the state was kept). A rebuilt value is
-// persisted at once, so later restarts do not depend on it.
+// history (databases from before the state was kept), which only counts when
+// a channel exists: without one nothing was ever handed over. A rebuilt value
+// is persisted at once, so later restarts do not depend on it.
 func loadNotified(ctx context.Context, opts Options, c config.Check, streak check.Streak, mute config.Mute, hasMute bool) bool {
 	if hasMute {
 		return mute.WasAlerting
 	}
+	fallback := streak.Alerting && c.Channel != ""
 	states, ok := opts.Store.(AlertStateStore)
 	if !ok {
-		return streak.Alerting
+		return fallback
 	}
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 	defer cancel()
 	known, found, err := states.AlertState(readCtx, c.Name)
 	if err != nil {
 		opts.Logger.Error("reading alert state failed", "check", c.Name, "error", err)
-		return streak.Alerting
+		return fallback
 	}
 	if !found {
-		saveNotified(ctx, opts, c, streak.Alerting)
-		return streak.Alerting
+		saveNotified(ctx, opts, c, fallback)
+		return fallback
 	}
 	return known
 }
