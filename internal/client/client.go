@@ -401,6 +401,15 @@ func (c *Client) DeleteChannel(ctx context.Context, n string) error {
 
 var _ tui.MaintenanceStore = (*Client)(nil)
 var _ tui.ChannelTester = (*Client)(nil)
+var _ tui.DefaultsStore = (*Client)(nil)
+
+// SetDefaults replaces the server's defaults; they come back in the next
+// snapshot.
+func (c *Client) SetDefaults(ctx context.Context, d config.Defaults) error {
+	dto := remote.DefaultsDTO{Zone: d.Zone, Channel: d.Channel, IntervalMS: d.Interval.Milliseconds(), TimeoutMS: d.Timeout.Milliseconds(),
+		ExpectedStatus: d.ExpectedStatus, AlertAfter: d.AlertAfter, RecoverAfter: d.RecoverAfter}
+	return c.write(ctx, "PUT", "/api/v1/defaults", dto)
+}
 
 // AddMaintenanceWindow creates a window and returns it with its ID.
 func (c *Client) AddMaintenanceWindow(ctx context.Context, w config.MaintenanceWindow) (config.MaintenanceWindow, error) {

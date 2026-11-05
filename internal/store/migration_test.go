@@ -106,7 +106,7 @@ func tables(t *testing.T, path string) []string {
 	return names
 }
 
-var v2Tables = []string{"alert_state", "certs", "channel_tests", "channels", "checks", "daemon", "maintenance_windows", "mutes", "results", "secret_key", "smtp_servers", "sqlite_sequence"}
+var v2Tables = []string{"alert_state", "certs", "channel_tests", "channels", "checks", "daemon", "defaults", "maintenance_windows", "mutes", "results", "secret_key", "smtp_servers", "sqlite_sequence"}
 
 func TestOpenMigratesV1AndKeepsData(t *testing.T) {
 	path := v1Database(t)
@@ -118,8 +118,8 @@ func TestOpenMigratesV1AndKeepsData(t *testing.T) {
 	}
 	defer s.Close()
 
-	if got := version(t, path); got != 6 {
-		t.Fatalf("user_version after Open = %d, want 6", got)
+	if got := version(t, path); got != 7 {
+		t.Fatalf("user_version after Open = %d, want 7", got)
 	}
 	if got := tables(t, path); !reflect.DeepEqual(got, v2Tables) {
 		t.Fatalf("tables after migration = %v, want %v", got, v2Tables)
@@ -158,8 +158,8 @@ func TestOpenCreatesV2AndReopenIsIdempotent(t *testing.T) {
 	s, path := openTemp(t)
 	record(t, s, result("api", 0, check.StatusUp))
 	s.Close()
-	if got := version(t, path); got != 6 {
-		t.Fatalf("user_version of a new database = %d, want 6", got)
+	if got := version(t, path); got != 7 {
+		t.Fatalf("user_version of a new database = %d, want 7", got)
 	}
 
 	again, err := Open(path)
@@ -179,7 +179,7 @@ func TestOpenReadOnlyRejectsV1WithUpgradeHint(t *testing.T) {
 	path := v1Database(t)
 
 	_, err := OpenReadOnly(path)
-	if err == nil || !strings.Contains(err.Error(), "database schema version 1 is older than this up (6); open it with `up serve` or `up tui` to upgrade it") {
+	if err == nil || !strings.Contains(err.Error(), "database schema version 1 is older than this up (7); open it with `up serve` or `up tui` to upgrade it") {
 		t.Fatalf("OpenReadOnly(v1) error = %v, want upgrade hint", err)
 	}
 	if got := version(t, path); got != 1 {
@@ -219,8 +219,8 @@ func TestOpenMigratesV5KeepingBehavior(t *testing.T) {
 		t.Fatalf("Open(v5) error = %v", err)
 	}
 	defer s.Close()
-	if got := version(t, path); got != 6 {
-		t.Fatalf("user_version = %d, want 6", got)
+	if got := version(t, path); got != 7 {
+		t.Fatalf("user_version = %d, want 7", got)
 	}
 	ctx := context.Background()
 	checks, err := s.Checks(ctx)
@@ -246,7 +246,7 @@ func TestOpenMigratesV5KeepingBehavior(t *testing.T) {
 
 func TestOpenReadOnlyRejectsV5AndOpenUpgradesIt(t *testing.T) {
 	path := v5Database(t)
-	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 5 is older than this up (6)") {
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 5 is older than this up (7)") {
 		t.Fatalf("OpenReadOnly(v5) error = %v", err)
 	}
 	s, err := Open(path)
@@ -259,4 +259,49 @@ func TestOpenReadOnlyRejectsV5AndOpenUpgradesIt(t *testing.T) {
 		t.Fatalf("OpenReadOnly after upgrade: %v", err)
 	}
 	ro.Close()
+}
+
+// v6Database writes a database as the previous release left it (migrations 0
+// to 5) with a monitor.
+func v6Database(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "up.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, m := range migrations[:6] {
+		if _, err := db.Exec(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 6;
+INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status) VALUES (0, 'api', 'https://api.example.com', 60000000000, 10000000000, 204);`); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestOpenMigratesV6WithBuiltinDefaultsAndKeepsMonitors(t *testing.T) {
+	path := v6Database(t)
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 6 is older than this up (7)") {
+		t.Fatalf("OpenReadOnly(v6) error = %v", err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(v6) error = %v", err)
+	}
+	defer s.Close()
+	if got := version(t, path); got != 7 {
+		t.Fatalf("user_version = %d, want 7", got)
+	}
+	ctx := context.Background()
+	if d, err := s.Defaults(ctx); err != nil || d != config.BuiltinDefaults() {
+		t.Fatalf("Defaults() = %+v, %v, want built-in", d, err)
+	}
+	checks, err := s.Checks(ctx)
+	if err != nil || len(checks) != 1 || checks[0].Interval != time.Minute || checks[0].ExpectedStatus != 204 {
+		t.Fatalf("Checks() = %+v, %v, want the untouched monitor", checks, err)
+	}
 }

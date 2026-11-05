@@ -74,12 +74,22 @@ func ValidateMaintenanceWindow(w MaintenanceWindow) error {
 	if w.Duration < MinMaintenance || w.Duration > MaxMaintenance {
 		errs = append(errs, errors.New("duration must be between 1m and 7d"))
 	}
-	if w.Zone == "" {
-		errs = append(errs, errors.New("zone is required"))
-	} else if _, err := LoadZone(w.Zone); err != nil {
-		errs = append(errs, fmt.Errorf("zone %q is not an IANA time zone", w.Zone))
+	if err := ValidateZone(w.Zone); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+// ValidateZone is the zone rule shared by maintenance windows and defaults:
+// an IANA zone that loads; "Local" and the empty zone are refused.
+func ValidateZone(zone string) error {
+	if zone == "" {
+		return errors.New("zone is required")
+	}
+	if _, err := LoadZone(zone); err != nil {
+		return fmt.Errorf("zone %q is not an IANA time zone", zone)
+	}
+	return nil
 }
 
 // LoadZone loads an IANA zone, refusing "Local" and "".

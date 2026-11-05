@@ -85,7 +85,7 @@ func renderSplit(snap Snapshot, selected int, now time.Time, loadErr error, widt
 	list := strings.TrimSuffix(renderList(snap, selected, now, loadErr, 1), "\n"+renderHelp("↑/↓ select · enter open · n new · e edit · d delete · m mute · ? more · q quit"))
 	list = strings.TrimSuffix(list, "\n")
 	if notice != "" {
-		list += "\n" + warnStyle.Render(notice)
+		list += "\n" + notice
 	}
 	left := strings.Split(list, "\n")
 	var right []string

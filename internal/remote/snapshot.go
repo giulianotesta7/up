@@ -28,6 +28,8 @@ type SnapshotDTO struct {
 	Incidents   int             `json:"incidents"`
 	// ChannelTests is each channel's newest test request.
 	ChannelTests []ChannelTestDTO `json:"channel_tests"`
+	// Defaults are what new monitors and maintenance windows start from.
+	Defaults DefaultsDTO `json:"defaults"`
 }
 
 // CheckDTO is a check on the wire, in both directions.
@@ -258,6 +260,7 @@ func NewSnapshotDTO(s tui.Snapshot, now time.Time) SnapshotDTO {
 	for _, v := range s.Channels {
 		d.Channels = append(d.Channels, channelDTO(v))
 	}
+	d.Defaults = defaultsDTO(s.Defaults)
 	d.ChannelTests = []ChannelTestDTO{}
 	for _, t := range s.ChannelTests {
 		d.ChannelTests = append(d.ChannelTests, channelTestDTO(t))
@@ -319,6 +322,7 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 	for _, t := range d.ChannelTests {
 		s.ChannelTests = append(s.ChannelTests, t.ChannelTest())
 	}
+	s.Defaults = d.Defaults.defaults()
 	return s
 }
 

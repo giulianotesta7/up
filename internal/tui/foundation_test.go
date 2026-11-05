@@ -93,7 +93,7 @@ func TestEditingAMonitorKeepsFieldsTheFormDoesNotShow(t *testing.T) {
 		t.Fatalf("check() = %+v", got)
 	}
 	// A new monitor starts from nothing.
-	fresh := newMonitorForm()
+	fresh := newMonitorForm(Snapshot{})
 	fresh.values[0], fresh.values[1] = "web", "https://example.com"
 	if got, err := fresh.check(); err != nil || got.Method != "" || got.Headers != nil || got.Kind != "" {
 		t.Fatalf("new check() = %+v, %v", got, err)

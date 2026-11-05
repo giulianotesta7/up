@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 6
+const schemaVersion = 7
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -132,6 +132,22 @@ CREATE TABLE channel_tests (
 CREATE UNIQUE INDEX channel_tests_one_active ON channel_tests (channel) WHERE status IN ('pending', 'sending');
 CREATE TABLE alert_state (check_name TEXT PRIMARY KEY, known_alerting INTEGER NOT NULL);
 CREATE TRIGGER alert_state_with_check AFTER DELETE ON checks BEGIN DELETE FROM alert_state WHERE check_name = OLD.name; END;
+`,
+	// v6 -> v7: the defaults the new monitor and new maintenance window forms
+	// start from. A single row (id = 1) holds them; no row means the built-in
+	// values (config.BuiltinDefaults), so upgrading changes nothing. An empty
+	// channel means none.
+	`
+CREATE TABLE defaults (
+	id              INTEGER PRIMARY KEY CHECK (id = 1),
+	zone            TEXT    NOT NULL,
+	channel         TEXT    NOT NULL,
+	interval_ns     INTEGER NOT NULL,
+	timeout_ns      INTEGER NOT NULL,
+	expected_status INTEGER NOT NULL,
+	alert_after     INTEGER NOT NULL,
+	recover_after   INTEGER NOT NULL
+);
 `,
 }
 

@@ -8,18 +8,18 @@ import (
 )
 
 func TestOrderIncludesAdvancedForHTTPOnly(t *testing.T) {
-	http := newMonitorForm()
+	http := newMonitorForm(Snapshot{})
 	if got := http.order(); got[len(got)-1] != focusAdvanced || got[0] != focusType {
 		t.Fatalf("HTTP order %v: want Type first and Advanced last", got)
 	}
-	tcp := newMonitorForm()
+	tcp := newMonitorForm(Snapshot{})
 	tcp.setKind(kindTCP)
 	for _, focus := range tcp.order() {
 		if focus >= focusAdvanced {
 			t.Fatalf("TCP order %v has an Advanced stop", tcp.order())
 		}
 	}
-	open := newMonitorForm()
+	open := newMonitorForm(Snapshot{})
 	open.adv.open = true
 	if got := open.order(); got[len(got)-1] != focusCount+len(open.adv.stops())-1 {
 		t.Fatalf("open fold order %v lacks its fields", got)
@@ -27,7 +27,7 @@ func TestOrderIncludesAdvancedForHTTPOnly(t *testing.T) {
 }
 
 func TestSwitchingTypeResetsAdvancedAndTCPIgnoresIt(t *testing.T) {
-	f := newMonitorForm()
+	f := newMonitorForm(Snapshot{})
 	f.adv = advancedForm{open: true, method: "POST", expect: "ok"}
 	f.setKind(kindTCP)
 	if f.adv.configured() || f.adv.open {

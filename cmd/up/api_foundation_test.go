@@ -52,3 +52,23 @@ func TestServeMountsMaintenanceAndChannelTestRoutes(t *testing.T) {
 		t.Fatalf("snapshot leaks the webhook URL: %s", body)
 	}
 }
+
+// serve mounts GET/PUT /api/v1/defaults and the snapshot carries them.
+func TestServeMountsDefaultsRoute(t *testing.T) {
+	call := startTestAPI(t)
+	if status, body := call("GET", "/api/v1/defaults", ""); status != 200 || !strings.Contains(body, `"zone":"UTC"`) || !strings.Contains(body, `"interval_ms":30000`) {
+		t.Fatalf("GET defaults = %d %s", status, body)
+	}
+	put := `{"zone":"Europe/Madrid","channel":"","interval_ms":60000,"timeout_ms":10000,"expected_status":204,"alert_after":3,"recover_after":2}`
+	if status, body := call("PUT", "/api/v1/defaults", put); status != 200 {
+		t.Fatalf("PUT defaults = %d %s", status, body)
+	}
+	if status, body := call("PUT", "/api/v1/defaults", strings.Replace(put, "Europe/Madrid", "Mars/Base", 1)); status != 400 {
+		t.Fatalf("PUT invalid defaults = %d %s, want 400", status, body)
+	}
+	var snap remote.SnapshotDTO
+	_, body := call("GET", "/api/v1/snapshot", "")
+	if err := json.Unmarshal([]byte(body), &snap); err != nil || snap.Defaults.Zone != "Europe/Madrid" || snap.Defaults.AlertAfter != 3 {
+		t.Fatalf("snapshot defaults = %+v, %v", snap.Defaults, err)
+	}
+}

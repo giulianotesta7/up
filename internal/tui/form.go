@@ -48,13 +48,24 @@ type monitorForm struct {
 	saving       bool
 	editing      bool
 	returnDetail bool
+	// status is the expected status a new HTTP monitor starts with (the
+	// default); empty means 200. Switching the type back to HTTP restores it.
+	status string
 	// base is the monitor being edited. The form shows only some fields, so
 	// the rest (request options, host, port) carry over unchanged.
 	base config.Check
 }
 
-func newMonitorForm() *monitorForm {
-	return &monitorForm{values: [5]string{"", "", "30s", "5s", "200"}, alertAfter: "1", recoverAfter: "1", tlsExpiry: "on"}
+// newMonitorForm starts a new monitor from the snapshot's defaults. A default
+// channel that no longer exists starts as none.
+func newMonitorForm(snap Snapshot) *monitorForm {
+	d := snap.NewItemDefaults()
+	status := strconv.Itoa(d.ExpectedStatus)
+	return &monitorForm{
+		values:  [5]string{"", "", d.Interval.String(), d.Timeout.String(), status},
+		channel: snap.existingChannel(d.Channel), alertAfter: strconv.Itoa(d.AlertAfter), recoverAfter: strconv.Itoa(d.RecoverAfter),
+		tlsExpiry: "on", status: status,
+	}
 }
 
 func editMonitorForm(c config.Check, detail bool) *monitorForm {
@@ -206,14 +217,14 @@ func channelChoices(snap Snapshot) []string {
 	return append([]string{""}, choices...)
 }
 
-// detectionHint says how long a real outage takes to reach the first email.
+// detectionHint says how long a real outage takes to reach the first alert.
 func detectionHint(f monitorForm) string {
 	n, err := strconv.Atoi(f.alertAfter)
 	interval, ierr := time.ParseDuration(f.values[2])
 	if err != nil || ierr != nil || n < 2 || interval <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("Detection time ≈ %d × %s = %s before the first email", n, interval, time.Duration(n)*interval)
+	return fmt.Sprintf("Detection time ≈ %d × %s = %s before the first alert", n, interval, time.Duration(n)*interval)
 }
 
 func (f *monitorForm) insert(text string) {
