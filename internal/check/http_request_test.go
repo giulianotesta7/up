@@ -174,3 +174,73 @@ func TestRunPlainMonitorUnchanged(t *testing.T) {
 		t.Fatalf("result = %+v method=%q ua=%q ct=%q len=%d", res, gotMethod, gotUA, gotCT, gotLen)
 	}
 }
+
+// redirectPair returns an origin that redirects to a target on another host
+// name (localhost vs 127.0.0.1) and records what the target receives.
+func redirectPair(t *testing.T, code int, sameOrigin bool) (origin *httptest.Server, received chan http.Header, bodies chan string) {
+	t.Helper()
+	received, bodies = make(chan http.Header, 4), make(chan string, 4)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		received <- r.Header.Clone()
+		bodies <- string(b)
+	}))
+	t.Cleanup(target.Close)
+	origin = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/final" {
+			b, _ := io.ReadAll(r.Body)
+			received <- r.Header.Clone()
+			bodies <- string(b)
+			return
+		}
+		dest := strings.Replace(target.URL, "127.0.0.1", "localhost", 1)
+		if sameOrigin {
+			dest = "/final"
+		}
+		http.Redirect(w, r, dest, code)
+	}))
+	t.Cleanup(origin.Close)
+	return
+}
+
+func TestRunDoesNotFollowCrossHostRedirectWithProtectedValues(t *testing.T) {
+	for _, code := range []int{302, 307} {
+		origin, received, _ := redirectPair(t, code, false)
+		ch, key := keyedChecker(t)
+		c := checkFor(origin.URL, 200, time.Second)
+		c.Method = "POST"
+		c.Headers = []config.Header{{Name: "X-Token", Value: seal(t, key, "s3cret")}}
+		c.Body = seal(t, key, "payload")
+		res := ch.Run(context.Background(), c)
+		if res.Status != StatusDown || res.Error != "redirect to another host not followed: the request carries protected values" {
+			t.Fatalf("%d: result = %+v", code, res)
+		}
+		select {
+		case h := <-received:
+			t.Fatalf("%d: target received %v", code, h)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func TestRunFollowsSameOriginRedirectWithProtectedValues(t *testing.T) {
+	origin, received, bodies := redirectPair(t, 307, true)
+	ch, key := keyedChecker(t)
+	c := checkFor(origin.URL, 200, time.Second)
+	c.Method = "POST"
+	c.Headers = []config.Header{{Name: "X-Token", Value: seal(t, key, "s3cret")}}
+	c.Body = seal(t, key, "payload")
+	res := ch.Run(context.Background(), c)
+	if res.Status != StatusUp || (<-received).Get("X-Token") != "s3cret" || <-bodies != "payload" {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
+func TestRunPlainMonitorStillFollowsCrossHostRedirect(t *testing.T) {
+	origin, received, _ := redirectPair(t, 302, false)
+	res := newChecker().Run(context.Background(), checkFor(origin.URL, 200, time.Second))
+	if res.Status != StatusUp {
+		t.Fatalf("result = %+v", res)
+	}
+	<-received
+}

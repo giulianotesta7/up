@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/giulianotesta7/up/internal/config"
@@ -18,6 +20,44 @@ const maxExpectRead = 1 << 20
 // errUndecryptable is the only thing said about protected request values that
 // cannot be opened; it never carries the values themselves.
 var errUndecryptable = errors.New("cannot decrypt the request headers or body (encryption key missing or changed)")
+
+// errRedirectLeavesOrigin is why a check that carries protected values stops
+// at a redirect to another origin. Go forwards custom headers (and, on 307 and
+// 308, the body) across hosts, so such a redirect is never followed.
+var errRedirectLeavesOrigin = errors.New("redirect to another host not followed: the request carries protected values")
+
+// client returns the HTTP client for c. A check with headers or a body gets a
+// copy whose CheckRedirect refuses to leave the original scheme, host and
+// port; the shared client is never modified.
+func (ch *Checker) client(c config.Check) *http.Client {
+	if len(c.Headers) == 0 && c.Body.Empty() {
+		return ch.Client
+	}
+	cl := *ch.Client
+	inner := cl.CheckRedirect
+	cl.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if origin(req.URL) != origin(via[0].URL) {
+			return errRedirectLeavesOrigin
+		}
+		if inner != nil {
+			return inner(req, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return &cl
+}
+
+// origin is scheme, host and port, with the default port made explicit.
+func origin(u *url.URL) string {
+	port := u.Port()
+	if port == "" {
+		port = map[string]string{"http": "80", "https": "443"}[u.Scheme]
+	}
+	return strings.ToLower(u.Scheme) + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port)
+}
 
 // newRequest builds the request for c: its method (empty is GET), the sealed
 // headers and body opened with ch.Key, and the default user agent unless a

@@ -240,3 +240,16 @@ func TestDetailShowsMethodAndExpectedTextWithoutSecrets(t *testing.T) {
 		t.Fatalf("plain detail shows request fields:\n%s", plain)
 	}
 }
+
+func TestAdvancedDuplicateHeaderShownInForm(t *testing.T) {
+	_, m := advancedModel(t)
+	m, _ = press(t, m, keySpace, keyTab, keyTab, keySpace)
+	m = typeText(t, m, "X-A")
+	m, _ = press(t, m, keyTab, keyTab, keySpace)
+	m = typeText(t, m, "x-a")
+	m, cmd := press(t, m, keyEnter)
+	if cmd != nil {
+		t.Fatal("duplicate headers were saved")
+	}
+	requireText(t, m, "Cannot save monitor:", `header "x-a" is repeated`)
+}

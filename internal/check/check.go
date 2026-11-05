@@ -85,11 +85,13 @@ func (ch *Checker) Run(ctx context.Context, c config.Check) Result {
 	}
 
 	start := time.Now()
-	resp, err := ch.Client.Do(req)
+	resp, err := ch.client(c).Do(req)
 	if err != nil {
 		switch {
 		case ctx.Err() != nil:
 			res.Status = StatusCanceled
+		case errors.Is(err, errRedirectLeavesOrigin):
+			res.Status, res.Error = StatusDown, errRedirectLeavesOrigin.Error()
 		case errors.Is(err, context.DeadlineExceeded) || isTimeout(err):
 			res.Status, res.Error = StatusDown, fmt.Sprintf("timeout after %s", c.Timeout)
 		default:
