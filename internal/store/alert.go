@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/giulianotesta7/up/internal/config"
+	"github.com/giulianotesta7/up/internal/secret"
 )
 
 // InUseError reports a deletion refused because other objects use the target.
@@ -160,19 +161,29 @@ func (s *Store) writeSMTP(ctx context.Context, v config.SMTPServer, update bool)
 	return tx.Commit()
 }
 
+const channelColumns = "name, kind, smtp_server, recipients, webhook_origin, webhook_url, webhook_url_key, webhook_auth_name, webhook_auth, webhook_auth_key"
+
 func scanChannel(row scanner) (config.Channel, error) {
 	var c config.Channel
 	var recipients string
-	err := row.Scan(&c.Name, &c.Kind, &c.SMTPServer, &recipients)
+	var url, urlKey, auth, authKey []byte
+	err := row.Scan(&c.Name, &c.Kind, &c.SMTPServer, &recipients, &c.WebhookOrigin, &url, &urlKey, &c.WebhookAuthName, &auth, &authKey)
 	if recipients != "" {
 		c.Recipients = strings.Split(recipients, "\n")
+	}
+	if len(url) > 0 {
+		c.WebhookURL = secret.Sealed{Key: urlKey, Data: url}
+	}
+	if len(auth) > 0 {
+		c.WebhookAuth = secret.Sealed{Key: authKey, Data: auth}
 	}
 	return c, err
 }
 
-// Channels returns channels ordered by name.
+// Channels returns channels ordered by name. Webhook values come back sealed;
+// callers that expose channels must strip them.
 func (s *Store) Channels(ctx context.Context) ([]config.Channel, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT name, kind, smtp_server, recipients FROM channels ORDER BY name")
+	rows, err := s.db.QueryContext(ctx, "SELECT "+channelColumns+" FROM channels ORDER BY name")
 	if err != nil {
 		return nil, fmt.Errorf("store: channels: %w", err)
 	}
@@ -193,7 +204,7 @@ func (s *Store) Channels(ctx context.Context) ([]config.Channel, error) {
 
 // Channel finds a channel by name.
 func (s *Store) Channel(ctx context.Context, name string) (config.Channel, bool, error) {
-	c, err := scanChannel(s.db.QueryRowContext(ctx, "SELECT name, kind, smtp_server, recipients FROM channels WHERE name=?", name))
+	c, err := scanChannel(s.db.QueryRowContext(ctx, "SELECT "+channelColumns+" FROM channels WHERE name=?", name))
 	if errors.Is(err, sql.ErrNoRows) {
 		return config.Channel{}, false, nil
 	}
@@ -240,18 +251,57 @@ func (s *Store) writeChannel(ctx context.Context, c config.Channel, update bool)
 	if !update && exists {
 		return classify(ErrExists, fmt.Errorf("name %q already exists", c.Name))
 	}
-	if err = requireSMTP(ctx, tx, c.SMTPServer); err != nil {
-		return
-	}
-	if update {
-		_, err = tx.ExecContext(ctx, "UPDATE channels SET kind=?, smtp_server=?, recipients=? WHERE name=?", c.Kind, c.SMTPServer, strings.Join(c.Recipients, "\n"), c.Name)
+	// Webhook values: resolve keep/replace/clear against the stored ones
+	// (config.Edit). Email channels store none.
+	var url, auth secret.Sealed
+	authName := ""
+	if c.Kind == config.KindEmail {
+		if err = requireSMTP(ctx, tx, c.SMTPServer); err != nil {
+			return
+		}
 	} else {
-		_, err = tx.ExecContext(ctx, "INSERT INTO channels (name, kind, smtp_server, recipients) VALUES (?, ?, ?, ?)", c.Name, c.Kind, c.SMTPServer, strings.Join(c.Recipients, "\n"))
+		var old config.Channel
+		if update {
+			if old, err = scanChannel(tx.QueryRowContext(ctx, "SELECT "+channelColumns+" FROM channels WHERE name=?", c.Name)); err != nil {
+				return
+			}
+		}
+		url = resolveProtected(c.WebhookURLEdit, c.WebhookURL, old.WebhookURL, update)
+		auth = resolveProtected(c.WebhookAuthEdit, c.WebhookAuth, old.WebhookAuth, update)
+		authName = c.WebhookAuthName
+		switch {
+		case url.Empty():
+			return classify(ErrValidation, errors.New("webhook URL is required"))
+		case authName == "" && !auth.Empty():
+			return classify(ErrValidation, errors.New("webhook auth value requires a header name"))
+		}
+	}
+	origin := c.WebhookOrigin
+	if c.Kind == config.KindEmail {
+		origin = ""
+	}
+	values := []any{c.Kind, c.SMTPServer, strings.Join(c.Recipients, "\n"), origin, blob(url.Data), blob(url.Key), authName, blob(auth.Data), blob(auth.Key), c.Name}
+	if update {
+		_, err = tx.ExecContext(ctx, "UPDATE channels SET kind=?, smtp_server=?, recipients=?, webhook_origin=?, webhook_url=?, webhook_url_key=?, webhook_auth_name=?, webhook_auth=?, webhook_auth_key=? WHERE name=?", values...)
+	} else {
+		_, err = tx.ExecContext(ctx, "INSERT INTO channels (kind, smtp_server, recipients, webhook_origin, webhook_url, webhook_url_key, webhook_auth_name, webhook_auth, webhook_auth_key, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values...)
 	}
 	if err != nil {
 		return
 	}
 	return tx.Commit()
+}
+
+// resolveProtected applies an edit to one protected value (see config.Edit).
+// Without a stored value (creating), keep stores the given one.
+func resolveProtected(edit config.Edit, given, stored secret.Sealed, update bool) secret.Sealed {
+	switch {
+	case edit == config.EditClear:
+		return secret.Sealed{}
+	case edit == config.EditKeep && update:
+		return stored
+	}
+	return given
 }
 
 // DeleteSMTPServer removes a server unless channels use it.
@@ -312,6 +362,11 @@ func (s *Store) deleteAlert(ctx context.Context, name, kind string) (err error) 
 	}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE name=?", name); err != nil {
 		return
+	}
+	if table == "channels" {
+		if _, err = tx.ExecContext(ctx, "DELETE FROM channel_tests WHERE channel=?", name); err != nil {
+			return
+		}
 	}
 	return tx.Commit()
 }
