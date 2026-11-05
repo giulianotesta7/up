@@ -16,7 +16,7 @@ const kindTCP = config.CheckTCP
 
 var kindChoices = []string{"HTTP", "TCP"}
 
-const tcpCopy = "TCP connect only: no TLS validation, no application health."
+const tcpCopy = "Checks that the port accepts a connection."
 
 func (f monitorForm) isTCP() bool { return f.kind == kindTCP }
 

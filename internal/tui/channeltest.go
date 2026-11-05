@@ -16,9 +16,8 @@ import (
 
 // Copy shown by the channel test popup.
 const (
-	testIntro        = "Test notification · sends no monitor checks and changes no monitor data."
-	testAcceptedSMTP = "Accepted by the SMTP server; inbox delivery is not confirmed"
-	testAcceptedHook = "Webhook accepted: HTTP 2xx"
+	testAcceptedSMTP = "Accepted by the mail server; inbox delivery is not confirmed."
+	testAcceptedHook = "Accepted (HTTP 2xx)"
 	testRunning      = "Sending test…"
 	testAlready      = "A test is already running for this channel."
 	testNoDaemon     = "Daemon not running; start `up serve` (or reconnect to the server) and retry."
@@ -132,7 +131,6 @@ func renderChannelTest(p channelTestPrompt, snap Snapshot, now time.Time, loadEr
 	}
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Test channel") + "\n" + renderBanners(snap, now, loadErr))
-	b.WriteString(helpStyle.Render(testIntro) + "\n\n")
 	b.WriteString("Channel: " + selectedNameStyle.Render(displayText(p.name)) + " " + helpStyle.Render("("+displayText(kind)+")") + "\n\n")
 	active := false
 	t, seen := followedTest(snap, p)
@@ -155,7 +153,7 @@ func renderChannelTest(p channelTestPrompt, snap Snapshot, now time.Time, loadEr
 	case seen:
 		b.WriteString(wrapStyled(downStyle, "✗ Test failed: "+displayText(t.Error)))
 	default:
-		b.WriteString(helpStyle.Render("Ready. Nothing is sent until you press enter."))
+		b.WriteString(helpStyle.Render("Press enter to send a test."))
 	}
 	b.WriteString("\n\n")
 	if active {

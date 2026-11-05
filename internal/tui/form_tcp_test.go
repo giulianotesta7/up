@@ -43,7 +43,7 @@ func TestNewFormOffersTypeSelectorDefaultingToHTTP(t *testing.T) {
 func TestTCPFormShowsOnlyTCPFieldsAndCopy(t *testing.T) {
 	m := openTCPForm(t)
 	requireText(t, m, "Type: ‹ TCP › ", "Name", "Host", "Port", "Interval", "30s", "Timeout", "5s", "Channel", "Alert after", "Recover after",
-		"TCP connect only", "no TLS validation", "no application health", "←/→ choose")
+		"Checks that the port accepts a connection.", "←/→ choose")
 	out := view(m)
 	for _, hidden := range []string{"HTTP/HTTPS URL", "Expected status", "TLS expiry", "HTTPS only", "Advanced"} {
 		if strings.Contains(out, hidden) {
@@ -184,7 +184,7 @@ func TestTCPListAndDetailShowTarget(t *testing.T) {
 		}
 	}
 	detail := ansi.Strip(renderDetail(snap, snap.Services[1], now, nil, 100))
-	for _, want := range []string{"database  db.example.com:5432", "TCP connect", "no TLS validation"} {
+	for _, want := range []string{"database  db.example.com:5432", "TCP connect"} {
 		if !strings.Contains(detail, want) {
 			t.Fatalf("detail missing %q:\n%s", want, detail)
 		}

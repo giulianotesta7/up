@@ -158,7 +158,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		field("Interval", s.Check.Interval.String())
 		field("Timeout", s.Check.Timeout.String())
 		if s.Check.Kind == kindTCP {
-			field("Type", "TCP connect · no TLS validation, no application health")
+			field("Type", "TCP connect")
 		} else {
 			field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
 			renderRequestFields(field, s.Check)

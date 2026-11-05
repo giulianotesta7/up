@@ -298,7 +298,7 @@ func renderChannelForm(f channelForm, snap Snapshot, now time.Time, loadErr erro
 	if f.err != nil {
 		b.WriteString("\n" + warnStyle.Render("Cannot save channel: "+f.err.Error()) + "\n")
 	}
-	b.WriteString("\n" + helpStyle.Render("recipients separated by commas") + "\n")
+	b.WriteString("\n" + helpStyle.Render("comma-separated") + "\n")
 	if f.saving {
 		b.WriteString(renderHelp("Saving channel… · ctrl+c quit"))
 	} else if f.focus == 1 || f.focus == 2 {
