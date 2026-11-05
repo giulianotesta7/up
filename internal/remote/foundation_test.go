@@ -159,6 +159,8 @@ func TestCheckRoutesRejectBadInputWithoutChangingAnything(t *testing.T) {
 		{"sealed to another key", "PUT", "/api/v1/checks/api", `{` + plainCheck + `,"headers":[{"name":"X","value":{"action":"replace","sealed":` + sealedJSON(bytes.Repeat([]byte{9}, 32), 1) + `}}]}`, "headers[0].value was sealed to a different key"},
 		{"header value too large", "PUT", "/api/v1/checks/api", `{` + plainCheck + `,"headers":[{"name":"X","value":{"action":"replace","sealed":{"key":"` + base64.StdEncoding.EncodeToString(serverKey) + `","data":"` + huge + `"}}}]}`, "headers[0].value.sealed.data is too large"},
 		{"bad method", "PUT", "/api/v1/checks/api", `{` + plainCheck + `,"method":"TRACE"}`, `method "TRACE" must be one of`},
+		{"duplicate header", "PUT", "/api/v1/checks/api", `{` + plainCheck + `,"headers":[{"name":"X-A"},{"name":"x-a"}]}`, `header "x-a" is repeated`},
+		{"HEAD with expected text", "PUT", "/api/v1/checks/api", `{` + plainCheck + `,"method":"HEAD","expect_text":"ok"}`, "HEAD does not"},
 		{"bad header name", "PUT", "/api/v1/checks/api", `{` + plainCheck + `,"headers":[{"name":"Bad Name"}]}`, `header name "Bad Name" is not valid`},
 		{"tcp without host", "PUT", "/api/v1/checks/api", `{"kind":"tcp","interval_ms":60000,"timeout_ms":1000,"port":80}`, "host is required"},
 		{"tcp port range", "PUT", "/api/v1/checks/api", `{"kind":"tcp","host":"h","port":70000,"interval_ms":60000,"timeout_ms":1000}`, "port 70000 must be between 1 and 65535"},

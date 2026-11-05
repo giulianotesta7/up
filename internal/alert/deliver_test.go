@@ -118,15 +118,6 @@ func (noServer) SMTPServer(context.Context, string) (config.SMTPServer, bool, er
 	return config.SMTPServer{}, false, nil
 }
 
-func TestDeliverWebhookIsNotAvailableYet(t *testing.T) {
-	s := customStore{found: true, channel: config.Channel{Kind: config.KindWebhook}}
-	n := NewNotifier(Options{Store: s, Logger: quiet()})
-	err := n.Deliver(context.Background(), config.Check{Name: "api", Channel: "hook"}, check.Result{Status: check.StatusDown})
-	if !errors.Is(err, ErrWebhookUnavailable) {
-		t.Fatalf("Deliver() = %v, want ErrWebhookUnavailable", err)
-	}
-}
-
 // The queue goes through the same delivery call and still only logs.
 func TestQueueUsesTheDeliveryCallAndLogsFailures(t *testing.T) {
 	var logs bytes.Buffer

@@ -433,8 +433,8 @@ func initialStreak(ctx context.Context, opts Options, c config.Check) check.Stre
 
 func logTransition(logger *slog.Logger, c config.Check, res check.Result) {
 	if res.Status == check.StatusUp {
-		logger.Info("check up", "check", c.Name, "url", c.URL, "latency", res.Latency)
+		logger.Info("check up", "check", c.Name, "url", c.Target(), "latency", res.Latency)
 		return
 	}
-	logger.Warn("check down", "check", c.Name, "url", c.URL, "error", res.Error)
+	logger.Warn("check down", "check", c.Name, "url", c.Target(), "error", res.Error)
 }

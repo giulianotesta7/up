@@ -15,10 +15,8 @@ import (
 	"github.com/giulianotesta7/up/internal/store"
 )
 
-var (
-	keyW     = tea.KeyPressMsg{Code: 'w', Text: "w"}
-	keySpace = tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
-)
+// keySpace is shared with form_advanced_test.go.
+var keyW = tea.KeyPressMsg{Code: 'w', Text: "w"}
 
 // maintenanceModel has the check "api" and a loaded snapshot. now is a Sunday
 // 03:45 UTC.
