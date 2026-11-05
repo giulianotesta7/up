@@ -244,7 +244,7 @@ func renderChannelList(snap Snapshot, selected int, now time.Time, loadErr error
 			b.WriteString(line(marker, row, strconv.Itoa(counts[i])) + "\n")
 		}
 	}
-	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · n new · e edit · d delete · t test · esc back · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("↑/↓ select · n new · e edit · d delete · t test · esc back · q quit"))
 	return b.String()
 }
 func renderChannelForm(f channelForm, snap Snapshot, now time.Time, loadErr error) string {
@@ -264,9 +264,9 @@ func renderChannelForm(f channelForm, snap Snapshot, now time.Time, loadErr erro
 		case f.saving:
 			b.WriteString(renderHelp("Saving channel… · ctrl+c quit"))
 		case f.focus == 1:
-			b.WriteString(renderHelp("←/→ choose kind · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
+			b.WriteString(renderHelp("←/→ choose · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
 		case f.focus == hookURLRow || f.focus == hookAuthRow:
-			b.WriteString(renderHelp("←/→ keep/replace/clear a saved value · type to replace · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
+			b.WriteString(renderHelp("←/→ keep/replace/clear · tab/shift+tab focus · enter save · esc cancel"))
 		default:
 			b.WriteString(renderHelp("tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
 		}

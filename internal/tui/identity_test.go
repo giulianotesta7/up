@@ -33,14 +33,7 @@ func TestIdentityViews(t *testing.T) {
 			}
 			out := view(current)
 			lines := strings.Split(out, "\n")
-			header := "▲ up  58.5% uptime today · 2 incidents"
-			if tc.name == "form" {
-				// The Type and Advanced rows make the popup tall enough to reach the first row; the identity prefix stays visible.
-				header = "▲ up  58.5% uptime "
-				if !strings.HasPrefix(lines[0], header) {
-					t.Errorf("header: %q", lines[0])
-				}
-			} else if lines[0] != header {
+			if lines[0] != "▲ up  58.5% uptime today · 2 incidents" {
 				t.Errorf("header: %q", lines[0])
 			}
 			if tc.name != "form" && lines[1] != "└"+strings.Repeat("─", 59) {
@@ -55,8 +48,7 @@ func TestIdentityViews(t *testing.T) {
 			if tc.name != "delete" && tc.name != "form" && len(lines) != tc.lines {
 				t.Errorf("lines = %d, want %d:\n%s", len(lines), tc.lines, out)
 			}
-			// The form popup also reaches the database footer of the short fixture list, so only the other views keep it.
-			if !strings.Contains(out, tc.help) || (tc.name != "form" && !strings.HasSuffix(out, "database: /shared/up.db")) {
+			if !strings.Contains(out, tc.help) || !strings.HasSuffix(out, "database: /shared/up.db") {
 				t.Errorf("lost help/footer:\n%s", out)
 			}
 		})

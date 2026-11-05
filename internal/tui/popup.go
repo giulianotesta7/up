@@ -60,7 +60,7 @@ func renderHelpPopup(split bool, remote ...bool) string {
 		return left + strings.Repeat(" ", max(0, 14-ansi.StringWidth(description))) + accentStyle.Render(key2) + strings.Repeat(" ", max(0, 4-ansi.StringWidth(key2))) + helpStyle.Render(description2)
 	}
 	monitors := [][2]string{{"↑/↓ k/j", "select"}, {"enter", "details"}, {"n", "new monitor"}, {"e", "edit"}, {"d", "delete"}}
-	alerting := [][2]string{{"m", "mute selected"}, {"u", "unmute"}, {"s", "SMTP servers"}, {"c", "channels"}}
+	alerting := [][2]string{{"m", "mute selected"}, {"u", "unmute"}, {"s", "SMTP servers"}, {"c", "channels"}, {"w", "maintenance"}}
 	if split {
 		monitors = append(monitors[:1:1], monitors[2:]...)
 	}
@@ -123,6 +123,11 @@ func overlayPopup(content, popup string, width, height int) string {
 		height = len(lines)
 	}
 	left, top := max(0, (width-boxWidth)/2), max(0, (height-len(box))/2)
+	// The box never covers the title row ("▲ up …"): an unsized model, whose
+	// height is the content, would otherwise start a tall box at row 0.
+	if len(lines) > 1 {
+		top = max(1, top)
+	}
 	for len(lines) < top+len(box) {
 		lines = append(lines, "")
 	}

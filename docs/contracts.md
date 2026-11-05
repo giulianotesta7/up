@@ -26,13 +26,14 @@ Header values, HTTP body, webhook URL and webhook auth value are `secret.Sealed`
 
 ### Maintenance evaluation
 
-`config.EvaluateMaintenance(windows, at) Maintenance{Active, End}` is pure. Occurrence = `[start, start+Duration)`; a nonexistent local start (DST gap) is skipped that day, a repeated one runs once at its first occurrence; windows overlapping or touching union (`End` is the union's end, capped at `MaintenanceHorizon`, 366 days). Nothing calls it for suppression yet.
+`config.EvaluateMaintenance(windows, at) Maintenance{Active, End}` is pure. Occurrence = `[start, start+Duration)`; a nonexistent local start (DST gap) is skipped that day, a repeated one runs once at its first occurrence; windows overlapping or touching union (`End` is the union's end, capped at `MaintenanceHorizon`, 366 days). The monitor (`internal/monitor/maintenance.go`) is its only caller for suppression: alerts and certificate warnings are held while a manual mute or an active window applies, and the existing mute reconciliation sends what recipients do not know once, when both have ended (`monitor.Options.Now` injects the clock; `monitor.WindowStore` is the optional store API).
 
 ## Store (`internal/store`)
 
 - Checks: `AddCheck`, `UpdateCheck`, `SetChecks`, `Checks` carry every field above; `RecordDefined` compares URL, kind, method, headers, body, expect text, host, port, interval, timeout, status.
 - Channels: `AddChannel`, `UpdateChannel`, `Channels`, `Channel` carry the webhook fields (sealed values come back sealed). `DeleteChannel` also deletes its test requests.
 - Windows (max `MaxMaintenanceWindows` = 20 per check): `AddMaintenanceWindow(ctx, w) (w with ID, error)`, `UpdateMaintenanceWindow(ctx, w)`, `DeleteMaintenanceWindow(ctx, check, id)`, `MaintenanceWindows(ctx, check)`, `AllMaintenanceWindows(ctx)`. `DeleteCheck` deletes its windows. Unknown check/window is `ErrNotFound`, invalid input `ErrValidation`.
+- Alert state (v6 `alert_state`, a trigger deletes it with its check): `AlertState(ctx, check) (known, found, err)`, `SetAlertState(ctx, check, known)` (`ErrNotFound` unknown check), `AlertStates(ctx)`. It records whether recipients were last told the check is down; the monitor writes it when it sends or settles and reads it on loop start (a live mute's `was_alerting` first, no row falls back to the streak). Snapshot: `Service.KnownAlerting`, `services[].known_alerting`.
 - Channel tests (one active per channel, enforced by a unique index): `EnqueueChannelTest(ctx, channel, at)` (`ErrNotFound` unknown channel, `ErrExists` if pending/sending), `ClaimChannelTest(ctx, at)` (oldest pending to sending), `CompleteChannelTest(ctx, id, errText, at)` (empty text = ok; text is cleaned by `SafeTestError`; only a sending test completes), `FailSendingChannelTests(ctx, reason, at)` (call at daemon start), `LatestChannelTest(ctx, channel)`, `LatestChannelTests(ctx)`. History per channel is capped at 20.
 
 ## Delivery seam (`internal/alert`)

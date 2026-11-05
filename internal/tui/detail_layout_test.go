@@ -10,10 +10,10 @@ func TestDetailSectionsAreSpacedAndIndented(t *testing.T) {
 	m, _ := press(t, modelWith(seededSnapshot(t, now.Add(-5*time.Second))), keyDown, keyEnter)
 	out := view(m)
 	for _, want := range []string{
-		"\n\nSTATUS\n  Status      DOWN",
-		"  Last error  " + reason,
-		"  Down since  Oct 25 03:44:00 (1m ago)",
-		"\n\nCONFIG\n  Interval    1m0s\n  Timeout     10s\n  Expected    204\n  Channel     none\n",
+		"\n\nSTATUS\n  Status       DOWN",
+		"  Last error   " + reason,
+		"  Down since   Oct 25 03:44:00 (1m ago)",
+		"\n\nCONFIG\n  Interval     1m0s\n  Timeout      10s\n  Expected     204\n  Channel      none\n",
 		"\n\nLATENCY\n",
 		"\n\nRECENT OUTAGES\n  Oct 25 03:44:00 → ongoing",
 	} {

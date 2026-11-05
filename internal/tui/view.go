@@ -40,6 +40,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		if anyCert {
 			certWidth = 9
 		}
+		heldWidth, heldHeader := heldColumn(snap, now)
 		showTrend := width <= 0 || width >= max(78, nameWidth+55+statusWidth+certWidth)
 		// A tcp tag follows the name when the list has room for it.
 		tcpTag := tcpTagWidth(snap, width, nameWidth, statusWidth, certWidth)
@@ -54,13 +55,13 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 				middle += "  " + cert + strings.Repeat(" ", max(0, 7-ansi.StringWidth(cert)))
 			}
 			prefix := marker + " " + dot + " " + name + padding + "  " + status + fmt.Sprintf("  %8s", latency) + middle
-			last = fmt.Sprintf("%-10s  %s", last, muted+strings.Repeat(" ", max(0, 13-ansi.StringWidth(muted))))
+			last = fmt.Sprintf("%-10s  %s", last, muted+strings.Repeat(" ", max(0, heldWidth-ansi.StringWidth(muted))))
 			if showTrend {
 				return prefix + "  " + strings.TrimRight(fmt.Sprintf("%-10s  %s", last, reason), " ")
 			}
 			return strings.TrimRight(prefix+fmt.Sprintf("  %-10s  %s", last, reason), " ")
 		}
-		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", fmt.Sprintf("%-*s", statusWidth, "STATUS"), "LATENCY", "TREND (16)", "CERT", "LAST CHECK", "MUTED", "")) + "\n")
+		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", fmt.Sprintf("%-*s", statusWidth, "STATUS"), "LATENCY", "TREND (16)", "CERT", "LAST CHECK", heldHeader, "")) + "\n")
 		for i, s := range snap.Services {
 			marker := " "
 			if i == selected {
@@ -84,10 +85,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 				remaining := s.Cert.NotAfter.Sub(now)
 				cert = certStyle(remaining).Render(certLeft(remaining))
 			}
-			muted := ""
-			if s.Muted(now) {
-				muted = warnStyle.Render("⏸ " + timeLeft(s.Mute.Until.Sub(now)) + " left")
-			}
+			muted := heldCell(s, now)
 			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, statusWidth), latency, sparkline(s.Recent, 16), cert, last, muted, reason) + "\n")
 		}
 	}
@@ -116,7 +114,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		b.WriteString("\n" + headerStyle.Render(title) + "\n")
 	}
 	field := func(label, value string) {
-		fmt.Fprintf(&b, "  %-10s  %s\n", label, value)
+		fmt.Fprintf(&b, "  %-11s  %s\n", label, value)
 	}
 
 	b.WriteString("\n" + headerStyle.Render("STATUS") + "\n")
@@ -129,11 +127,21 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		held := "nothing pending"
 		switch s.Pending() {
 		case "down":
-			held = "1 email pending (down since " + formatTime(s.DownSince, now) + ")"
+			held = "1 alert pending (down since " + formatTime(s.DownSince, now) + ")"
 		case "recovery":
-			held = "1 email pending (recovery)"
+			held = "1 alert pending (recovery)"
 		}
 		field("Muted", warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))+" · "+held)
+	}
+	if s.InMaintenance.Active {
+		held := "nothing pending"
+		switch s.heldPending() {
+		case "down":
+			held = "1 alert pending (down since " + formatTime(s.DownSince, now) + ")"
+		case "recovery":
+			held = "1 alert pending (recovery)"
+		}
+		field("Maintenance", warnStyle.Render(fmt.Sprintf("until %s (%s left)", clockWithDay(s.InMaintenance.End, now), timeLeft(s.InMaintenance.End.Sub(now))))+" · "+held)
 	}
 	field("Last error", orDash(s.Latest.Error))
 	if streak := streakLine(s, now); streak != "" {
@@ -166,6 +174,9 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 			}
 		}
 		field("Channel", channel)
+		if n := len(s.Maintenance); n > 0 {
+			field("Maintenance", plural(n, "window")+helpStyle.Render(" (w to edit)"))
+		}
 		if !s.thresholdsDefault() {
 			field("Alerting", fmt.Sprintf("after %s · recovers after %s", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success")))
 		}
@@ -388,7 +399,7 @@ func renderKeys(remote ...bool) string {
 		row("enter", "details", "u", "unmute"),
 		row("n", "new monitor", "s", "SMTP servers"),
 		row("e", "edit", "c", "channels"),
-		row("d", "delete", "", ""),
+		row("d", "delete", "w", "maintenance"),
 		"",
 		headerStyle.Render("VIEW"),
 		"",

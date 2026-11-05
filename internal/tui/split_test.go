@@ -19,7 +19,7 @@ func sized(m Model, w, h int) Model {
 func TestSplitView(t *testing.T) {
 	m := sized(modelWith(seededSnapshot(t, now)), 120, 35)
 	out := view(m)
-	for _, s := range []string{"api", "payments", "STATUS", "Status      UP", "ACTIVITY", "↑/↓ select · n new"} {
+	for _, s := range []string{"api", "payments", "STATUS", "Status       UP", "ACTIVITY", "↑/↓ select · n new"} {
 		if !strings.Contains(out, s) {
 			t.Errorf("missing %q in view:\n%s", s, out)
 		}
@@ -33,7 +33,7 @@ func TestSplitView(t *testing.T) {
 		}
 	}
 	m, _ = press(t, m, keyEnter, keyDown)
-	if m.detail || !strings.Contains(view(m), "Status      DOWN") {
+	if m.detail || !strings.Contains(view(m), "Status       DOWN") {
 		t.Errorf("selection did not change detail: %s", view(m))
 	}
 	for _, size := range [][2]int{{100, 35}, {120, 20}} {

@@ -64,6 +64,7 @@ type Model struct {
 	form              *monitorForm
 	deletion          *deletePrompt
 	mute              *mutePrompt
+	maint             *maintenancePopup
 	notice            string
 	smtpScreen        bool
 	smtpSelected      int
@@ -285,6 +286,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.load
+	case maintenanceMsg:
+		return m.handleMaintenanceMsg(msg)
 	case smtpSaveMsg:
 		if msg.generation != m.generation || m.smtpForm == nil || !m.smtpForm.saving {
 			return m, nil
@@ -354,6 +357,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case channelTestMsg:
 		return m.channelTestResult(msg)
 	case tea.PasteMsg:
+		if m.maint != nil {
+			return m.handleMaintenancePaste(msg.Content), nil
+		}
 		if m.channelForm != nil && !m.channelForm.saving {
 			f := *m.channelForm
 			f.insert(msg.Content)
@@ -396,6 +402,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mute != nil {
 		return m.handleMuteKey(msg)
 	}
+	if m.maint != nil {
+		return m.handleMaintenanceKey(msg)
+	}
 	m.notice = ""
 	if m.help {
 		if key := msg.String(); key == "?" || key == "esc" {
@@ -436,11 +445,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.deletion = &deletePrompt{name: c.Name}
 			}
 		}
+	case "w":
+		m = m.openMaintenance()
 	case "m", "u":
 		if m.selected < len(m.snap.Services) {
 			svc := m.snap.Services[m.selected]
 			if msg.String() == "m" {
-				m.mute = &mutePrompt{name: svc.Check.Name, wasAlerting: svc.Streak.Alerting}
+				m.mute = &mutePrompt{name: svc.Check.Name, wasAlerting: svc.KnownAlerting}
 			} else if svc.Muted(m.now()) {
 				m.generation++
 				return m, m.unmute(svc.Check.Name)
@@ -478,9 +489,11 @@ func (m Model) View() tea.View {
 		content = renderKeys(m.destination != "")
 	}
 	modal := ""
-	if m.form != nil || m.deletion != nil || m.mute != nil {
+	if m.form != nil || m.deletion != nil || m.mute != nil || m.maint != nil {
 		screen, minimum := "", 0
 		switch {
+		case m.maint != nil:
+			screen, minimum = m.maintenanceScreen(now), maintenanceMinWidth
 		case m.mute != nil:
 			screen = renderMute(*m.mute, m.snap, now, m.err)
 			p := *m.mute
@@ -600,7 +613,7 @@ func (m Model) View() tea.View {
 	}
 	content = renderTitleWidth(m.snap, m.width) + "\n" + rule + "\n" + content
 	if modal != "" || stackParent != "" || stackChild != "" || (m.help && helpPopupFits(m.width, m.height)) {
-		content = padForPopup(content, m.height)
+		content = padForPopup(content, m.popupPadHeight(modal, stackParent, stackChild))
 	}
 	if m.destination != "" {
 		footer := helpStyle.Render("remote · " + displayText(m.destination))
@@ -661,6 +674,22 @@ func (m Model) View() tea.View {
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
+}
+
+// popupPadHeight is the height to pad the content to before a popup. Before
+// the terminal size is known it grows to hold the tallest box between the title
+// row and the footer, so the box covers neither.
+func (m Model) popupPadHeight(boxes ...string) int {
+	if m.height > 0 {
+		return m.height
+	}
+	height := 0
+	for _, box := range boxes {
+		if box != "" {
+			height = max(height, popupHeight+2, strings.Count(box, "\n")+1+3)
+		}
+	}
+	return height
 }
 
 // Run shows the TUI until the user quits or ctx is done.

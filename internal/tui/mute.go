@@ -130,7 +130,7 @@ func renderMute(p mutePrompt, snap Snapshot, now time.Time, loadErr error) strin
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Mute alerts · "+p.name) + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
-	b.WriteString(helpStyle.Render("Checks keep running. Emails are held until the mute ends.") + "\n\n")
+	b.WriteString(helpStyle.Render("Checks keep running. Alerts are held until the mute ends.") + "\n\n")
 	if p.custom {
 		fmt.Fprintf(&b, "%s %s: %s%s      %s\n", accentStyle.Render(">"), accentStyle.Render("Duration"), p.input, accentStyle.Render("│"), helpStyle.Render("e.g. 45m, 2h, 1h30m"))
 	} else {

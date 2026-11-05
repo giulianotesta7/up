@@ -41,7 +41,7 @@ func mutedModel(t *testing.T, statuses ...check.Status) (*store.Store, Model) {
 func TestMutePickerMutesAndUnmutes(t *testing.T) {
 	s, m := mutedModel(t, check.StatusUp, check.StatusDown)
 	m, _ = press(t, m, keyM)
-	requireText(t, m, "Mute alerts · api", "Checks keep running. Emails are held until the mute ends.",
+	requireText(t, m, "Mute alerts · api", "Checks keep running. Alerts are held until the mute ends.",
 		"30 minutes", "1 hour", "4 hours", "24 hours", "Custom…",
 		"If api is still down when the mute ends, you get the alert then.", "↑/↓ choose · enter mute · esc cancel")
 	m, _ = press(t, m, keyEsc)
@@ -60,7 +60,7 @@ func TestMutePickerMutesAndUnmutes(t *testing.T) {
 		t.Fatalf("list lacks the mute:\n%s", list)
 	}
 	m, _ = press(t, m, keyEnter)
-	requireText(t, m, "Muted       until 07:45 (4h left) · nothing pending")
+	requireText(t, m, "Muted        until 07:45 (4h left) · nothing pending")
 
 	m, cmd = press(t, m, keyU)
 	m = finishCommand(t, m, cmd)
@@ -112,7 +112,7 @@ func TestDetailShowsHeldEmail(t *testing.T) {
 	}
 	next, _ := m.Update(m.Init()())
 	m, _ = press(t, next.(Model), keyEnter)
-	requireText(t, m, "Muted       until 04:13 (28m left) · 1 email pending (down since Oct 25 03:40:30)")
+	requireText(t, m, "Muted        until 04:13 (28m left) · 1 alert pending (down since Oct 25 03:40:30)")
 }
 
 func TestMutedColumnIsAlwaysShown(t *testing.T) {
