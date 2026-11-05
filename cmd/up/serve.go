@@ -161,10 +161,12 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	notifyCtx, cancelNotify := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() { defer close(done); notifier.Run(notifyCtx) }()
+	checker := check.New()
+	checker.Key = key
 	err = monitor.Run(ctx, monitor.Options{
 		Alerter:           notifier,
 		Store:             s,
-		Runner:            check.New(),
+		Runner:            checker,
 		HeartbeatInterval: monitor.DefaultHeartbeatInterval,
 		Retention:         *retention,
 		Logger:            logger,

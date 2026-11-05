@@ -311,3 +311,60 @@ PRAGMA user_version = 1;`)
 		}
 	}
 }
+
+// The daemon opens sealed request headers and body with the key serve loads.
+func TestServeOpensSealedRequestSettings(t *testing.T) {
+	isolateDefaultDatabase(t)
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "up.db")
+	type seen struct{ method, token, body string }
+	got := make(chan seen, 8)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b := new(bytes.Buffer)
+		_, _ = b.ReadFrom(r.Body)
+		select {
+		case got <- seen{r.Method, r.Header.Get("X-Token"), b.String()}:
+		default:
+		}
+	}))
+	defer srv.Close()
+	key, _, err := secret.LoadOrCreate(dbPath + ".key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seal := func(v string) secret.Sealed {
+		s, err := secret.Seal(key.PublicKey(), v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	s, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	c := config.Check{Name: "api", URL: srv.URL, Interval: time.Hour, Timeout: time.Second, ExpectedStatus: 200,
+		Method: "POST", Headers: []config.Header{{Name: "X-Token", Value: seal("s3cret")}}, Body: seal("payload")}
+	if err := s.AddCheck(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var errOut string
+	go func() { defer close(done); _, _, errOut = runCmd(ctx, "serve", "--db", dbPath) }()
+	defer func() { cancel(); <-done }()
+	select {
+	case v := <-got:
+		if v != (seen{"POST", "s3cret", "payload"}) {
+			t.Fatalf("server saw %+v", v)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("daemon never sent the request")
+	}
+	cancel()
+	<-done
+	if strings.Contains(errOut, "s3cret") || strings.Contains(errOut, "payload") {
+		t.Fatalf("protected value logged: %s", errOut)
+	}
+}

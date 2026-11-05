@@ -21,7 +21,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 
 ## Features
 
-- **HTTP checks** with per-monitor interval, timeout and expected status. Redirects are followed.
+- **HTTP checks** with per-monitor interval, timeout and expected status. Redirects are followed. Optional method, headers, body and expected text under Advanced.
 - **Managed from the TUI.** Add, edit, delete and mute monitors; the daemon picks up changes within ~2s.
 - **Remote TUI.** Run the daemon on a server and manage it from your laptop over an authenticated API.
 - **Check history.** Every result is stored and outages are derived from it. Results are kept for 30 days by default; retention is configurable.
@@ -122,6 +122,21 @@ The database is resolved in this order: `--db`, `$UP_DB`, `/var/lib/up/up.db` if
 
 In forms: `tab`/`shift+tab` switch fields · `←`/`→` choose · `enter` save · `esc` cancel.
 
+### Monitor fields
+
+Only **name** and **URL** are required: a new monitor is a `GET` every 30s with a 5s timeout that expects status `200`. The form has a collapsed **Advanced** row (`space` opens it, `←` closes it) for the HTTP request:
+
+| Field | Meaning |
+|---|---|
+| Method | `GET` (default), `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE` or `OPTIONS`; choose with `←`/`→`. |
+| Headers | Name/value pairs sent with every check. `space` on `+ Header` adds one, `ctrl+d` removes the focused one. |
+| Request body | Text sent as the body. |
+| Expected text | Literal, case-sensitive text the response body must contain. The status **and** the text must both match. |
+
+Only the first 1 MiB of a response is read, within the timeout. If the text is not found and the response is larger, the check fails and says so. Responses are never stored, and latency stays the time until the response headers arrive. Regex, JSONPath, OAuth and multi-step checks are not supported.
+
+Header values and the request body are protected like SMTP passwords: they are sealed with the server's public key, never shown again (the form says `set` and offers keep / replace / clear) and never returned by the API. Typing them needs the encryption key, so start `up serve` once first. Editing a monitor that has any Advanced setting opens the section and marks it `configured`; the detail view shows the method and expected text.
+
 ## Alerts
 
 1. `s`: add an SMTP server. For a relay without authentication, set **No login required** to **Yes**.
@@ -204,7 +219,7 @@ Bodies are strict JSON, limited to 1 MiB. Errors: `400` invalid input, `404` not
 ### Security
 
 - **One token, full access.** There are no roles or rate limiting. For an internet-facing API, a proxy with rate limiting is recommended.
-- SMTP passwords are sealed with the server's public key; the API rejects plaintext passwords and never returns passwords or ciphertext. The private key stays on the server.
+- SMTP passwords, HTTP header values and request bodies are sealed with the server's public key; the API rejects plaintext values and never returns them or their ciphertext. The private key stays on the server.
 - The server stores a SHA-256 token hash and compares it in constant time. Token and remote credential files readable by others are refused.
 - The client does not follow redirects or forward the token to another host. Server text is stripped of terminal escape sequences before display. There is no certificate pinning.
 
