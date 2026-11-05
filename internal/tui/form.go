@@ -27,6 +27,9 @@ const (
 	focusAlertAfter
 	focusRecoverAfter
 	focusTLS
+	focusType
+	focusPort
+	focusAdvanced // HTTP fold row; the fields inside follow (form_advanced.go)
 	focusCount
 )
 
@@ -36,12 +39,18 @@ type monitorForm struct {
 	alertAfter   string
 	recoverAfter string
 	tlsExpiry    string
+	kind         string       // "" is HTTP, kindTCP is TCP
+	port         string       // TCP only
+	adv          advancedForm // HTTP only
 	focus        int
 	cursor       int // rune offset in the focused field
 	err          error
 	saving       bool
 	editing      bool
 	returnDetail bool
+	// base is the monitor being edited. The form shows only some fields, so
+	// the rest (request options, host, port) carry over unchanged.
+	base config.Check
 }
 
 func newMonitorForm() *monitorForm {
@@ -49,16 +58,28 @@ func newMonitorForm() *monitorForm {
 }
 
 func editMonitorForm(c config.Check, detail bool) *monitorForm {
+	if c.Kind == kindTCP {
+		return editTCPForm(c, detail)
+	}
 	return &monitorForm{
 		values:  [5]string{c.Name, c.URL, c.Interval.String(), c.Timeout.String(), strconv.Itoa(c.ExpectedStatus)},
 		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: tlsChoice(c.TLSOff),
-		focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail,
+		adv:   newAdvanced(c),
+		focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail, base: c,
 	}
 }
 
 // check converts text only; all semantic rules belong to config.ValidateCheck.
-func (f monitorForm) check() (config.Check, error) {
-	c := config.Check{Name: f.values[0], URL: f.values[1], Channel: f.channel}
+func (f monitorForm) check() (config.Check, error) { return f.checkWith(nil) }
+
+// checkWith is check with the daemon public key that new protected values are
+// sealed to. TCP monitors have no protected values.
+func (f monitorForm) checkWith(key []byte) (config.Check, error) {
+	if f.isTCP() {
+		return f.tcpCheck()
+	}
+	c := f.base
+	c.Name, c.URL, c.Channel = f.values[0], f.values[1], f.channel
 	var err error
 	if c.Interval, err = time.ParseDuration(f.values[2]); err != nil {
 		return c, fmt.Errorf("interval: %w", err)
@@ -76,6 +97,9 @@ func (f monitorForm) check() (config.Check, error) {
 		return c, fmt.Errorf("recover after: %w", err)
 	}
 	c.TLSOff = f.tlsExpiry == "off"
+	if err := f.applyAdvanced(&c, key); err != nil {
+		return c, err
+	}
 	return c, config.ValidateCheck(c)
 }
 
@@ -122,19 +146,17 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == "shift+tab" {
 			delta = -1
 		}
-		first := 0
-		if f.editing {
-			first = 1 // The stored name is displayed, never focused or editable.
+		order := f.order()
+		at := 0
+		for i, focus := range order {
+			if focus == f.focus {
+				at = i
+			}
 		}
-		count := focusCount - first
-		f.focus = first + (f.focus-first+delta+count)%count
-		if f.focus < len(f.values) {
-			f.cursor = len([]rune(f.values[f.focus]))
-		} else {
-			f.cursor = 0
-		}
+		f.focus = order[(at+delta+len(order))%len(order)]
+		f.cursor = f.focusCursor()
 	case "enter":
-		c, err := f.check()
+		c, err := f.checkWith(m.snap.PublicKey)
 		f.err = err
 		if err != nil {
 			return m, nil
@@ -144,7 +166,10 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.generation++
 		return m, m.save(c)
 	default:
-		if f.focus >= focusChannel {
+		if f.handleAdvancedKey(msg, m.snap.HasKey) {
+			return m, nil
+		}
+		if f.choiceFocus() {
 			delta := 0
 			switch msg.String() {
 			case "left":
@@ -154,6 +179,8 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			switch {
 			case delta == 0:
+			case f.focus == focusType:
+				f.setKind(map[string]string{"HTTP": "", "TCP": kindTCP}[cycleChoice(kindChoices, f.kindName(), delta)])
 			case f.focus == focusChannel:
 				f.channel = cycleChoice(channelChoices(m.snap), f.channel, delta)
 			case f.focus == focusAlertAfter:
@@ -190,7 +217,8 @@ func detectionHint(f monitorForm) string {
 }
 
 func (f *monitorForm) insert(text string) {
-	if f.focus >= len(f.values) {
+	field := f.text()
+	if field == nil {
 		return
 	}
 	// Paste is single-line too. Ignore terminal controls, not Unicode text.
@@ -200,15 +228,19 @@ func (f *monitorForm) insert(text string) {
 		}
 		return r
 	}, text)
-	value := []rune(f.values[f.focus])
+	value := []rune(*field)
 	inserted := []rune(text)
 	value = append(value[:f.cursor], append(inserted, value[f.cursor:]...)...)
 	f.cursor += len(inserted)
-	f.values[f.focus] = string(value)
+	*field = string(value)
 }
 
 func (f *monitorForm) edit(msg tea.KeyPressMsg) {
-	value := []rune(f.values[f.focus])
+	field := f.text()
+	if field == nil {
+		return
+	}
+	value := []rune(*field)
 	switch msg.String() {
 	case "left":
 		f.cursor = max(0, f.cursor-1)
@@ -222,11 +254,11 @@ func (f *monitorForm) edit(msg tea.KeyPressMsg) {
 		if f.cursor > 0 {
 			value = append(value[:f.cursor-1], value[f.cursor:]...)
 			f.cursor--
-			f.values[f.focus] = string(value)
+			*field = string(value)
 		}
 	case "delete":
 		if f.cursor < len(value) {
-			f.values[f.focus] = string(append(value[:f.cursor], value[f.cursor+1:]...))
+			*field = string(append(value[:f.cursor], value[f.cursor+1:]...))
 		}
 	default:
 		if msg.Text != "" {
@@ -236,14 +268,27 @@ func (f *monitorForm) edit(msg tea.KeyPressMsg) {
 }
 
 func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) string {
+	s, _ := renderFormFocus(f, snap, now, loadErr)
+	return s
+}
+
+// renderFormFocus also returns the line the focused field is on, so a tall
+// form can scroll to it.
+func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error) (string, int) {
 	var b strings.Builder
+	focusLine := 0
 	title := "New monitor"
 	if f.editing {
 		title = "Edit monitor"
 	}
 	b.WriteString(titleStyle.Render(title) + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
+	b.WriteString(typeLine(f))
 	for i, label := range fieldLabels {
+		if f.isTCP() {
+			renderTCPFields(&b, f)
+			break
+		}
 		marker := " "
 		value := f.values[i]
 		if i == f.focus {
@@ -252,6 +297,7 @@ func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) stri
 			value = string(runes[:f.cursor]) + accentStyle.Render("│") + string(runes[f.cursor:])
 			label = accentStyle.Render(label)
 			marker = accentStyle.Render(marker)
+			focusLine = strings.Count(b.String(), "\n")
 		}
 		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, value)
 	}
@@ -261,18 +307,22 @@ func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) stri
 	if selected == "" {
 		selected = "none"
 	}
-	focused := f.focus >= focusChannel
+	focused := f.choiceFocus()
 	choiceLine := func(position int, label, rendered string) {
 		marker := " "
 		if f.focus == position {
 			marker, label = accentStyle.Render(">"), accentStyle.Render(label)
+			focusLine = strings.Count(b.String(), "\n")
 		}
 		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, rendered)
 	}
 	choiceLine(focusChannel, "Channel", renderChoice(selected, choices, f.focus == focusChannel))
 	choiceLine(focusAlertAfter, "Alert after", renderChoiceUnit(f.alertAfter, "failures in a row", thresholdChoices, f.focus == focusAlertAfter))
 	choiceLine(focusRecoverAfter, "Recover after", renderChoiceUnit(f.recoverAfter, "successes in a row", thresholdChoices, f.focus == focusRecoverAfter))
-	choiceLine(focusTLS, "TLS expiry", renderChoiceUnit(f.tlsExpiry, "", tlsChoices, f.focus == focusTLS)+"   "+helpStyle.Render("HTTPS only"))
+	if !f.isTCP() {
+		choiceLine(focusTLS, "TLS expiry", renderChoiceUnit(f.tlsExpiry, "", tlsChoices, f.focus == focusTLS)+"   "+helpStyle.Render("HTTPS only"))
+		f.renderAdvanced(&b, snap.HasKey, &focusLine)
+	}
 	if hint := detectionHint(f); hint != "" {
 		b.WriteString("\n" + helpStyle.Render(hint) + "\n")
 	}
@@ -281,10 +331,12 @@ func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) stri
 	}
 	if f.saving {
 		b.WriteString("\n" + renderHelp("Saving monitor… · ctrl+c quit"))
+	} else if f.focus >= focusAdvanced {
+		b.WriteString("\n" + renderHelp(f.advancedHelp()))
 	} else if focused {
 		b.WriteString("\n" + renderHelp("←/→ choose · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
 	} else {
 		b.WriteString("\n" + renderHelp("tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
 	}
-	return b.String()
+	return b.String(), focusLine
 }

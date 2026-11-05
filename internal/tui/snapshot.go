@@ -41,6 +41,15 @@ type Service struct {
 	// Cert is the last certificate observed for an HTTPS monitor.
 	Cert    config.Cert
 	HasCert bool
+	// Maintenance are the monitor's recurring windows and InMaintenance
+	// their evaluation at the snapshot's time (see config.EvaluateMaintenance).
+	// Both stay empty with a store that cannot read windows.
+	Maintenance   []config.MaintenanceWindow
+	InMaintenance config.Maintenance
+	// KnownAlerting is whether the recipients were last told the monitor is
+	// down: what the daemon recorded, or the streak when it recorded nothing
+	// yet. A mute taken now starts from it.
+	KnownAlerting bool
 }
 
 // Muted reports whether the service's alerts are being held at now.
@@ -94,10 +103,12 @@ type Snapshot struct {
 	Services    []Service
 	SMTPServers []config.SMTPServer
 	Channels    []config.Channel
-	PublicKey   []byte
-	HasKey      bool
-	LastBeat    time.Time
-	HasBeat     bool
+	// ChannelTests is each channel's newest test request, by channel name.
+	ChannelTests []config.ChannelTest
+	PublicKey    []byte
+	HasKey       bool
+	LastBeat     time.Time
+	HasBeat      bool
 	// Uptime is the mean percentage over monitors with observed time.
 	Uptime    float64
 	HasUptime bool
@@ -136,6 +147,44 @@ type Store interface {
 }
 
 var _ Store = (*store.Store)(nil)
+
+// The interfaces below are optional capabilities of a Store, found with a
+// type assertion so features can use them without widening Store. Both the
+// local *store.Store and the remote client implement the write ones; only
+// *store.Store implements the readers, because remote reads arrive in the
+// snapshot.
+
+// MaintenanceStore edits a monitor's recurring maintenance windows. IDs are
+// assigned by the store and returned in the added window.
+type MaintenanceStore interface {
+	AddMaintenanceWindow(context.Context, config.MaintenanceWindow) (config.MaintenanceWindow, error)
+	UpdateMaintenanceWindow(context.Context, config.MaintenanceWindow) error
+	DeleteMaintenanceWindow(ctx context.Context, check string, id int64) error
+}
+
+// ChannelTester asks the daemon to send a test message through a channel. It
+// only records the request (pending); the daemon sends it, and the result
+// arrives in later snapshots as Snapshot.ChannelTests. The remote client
+// ignores the time and uses the server's clock. A channel with an active test
+// returns store.ErrExists.
+type ChannelTester interface {
+	EnqueueChannelTest(ctx context.Context, channel string, at time.Time) (config.ChannelTest, error)
+}
+
+// MaintenanceReader lets Load fill Service.Maintenance.
+type MaintenanceReader interface {
+	AllMaintenanceWindows(context.Context) ([]config.MaintenanceWindow, error)
+}
+
+// AlertStateReader lets Load fill Service.KnownAlerting.
+type AlertStateReader interface {
+	AlertStates(context.Context) (map[string]bool, error)
+}
+
+// ChannelTestReader lets Load fill Snapshot.ChannelTests.
+type ChannelTestReader interface {
+	LatestChannelTests(context.Context) ([]config.ChannelTest, error)
+}
 
 // SnapshotLoader is an optional capability of a Store: it returns a whole
 // snapshot in one call. The TUI uses it instead of many per-resource reads,
@@ -178,6 +227,23 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	var windows []config.MaintenanceWindow
+	if r, ok := s.(MaintenanceReader); ok {
+		if windows, err = r.AllMaintenanceWindows(ctx); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	var states map[string]bool
+	if r, ok := s.(AlertStateReader); ok {
+		if states, err = r.AlertStates(ctx); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	if r, ok := s.(ChannelTestReader); ok {
+		if snap.ChannelTests, err = r.LatestChannelTests(ctx); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	var observedMonitors int
 	checks, err := s.Checks(ctx)
 	if err != nil {
@@ -195,6 +261,12 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 				svc.Mute, svc.HasMute = mute, true
 			}
 		}
+		for _, w := range windows {
+			if w.Check == c.Name {
+				svc.Maintenance = append(svc.Maintenance, w)
+			}
+		}
+		svc.InMaintenance = config.EvaluateMaintenance(svc.Maintenance, now)
 		if svc.Recent, err = s.Recent(ctx, c.Name, recentLimit); err != nil {
 			return Snapshot{}, err
 		}
@@ -202,6 +274,10 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 			svc.Latest, svc.HasResult = svc.Recent[0], true
 		}
 		svc.Streak = check.Replay(svc.Recent, c.FailuresToAlert(), c.SuccessesToRecover())
+		svc.KnownAlerting = svc.Streak.Alerting && c.Channel != ""
+		if known, ok := states[c.Name]; ok {
+			svc.KnownAlerting = known
+		}
 		if svc.Outages, err = s.Outages(ctx, c.Name, outageLimit); err != nil {
 			return Snapshot{}, err
 		}

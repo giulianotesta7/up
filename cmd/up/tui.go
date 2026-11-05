@@ -21,15 +21,19 @@ Create, edit and delete monitors and show stored results, refreshing every 2s.
 Creates the SQLite database on first use; no daemon startup required.
 Keep 'up serve' running to discover monitors and record results while closed.
 New monitors require a name and HTTP/HTTPS URL. Defaults: interval 30s,
-timeout 5s, expected status 200. An edit cannot rename a monitor;
+timeout 5s, expected status 200. The form's first field, Type, chooses HTTP or
+TCP with ←/→; a TCP monitor takes a host and port and only checks that the
+connection opens: no TLS validation, no application health, no certificate
+tracking. An edit cannot rename a monitor;
 a confirmed delete removes history and cannot be undone.
 Forms and confirmations open as popups when they fit; small terminals use full screens.
 Manage SMTP servers and channels for email alerts with s and c; choose a monitor's channel in its form.
 SMTP passwords are encrypted with the key that 'up serve' keeps in <db>.key; run it once before entering a password, and back up that file with the database.
+Channels are email or webhook (a generic JSON POST, not a native Slack or Discord format); webhook URLs and auth values use the same key and are never shown again.
 
 Keys: ↑/↓ or k/j select · enter details (small terminals) · n new monitor · e edit · d delete · s SMTP servers · c channels · a toggle animation · ? all keys · esc back · q/ctrl+c quit
 Terminals of at least 110x30 show the selected monitor's detail beside the list, with an activity feed below; enter is not needed there.
-Form: tab/shift+tab focus · enter save · esc cancel · ctrl+c quit
+Form: tab/shift+tab focus · ←/→ choose (Type, Channel, thresholds) · enter save · esc cancel · ctrl+c quit
 Delete: y delete · n cancel · esc cancel · ctrl+c quit
 
 Use --remote or UP_REMOTE=true to connect to the remote saved by 'up login'.

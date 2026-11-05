@@ -23,6 +23,7 @@ import (
 	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/connection"
 	"github.com/giulianotesta7/up/internal/remote"
+	"github.com/giulianotesta7/up/internal/secret"
 	"github.com/giulianotesta7/up/internal/store"
 	"github.com/giulianotesta7/up/internal/tui"
 )
@@ -173,13 +174,29 @@ func (c *Client) LoadSnapshot(ctx context.Context, now time.Time) (tui.Snapshot,
 		}
 		return t.Add(skew)
 	}
+	// now is read before the request, so the skew can be a few milliseconds
+	// negative; a boundary that sat on a whole minute (a window end, the end
+	// of a mute, a certificate expiry) would then show as the previous minute.
+	// Such a boundary stays on its minute.
+	boundary := func(t time.Time) time.Time {
+		shifted := shift(t)
+		if !t.IsZero() && t.Equal(t.Truncate(time.Minute)) {
+			return shifted.Round(time.Minute)
+		}
+		return shifted
+	}
 	s.LastBeat = shift(s.LastBeat)
+	for i := range s.ChannelTests {
+		t := &s.ChannelTests[i]
+		t.Requested, t.Started, t.Finished = shift(t.Requested), shift(t.Started), shift(t.Finished)
+	}
 	for i := range s.Services {
 		v := &s.Services[i]
+		v.InMaintenance.End = boundary(v.InMaintenance.End)
 		v.Latest.At = shift(v.Latest.At)
 		v.DownSince = shift(v.DownSince)
-		v.Mute.Until = shift(v.Mute.Until)
-		v.Cert.NotAfter = shift(v.Cert.NotAfter)
+		v.Mute.Until = boundary(v.Mute.Until)
+		v.Cert.NotAfter = boundary(v.Cert.NotAfter)
 		v.Cert.Observed = shift(v.Cert.Observed)
 		for j := range v.Recent {
 			v.Recent[j].At = shift(v.Recent[j].At)
@@ -205,9 +222,44 @@ func (c *Client) Certs(context.Context) ([]config.Cert, error)             { ret
 func (c *Client) SMTPServers(context.Context) ([]config.SMTPServer, error) { return nil, errReads }
 func (c *Client) Channels(context.Context) ([]config.Channel, error)       { return nil, errReads }
 func (c *Client) PublicKey(context.Context) ([]byte, bool, error)          { return nil, false, errReads }
-func checkDTO(v config.Check) remote.CheckDTO {
-	return remote.CheckDTO{Name: v.Name, URL: v.URL, IntervalMS: v.Interval.Milliseconds(), TimeoutMS: v.Timeout.Milliseconds(), ExpectedStatus: v.ExpectedStatus, Channel: v.Channel, AlertAfter: v.AlertAfter, RecoverAfter: v.RecoverAfter, TLSOff: v.TLSOff}
+
+// checkWrite is the body of a check create or update. Fields added after the
+// first release are omitted when empty, so a plain check keeps its old wire
+// form.
+type checkWrite struct {
+	Name           string          `json:"name"`
+	URL            string          `json:"url"`
+	IntervalMS     int64           `json:"interval_ms"`
+	TimeoutMS      int64           `json:"timeout_ms"`
+	ExpectedStatus int             `json:"expected_status"`
+	Channel        string          `json:"channel"`
+	AlertAfter     int             `json:"alert_after"`
+	RecoverAfter   int             `json:"recover_after"`
+	TLSOff         bool            `json:"tls_off"`
+	Kind           string          `json:"kind,omitempty"`
+	Method         string          `json:"method,omitempty"`
+	Headers        []headerWrite   `json:"headers,omitempty"`
+	Body           *protectedWrite `json:"body,omitempty"`
+	ExpectText     string          `json:"expect_text,omitempty"`
+	Host           string          `json:"host,omitempty"`
+	Port           int             `json:"port,omitempty"`
 }
+
+type headerWrite struct {
+	Name  string          `json:"name"`
+	Value *protectedWrite `json:"value,omitempty"`
+}
+
+func checkDTO(v config.Check) checkWrite {
+	d := checkWrite{Name: v.Name, URL: v.URL, IntervalMS: v.Interval.Milliseconds(), TimeoutMS: v.Timeout.Milliseconds(), ExpectedStatus: v.ExpectedStatus, Channel: v.Channel,
+		AlertAfter: v.AlertAfter, RecoverAfter: v.RecoverAfter, TLSOff: v.TLSOff, Kind: v.Kind, Method: v.Method,
+		Body: protectedFor(v.BodyEdit, v.Body), ExpectText: v.ExpectText, Host: v.Host, Port: v.Port}
+	for _, h := range v.Headers {
+		d.Headers = append(d.Headers, headerWrite{Name: h.Name, Value: protectedFor(h.Edit, h.Value)})
+	}
+	return d
+}
+
 func item(resource, name string) string { return "/api/v1/" + resource + "/" + url.PathEscape(name) }
 
 // addressable refuses names the server's router would normalize away, so no
@@ -295,8 +347,38 @@ func (c *Client) DeleteSMTPServer(ctx context.Context, n string) error {
 	}
 	return c.write(ctx, "DELETE", item("smtp-servers", n), nil)
 }
-func channelDTO(v config.Channel) remote.ChannelDTO {
-	return remote.ChannelDTO{Name: v.Name, Kind: v.Kind, SMTPServer: v.SMTPServer, Recipients: v.Recipients}
+
+// protectedWrite is the write form of a protected value; nil keeps it.
+type protectedWrite struct {
+	Action string      `json:"action"`
+	Sealed *sealedWire `json:"sealed,omitempty"`
+}
+
+func protectedFor(edit config.Edit, v secret.Sealed) *protectedWrite {
+	switch edit {
+	case config.EditReplace:
+		return &protectedWrite{Action: "replace", Sealed: &sealedWire{v.Key, v.Data}}
+	case config.EditClear:
+		return &protectedWrite{Action: "clear"}
+	}
+	return nil
+}
+
+// channelWrite is the body of a channel create or update.
+type channelWrite struct {
+	Name            string          `json:"name"`
+	Kind            string          `json:"kind"`
+	SMTPServer      string          `json:"smtp_server"`
+	Recipients      []string        `json:"recipients"`
+	WebhookOrigin   string          `json:"webhook_origin,omitempty"`
+	WebhookURL      *protectedWrite `json:"webhook_url,omitempty"`
+	WebhookAuthName string          `json:"webhook_auth_name,omitempty"`
+	WebhookAuth     *protectedWrite `json:"webhook_auth,omitempty"`
+}
+
+func channelDTO(v config.Channel) channelWrite {
+	return channelWrite{Name: v.Name, Kind: v.Kind, SMTPServer: v.SMTPServer, Recipients: v.Recipients, WebhookOrigin: v.WebhookOrigin,
+		WebhookURL: protectedFor(v.WebhookURLEdit, v.WebhookURL), WebhookAuthName: v.WebhookAuthName, WebhookAuth: protectedFor(v.WebhookAuthEdit, v.WebhookAuth)}
 }
 func (c *Client) AddChannel(ctx context.Context, v config.Channel) error {
 	if err := addressable(v.Name); err != nil {
@@ -315,6 +397,76 @@ func (c *Client) DeleteChannel(ctx context.Context, n string) error {
 		return err
 	}
 	return c.write(ctx, "DELETE", item("channels", n), nil)
+}
+
+var _ tui.MaintenanceStore = (*Client)(nil)
+var _ tui.ChannelTester = (*Client)(nil)
+
+// AddMaintenanceWindow creates a window and returns it with its ID.
+func (c *Client) AddMaintenanceWindow(ctx context.Context, w config.MaintenanceWindow) (config.MaintenanceWindow, error) {
+	if err := addressable(w.Check); err != nil {
+		return config.MaintenanceWindow{}, err
+	}
+	status, b, err := c.request(ctx, "POST", item("checks", w.Check)+"/maintenance", maintenanceBody(w))
+	if err != nil {
+		return config.MaintenanceWindow{}, err
+	}
+	if status < 200 || status >= 300 {
+		return config.MaintenanceWindow{}, c.responseError(status, b)
+	}
+	var d remote.MaintenanceDTO
+	if json.Unmarshal(b, &d) != nil {
+		return config.MaintenanceWindow{}, errors.New("client: invalid response")
+	}
+	win := d.Window(w.Check)
+	win.Zone = clean(win.Zone)
+	return win, nil
+}
+
+// UpdateMaintenanceWindow replaces the window with w.ID.
+func (c *Client) UpdateMaintenanceWindow(ctx context.Context, w config.MaintenanceWindow) error {
+	if err := addressable(w.Check); err != nil {
+		return err
+	}
+	return c.write(ctx, "PUT", fmt.Sprintf("%s/maintenance/%d", item("checks", w.Check), w.ID), maintenanceBody(w))
+}
+
+// DeleteMaintenanceWindow removes window id of a check.
+func (c *Client) DeleteMaintenanceWindow(ctx context.Context, check string, id int64) error {
+	if err := addressable(check); err != nil {
+		return err
+	}
+	return c.write(ctx, "DELETE", fmt.Sprintf("%s/maintenance/%d", item("checks", check), id), nil)
+}
+
+func maintenanceBody(w config.MaintenanceWindow) remote.MaintenanceWriteDTO {
+	d := remote.MaintenanceWriteDTO{Weekdays: []int{}, StartMinute: w.StartMinute, DurationMS: w.Duration.Milliseconds(), Zone: w.Zone}
+	for _, day := range w.Weekdays {
+		d.Weekdays = append(d.Weekdays, int(day))
+	}
+	return d
+}
+
+// EnqueueChannelTest asks the server to test a channel; the time is ignored
+// (the server stamps the request). The result arrives in later snapshots.
+func (c *Client) EnqueueChannelTest(ctx context.Context, channel string, _ time.Time) (config.ChannelTest, error) {
+	if err := addressable(channel); err != nil {
+		return config.ChannelTest{}, err
+	}
+	status, b, err := c.request(ctx, "POST", item("channels", channel)+"/test", nil)
+	if err != nil {
+		return config.ChannelTest{}, err
+	}
+	if status < 200 || status >= 300 {
+		return config.ChannelTest{}, c.responseError(status, b)
+	}
+	var d remote.ChannelTestDTO
+	if json.Unmarshal(b, &d) != nil {
+		return config.ChannelTest{}, errors.New("client: invalid response")
+	}
+	t := d.ChannelTest()
+	t.Channel, t.Error = clean(t.Channel), clean(t.Error)
+	return t, nil
 }
 
 // clean removes terminal escape sequences and control characters from text a

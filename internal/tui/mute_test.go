@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/giulianotesta7/up/internal/check"
+	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/store"
 )
 
@@ -22,7 +23,16 @@ func mutedModel(t *testing.T, statuses ...check.Status) (*store.Store, Model) {
 	t.Helper()
 	s, m := formStore(t)
 	ctx := context.Background()
-	if err := s.AddCheck(ctx, testChecks[0]); err != nil {
+	// A down only counts as told to recipients when there is a channel to send it to.
+	if err := s.AddSMTPServer(ctx, config.SMTPServer{Name: "smtp", Host: "example.com", Port: 25, TLS: config.TLSNone, Sender: "a@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddChannel(ctx, config.Channel{Name: "mail", Kind: config.KindEmail, SMTPServer: "smtp", Recipients: []string{"a@example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	c := testChecks[0]
+	c.Channel = "mail"
+	if err := s.AddCheck(ctx, c); err != nil {
 		t.Fatal(err)
 	}
 	for i, st := range statuses {
@@ -41,7 +51,7 @@ func mutedModel(t *testing.T, statuses ...check.Status) (*store.Store, Model) {
 func TestMutePickerMutesAndUnmutes(t *testing.T) {
 	s, m := mutedModel(t, check.StatusUp, check.StatusDown)
 	m, _ = press(t, m, keyM)
-	requireText(t, m, "Mute alerts · api", "Checks keep running. Emails are held until the mute ends.",
+	requireText(t, m, "Mute alerts · api", "Checks keep running. Alerts are held until the mute ends.",
 		"30 minutes", "1 hour", "4 hours", "24 hours", "Custom…",
 		"If api is still down when the mute ends, you get the alert then.", "↑/↓ choose · enter mute · esc cancel")
 	m, _ = press(t, m, keyEsc)
@@ -60,7 +70,7 @@ func TestMutePickerMutesAndUnmutes(t *testing.T) {
 		t.Fatalf("list lacks the mute:\n%s", list)
 	}
 	m, _ = press(t, m, keyEnter)
-	requireText(t, m, "Muted       until 07:45 (4h left) · nothing pending")
+	requireText(t, m, "Muted        until 07:45 (4h left) · nothing pending")
 
 	m, cmd = press(t, m, keyU)
 	m = finishCommand(t, m, cmd)
@@ -112,7 +122,7 @@ func TestDetailShowsHeldEmail(t *testing.T) {
 	}
 	next, _ := m.Update(m.Init()())
 	m, _ = press(t, next.(Model), keyEnter)
-	requireText(t, m, "Muted       until 04:13 (28m left) · 1 email pending (down since Oct 25 03:40:30)")
+	requireText(t, m, "Muted        until 04:13 (28m left) · 1 alert pending (down since Oct 25 03:40:30)")
 }
 
 func TestMutedColumnIsAlwaysShown(t *testing.T) {

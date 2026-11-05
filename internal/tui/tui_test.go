@@ -91,7 +91,7 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("got %d services, want 3 in config order", len(snap.Services))
 	}
 	api, pay, fresh := snap.Services[0], snap.Services[1], snap.Services[2]
-	if api.Check != testChecks[0] || !api.HasResult || api.Latest != up("api", "03:44:30") || api.Label() != "UP" {
+	if !api.Check.SameDefinition(testChecks[0]) || !api.HasResult || api.Latest != up("api", "03:44:30") || api.Label() != "UP" {
 		t.Errorf("api = %+v, want the latest up result", api)
 	}
 	if pay.Label() != "DOWN" || !pay.DownSince.Equal(at("03:44:00")) || pay.Latest.Error != reason {
@@ -239,8 +239,8 @@ func TestDetailView(t *testing.T) {
 
 	for _, want := range []string{
 		"payments", "https://pay.example.com",
-		"Interval    1m0s", "Timeout     10s", "Expected    204",
-		"Status      DOWN", "Last error  " + reason, "Down since  Oct 25 03:44:00 (1m ago)",
+		"Interval     1m0s", "Timeout      10s", "Expected     204",
+		"Status       DOWN", "Last error   " + reason, "Down since   Oct 25 03:44:00 (1m ago)",
 		"84ms", "older", "AVG      P95      MAX      FAILED", "84ms     84ms     84ms     3 of 5",
 		"Oct 25 03:44:00 → ongoing",
 		"Oct 25 03:12:00 → Oct 25 03:40:00 (28m)",
@@ -256,13 +256,13 @@ func TestDetailViewOfUpAndPendingServices(t *testing.T) {
 	snap := seededSnapshot(t, now.Add(-5*time.Second))
 
 	apiView := view(func() Model { m, _ := press(t, modelWith(snap), keyEnter); return m }())
-	for _, want := range []string{"Status      UP", "Last error  —", "Down since  —", "No outages recorded."} {
+	for _, want := range []string{"Status       UP", "Last error   —", "Down since   —", "No outages recorded."} {
 		if !strings.Contains(apiView, want) {
 			t.Errorf("api detail missing %q:\n%s", want, apiView)
 		}
 	}
 	pendingView := view(func() Model { m, _ := press(t, modelWith(snap), keyDown, keyDown, keyEnter); return m }())
-	if !strings.Contains(pendingView, "Status      PENDING") || !strings.Contains(pendingView, "No checks yet.") {
+	if !strings.Contains(pendingView, "Status       PENDING") || !strings.Contains(pendingView, "No checks yet.") {
 		t.Errorf("pending detail:\n%s", pendingView)
 	}
 }

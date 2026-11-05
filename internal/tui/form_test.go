@@ -201,7 +201,7 @@ func TestFormSavePersistsAndSelects(t *testing.T) {
 		t.Fatalf("persisted %+v", c)
 	}
 	m, _ = press(t, m, keyEnter)
-	if !strings.Contains(view(m), "Status      PENDING") || !strings.Contains(view(m), "https://example.com") {
+	if !strings.Contains(view(m), "Status       PENDING") || !strings.Contains(view(m), "https://example.com") {
 		t.Fatalf("selection/detail:\n%s", view(m))
 	}
 }
@@ -267,8 +267,8 @@ func TestSaveFailureRetainsFormAndCanRetry(t *testing.T) {
 	if !strings.Contains(view(m), "already exists") {
 		t.Fatal("missing duplicate error")
 	}
-	// Wrap focus back to name and correct the duplicate in the retained form.
-	m, _ = press(t, m, keyTab, keyTab, keyTab, keyTab, keyTab)
+	// Wrap focus back to name (through Type and Advanced) and correct the duplicate in the retained form.
+	m, _ = press(t, m, keyTab, keyTab, keyTab, keyTab, keyTab, keyTab, keyTab)
 	m = replaceField(t, m, "api", "unique")
 	m, cmd = press(t, m, keyEnter)
 	m = finishCommand(t, m, cmd)

@@ -40,7 +40,11 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		if anyCert {
 			certWidth = 9
 		}
+		heldWidth, heldHeader := heldColumn(snap, now)
 		showTrend := width <= 0 || width >= max(78, nameWidth+55+statusWidth+certWidth)
+		// A tcp tag follows the name when the list has room for it.
+		tcpTag := tcpTagWidth(snap, width, nameWidth, statusWidth, certWidth)
+		nameWidth += tcpTag
 		row := func(marker, dot, name, status, latency, trend, cert, last, muted, reason string) string {
 			padding := strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name)))
 			middle := ""
@@ -51,13 +55,13 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 				middle += "  " + cert + strings.Repeat(" ", max(0, 7-ansi.StringWidth(cert)))
 			}
 			prefix := marker + " " + dot + " " + name + padding + "  " + status + fmt.Sprintf("  %8s", latency) + middle
-			last = fmt.Sprintf("%-10s  %s", last, muted+strings.Repeat(" ", max(0, 13-ansi.StringWidth(muted))))
+			last = fmt.Sprintf("%-10s  %s", last, muted+strings.Repeat(" ", max(0, heldWidth-ansi.StringWidth(muted))))
 			if showTrend {
 				return prefix + "  " + strings.TrimRight(fmt.Sprintf("%-10s  %s", last, reason), " ")
 			}
 			return strings.TrimRight(prefix+fmt.Sprintf("  %-10s  %s", last, reason), " ")
 		}
-		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", fmt.Sprintf("%-*s", statusWidth, "STATUS"), "LATENCY", "TREND (16)", "CERT", "LAST CHECK", "MUTED", "")) + "\n")
+		b.WriteString(headerStyle.Render(row(" ", " ", "MONITOR", fmt.Sprintf("%-*s", statusWidth, "STATUS"), "LATENCY", "TREND (16)", "CERT", "LAST CHECK", heldHeader, "")) + "\n")
 		for i, s := range snap.Services {
 			marker := " "
 			if i == selected {
@@ -72,18 +76,16 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			if i == selected {
 				name = selectedNameStyle.Render(name)
 			}
+			name = tagTCP(name, s.Check, nameWidth, tcpTag)
 			cert := ""
-			if anyCert {
+			if anyCert && s.Check.Kind != kindTCP {
 				cert = helpStyle.Render("—")
 			}
 			if s.HasCert {
 				remaining := s.Cert.NotAfter.Sub(now)
 				cert = certStyle(remaining).Render(certLeft(remaining))
 			}
-			muted := ""
-			if s.Muted(now) {
-				muted = warnStyle.Render("⏸ " + timeLeft(s.Mute.Until.Sub(now)) + " left")
-			}
+			muted := heldCell(s, now)
 			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, statusWidth), latency, sparkline(s.Recent, 16), cert, last, muted, reason) + "\n")
 		}
 	}
@@ -104,7 +106,7 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 
 func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr error, width int, opts detailOptions) string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + s.Check.URL + "\n")
+	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + s.Check.Target() + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
 
 	// Sections are separated by one blank line; a header sits right above its rows.
@@ -112,7 +114,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		b.WriteString("\n" + headerStyle.Render(title) + "\n")
 	}
 	field := func(label, value string) {
-		fmt.Fprintf(&b, "  %-10s  %s\n", label, value)
+		fmt.Fprintf(&b, "  %-11s  %s\n", label, value)
 	}
 
 	b.WriteString("\n" + headerStyle.Render("STATUS") + "\n")
@@ -125,11 +127,21 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		held := "nothing pending"
 		switch s.Pending() {
 		case "down":
-			held = "1 email pending (down since " + formatTime(s.DownSince, now) + ")"
+			held = "1 alert pending (down since " + formatTime(s.DownSince, now) + ")"
 		case "recovery":
-			held = "1 email pending (recovery)"
+			held = "1 alert pending (recovery)"
 		}
 		field("Muted", warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))+" · "+held)
+	}
+	if s.InMaintenance.Active {
+		held := "nothing pending"
+		switch s.heldPending() {
+		case "down":
+			held = "1 alert pending (down since " + formatTime(s.DownSince, now) + ")"
+		case "recovery":
+			held = "1 alert pending (recovery)"
+		}
+		field("Maintenance", warnStyle.Render(fmt.Sprintf("until %s (%s left)", clockWithDay(s.InMaintenance.End, now), timeLeft(s.InMaintenance.End.Sub(now))))+" · "+held)
 	}
 	field("Last error", orDash(s.Latest.Error))
 	if streak := streakLine(s, now); streak != "" {
@@ -145,22 +157,26 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		section("CONFIG")
 		field("Interval", s.Check.Interval.String())
 		field("Timeout", s.Check.Timeout.String())
-		field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
+		if s.Check.Kind == kindTCP {
+			field("Type", "TCP connect")
+		} else {
+			field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
+			renderRequestFields(field, s.Check)
+		}
 		channel := s.Check.Channel
 		if channel == "" {
 			channel = "none"
 		}
 		for _, c := range snap.Channels {
 			if c.Name == s.Check.Channel && s.Check.Channel != "" {
-				noun := "recipients"
-				if len(c.Recipients) == 1 {
-					noun = "recipient"
-				}
-				channel += " " + helpStyle.Render(fmt.Sprintf("(%s via %s → %d %s)", c.Kind, c.SMTPServer, len(c.Recipients), noun))
+				channel += " " + helpStyle.Render(channelSummary(c))
 				break
 			}
 		}
 		field("Channel", channel)
+		if n := len(s.Maintenance); n > 0 {
+			field("Maintenance", plural(n, "window")+helpStyle.Render(" (w to edit)"))
+		}
 		if !s.thresholdsDefault() {
 			field("Alerting", fmt.Sprintf("after %s · recovers after %s", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success")))
 		}
@@ -383,7 +399,7 @@ func renderKeys(remote ...bool) string {
 		row("enter", "details", "u", "unmute"),
 		row("n", "new monitor", "s", "SMTP servers"),
 		row("e", "edit", "c", "channels"),
-		row("d", "delete", "", ""),
+		row("d", "delete", "w", "maintenance"),
 		"",
 		headerStyle.Render("VIEW"),
 		"",

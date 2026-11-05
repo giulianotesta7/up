@@ -53,6 +53,15 @@ func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, t
 	for _, path := range []string{"/api/v1/smtp-servers", "/api/v1/smtp-servers/", "/api/v1/channels", "/api/v1/channels/"} {
 		routes.Handle(path, alerts)
 	}
+	// Wildcard routes are more specific than the prefixes above and win.
+	if ms, ok := s.(remote.MaintenanceStore); ok {
+		maintenance := remote.MaintenanceRoutes(ms)
+		routes.Handle("/api/v1/checks/{name}/maintenance", maintenance)
+		routes.Handle("/api/v1/checks/{name}/maintenance/{id}", maintenance)
+	}
+	if ts, ok := s.(remote.ChannelTestStore); ok {
+		routes.Handle("/api/v1/channels/{name}/test", remote.ChannelTestRoutes(ts))
+	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		verifier, err := remote.LoadVerifier(tokenPath)
 		if err != nil {

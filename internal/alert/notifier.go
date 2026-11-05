@@ -2,7 +2,6 @@ package alert
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -40,6 +39,10 @@ type event struct {
 	result    check.Result
 	cert      *config.Cert
 	remaining time.Duration
+	// test marks a channel test notification. Transports label it as a test;
+	// check and result are zero and no monitor state is involved.
+	//lint:ignore U1000 set by the channel-test entry point (#59) and read by every transport
+	test bool
 }
 
 // Notifier sends alerts from a bounded queue, one at a time and in order.
@@ -92,71 +95,46 @@ func (n *Notifier) Run(ctx context.Context) {
 	}
 }
 
+// Deliver sends the alert for result r of check c through c.Channel and
+// returns when the transport has answered, with the delivery error if any.
+// It is the synchronous seam under the queue: Run calls the same code, and
+// tests and the channel-test feature call it directly. Failures are also
+// logged, as the queue always did.
+func (n *Notifier) Deliver(ctx context.Context, c config.Check, r check.Result) error {
+	return n.deliver(ctx, event{check: c, result: r})
+}
+
+// DeliverCert is Deliver for a certificate expiry warning.
+func (n *Notifier) DeliverCert(ctx context.Context, c config.Check, cert config.Cert, remaining time.Duration) error {
+	return n.deliver(ctx, event{check: c, cert: &cert, remaining: remaining})
+}
+
+// send delivers a queued event; the outcome is only logged.
 func (n *Notifier) send(ctx context.Context, e event) {
-	c, r := e.check, e.result
+	_ = n.deliver(ctx, e)
+}
+
+// deliver looks up the event's channel and hands it to the transport for the
+// channel's kind. Every transport logs its own failures and returns them.
+func (n *Notifier) deliver(ctx context.Context, e event) error {
+	c := e.check
 	ch, ok, err := n.opts.Store.Channel(ctx, c.Channel)
 	if err != nil {
 		n.opts.Logger.Error("reading alert channel failed", "check", c.Name, "channel", c.Channel, "error", err)
-		return
+		return fmt.Errorf("reading alert channel %q: %w", c.Channel, err)
 	}
 	if !ok {
 		n.opts.Logger.Warn("alert channel not found", "check", c.Name, "channel", c.Channel)
-		return
+		return fmt.Errorf("alert channel %q not found", c.Channel)
 	}
-	if ch.Kind != config.KindEmail {
-		n.opts.Logger.Error("unsupported alert channel kind", "channel", c.Channel, "kind", ch.Kind)
-		return
+	switch ch.Kind {
+	case config.KindEmail:
+		return n.deliverEmail(ctx, ch, e)
+	case config.KindWebhook:
+		return n.deliverWebhook(ctx, ch, e)
 	}
-	server, ok, err := n.opts.Store.SMTPServer(ctx, ch.SMTPServer)
-	if err != nil {
-		n.opts.Logger.Error("reading SMTP server failed", "server", ch.SMTPServer, "error", err)
-		return
-	}
-	if !ok {
-		n.opts.Logger.Error("SMTP server not found", "server", ch.SMTPServer)
-		return
-	}
-	password := ""
-	if !server.Password.Empty() {
-		if n.opts.Key == nil {
-			n.opts.Logger.Error("SMTP server password cannot be opened", "server", ch.SMTPServer)
-			return
-		}
-		password, err = n.opts.Key.Open(server.Password)
-		if errors.Is(err, secret.ErrWrongKey) {
-			n.opts.Logger.Error("SMTP server password was sealed to another key; enter it again in the TUI", "server", ch.SMTPServer)
-			return
-		}
-		if err != nil {
-			n.opts.Logger.Error("opening SMTP server password failed", "server", ch.SMTPServer, "error", err)
-			return
-		}
-	}
-	at := r.At.In(n.opts.Location).Format("Jan 02 15:04:05 (MST)")
-	msg := Message{From: server.Sender, To: ch.Recipients, Date: r.At}
-	if e.cert != nil {
-		msg.Date = e.cert.Observed
-		msg.Subject, msg.Body = certMessage(c, *e.cert, e.remaining)
-	} else if r.Status == check.StatusDown {
-		if outages, err := n.opts.Store.Outages(ctx, c.Name, 1); err == nil && len(outages) > 0 && outages[0].Ongoing {
-			at = outages[0].Start.In(n.opts.Location).Format("Jan 02 15:04:05 (MST)")
-		}
-		msg.Subject = fmt.Sprintf("[up] %s is DOWN", c.Name)
-		msg.Body = fmt.Sprintf("%s is DOWN since %s.\nURL:    %s\nError:  %s\nHost:   %s\n", c.Name, at, c.URL, r.Error, n.opts.Hostname)
-	} else {
-		msg.Subject = fmt.Sprintf("[up] %s is UP again", c.Name)
-		first := fmt.Sprintf("%s is UP again at %s", c.Name, at)
-		outages, err := n.opts.Store.Outages(ctx, c.Name, 1)
-		if err == nil && len(outages) > 0 && !outages[0].Ongoing {
-			first += fmt.Sprintf(", after %s down", outages[0].End.Sub(outages[0].Start).Round(time.Second))
-		}
-		msg.Body = fmt.Sprintf("%s.\nURL:     %s\nLatency: %s\nHost:    %s\n", first, c.URL, r.Latency.Round(time.Millisecond), n.opts.Hostname)
-	}
-	if err = n.opts.Sender.Send(ctx, server, password, msg); err != nil {
-		n.opts.Logger.Error("sending alert failed", "check", c.Name, "channel", c.Channel, "error", err)
-		return
-	}
-	n.opts.Logger.Info("alert sent", "check", c.Name, "channel", c.Channel, "status", r.Status)
+	n.opts.Logger.Error("unsupported alert channel kind", "channel", c.Channel, "kind", ch.Kind)
+	return fmt.Errorf("unsupported alert channel kind %q", ch.Kind)
 }
 
 func certUnit(n int, unit string) string {
@@ -185,6 +163,6 @@ func certMessage(c config.Check, cert config.Cert, remaining time.Duration) (str
 		line = fmt.Sprintf("  Next warning %d days before expiry\n", next)
 	}
 	subject := fmt.Sprintf("[up] %s: TLS certificate expires in %s", c.Name, left)
-	body := fmt.Sprintf("The certificate served by %s expires in %s\n\n  Monitor   %s\n  Issuer    %s\n%s\nIf the certificate is renewed, up will detect it and stop warning.\n", c.URL, left, c.Name, cert.Issuer, line)
+	body := fmt.Sprintf("The certificate served by %s expires in %s\n\n  Monitor   %s\n  Issuer    %s\n%s\nIf the certificate is renewed, up will detect it and stop warning.\n", c.Target(), left, c.Name, cert.Issuer, line)
 	return subject, body
 }

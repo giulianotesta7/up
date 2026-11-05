@@ -102,6 +102,8 @@ type Options struct {
 	// PruneInterval defaults to DefaultPruneInterval when nonpositive.
 	PruneInterval time.Duration
 	Logger        *slog.Logger
+	// Now is the clock for mutes and maintenance windows; nil is time.Now.
+	Now func() time.Time
 }
 
 // Run reads the SQLite definitions, then starts each check
@@ -112,6 +114,10 @@ type Options struct {
 func Run(ctx context.Context, opts Options) error {
 	checks, err := opts.Store.Checks(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			// Shutdown before the first read is a clean stop.
+			return nil
+		}
 		return err
 	}
 	if opts.DiscoveryInterval <= 0 {
@@ -154,7 +160,7 @@ func Run(ctx context.Context, opts Options) error {
 		for name, active := range running {
 			select {
 			case <-active.done:
-				if c, exists := definitions[name]; exists && c == active.definition {
+				if c, exists := definitions[name]; exists && c.SameDefinition(active.definition) {
 					previous[name] = active.last
 				}
 				delete(running, name)
@@ -164,12 +170,12 @@ func Run(ctx context.Context, opts Options) error {
 		// Cancel all obsolete loops before joining any one of them.
 		// Joining means a Runner that ignores cancellation can stall discovery.
 		for name, active := range running {
-			if c, exists := definitions[name]; !exists || c != active.definition {
+			if c, exists := definitions[name]; !exists || !c.SameDefinition(active.definition) {
 				active.cancel()
 			}
 		}
 		for name, active := range running {
-			if c, exists := definitions[name]; !exists || c != active.definition {
+			if c, exists := definitions[name]; !exists || !c.SameDefinition(active.definition) {
 				<-active.done
 				if exists {
 					previous[name] = active.last
@@ -276,10 +282,53 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 	}
 	if opts.Alerter != nil {
 		streak = initialStreak(ctx, opts, c)
-		notified = streak.Alerting
-		if m, found := readMute(); found {
-			notified = m.WasAlerting
+		m, found := readMute()
+		notified = loadNotified(ctx, opts, c, streak, m, found)
+	}
+	// suppressed is a manual mute or an active maintenance window.
+	suppressed := func() suppression {
+		m, found := readMute()
+		now := opts.now()
+		active := found && m.Until.After(now)
+		return suppression{mute: m, found: found, active: active || config.EvaluateMaintenance(windows(ctx, opts, c.Name), now).Active}
+	}
+	// settle sends what the recipients do not know once nothing holds alerts
+	// back, and forgets a mute that has ended with no window still running.
+	settle := func(res check.Result, s suppression) {
+		if c.Channel == "" {
+			// Nothing can be handed over, so recipients learn nothing. A
+			// recovery nobody could be told about owes no later alert.
+			if notified && !streak.Alerting {
+				notified = false
+				saveNotified(ctx, opts, c, notified)
+			}
+		} else if !s.active && streak.Alerting != notified {
+			notified = streak.Alerting
+			opts.Alerter.Notify(c, res)
+			saveNotified(ctx, opts, c, notified)
 		}
+		if s.found && !s.active {
+			clearCtx, clearCancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+			if err := muteStore.ClearMute(clearCtx, c.Name, s.mute.Until); err != nil {
+				opts.Logger.Error("clearing mute failed", "check", c.Name, "error", err)
+			}
+			clearCancel()
+		}
+	}
+	// Suppression can end between results (a window ends or is deleted), so
+	// it is rechecked every discovery interval against the last result.
+	var recheck <-chan time.Time
+	var latest check.Result
+	if opts.Alerter != nil {
+		// What is owed from before this loop started (a channel just attached
+		// to a monitor that is down) goes out now, not after the first check.
+		latest = lastResult(ctx, opts, c)
+		t := time.NewTicker(opts.DiscoveryInterval)
+		defer t.Stop()
+		recheck = t.C
+	}
+	if latest.CheckName != "" {
+		settle(latest, suppressed())
 	}
 	for {
 		res := opts.Runner.Run(ctx, c)
@@ -302,35 +351,28 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 		}
 		if opts.Alerter != nil {
 			streak.Observe(res.Status, c.AlertAfter, c.RecoverAfter)
-			m, found := readMute()
-			active := found && m.Until.After(time.Now())
+			sup := suppressed()
 			if res.Cert != nil {
-				observeCert(ctx, opts, c, res, active)
+				observeCert(ctx, opts, c, res, sup.active)
 			}
-			if c.Channel == "" {
-				notified = streak.Alerting
-			} else if !active {
-				if streak.Alerting != notified {
-					notified = streak.Alerting
-					opts.Alerter.Notify(c, res)
-				}
-			}
-			if found && !active {
-				clearCtx, clearCancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
-				if err := muteStore.ClearMute(clearCtx, c.Name, m.Until); err != nil {
-					opts.Logger.Error("clearing mute failed", "check", c.Name, "error", err)
-				}
-				clearCancel()
-			}
+			latest = res
+			settle(res, sup)
 		}
 		if res.Status != last {
 			logTransition(opts.Logger, c, res)
 			last = res.Status
 		}
-		select {
-		case <-ctx.Done():
-			return last
-		case <-ticker.C:
+		for waiting := true; waiting; {
+			select {
+			case <-ctx.Done():
+				return last
+			case <-ticker.C:
+				waiting = false
+			case <-recheck:
+				if latest.CheckName != "" {
+					settle(latest, suppressed())
+				}
+			}
 		}
 	}
 }
@@ -397,10 +439,26 @@ func initialStreak(ctx context.Context, opts Options, c config.Check) check.Stre
 	return check.Streak{}
 }
 
+// lastResult is the newest stored result, or the zero value when none is
+// known, so a loop can reconcile before its first check finishes.
+func lastResult(ctx context.Context, opts Options, c config.Check) check.Result {
+	reader, ok := opts.Store.(LatestReader)
+	if !ok {
+		return check.Result{}
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	res, found, err := reader.Latest(readCtx, c.Name)
+	if err != nil || !found {
+		return check.Result{}
+	}
+	return res
+}
+
 func logTransition(logger *slog.Logger, c config.Check, res check.Result) {
 	if res.Status == check.StatusUp {
-		logger.Info("check up", "check", c.Name, "url", c.URL, "latency", res.Latency)
+		logger.Info("check up", "check", c.Name, "url", c.Target(), "latency", res.Latency)
 		return
 	}
-	logger.Warn("check down", "check", c.Name, "url", c.URL, "error", res.Error)
+	logger.Warn("check down", "check", c.Name, "url", c.Target(), "error", res.Error)
 }

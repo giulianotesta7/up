@@ -26,17 +26,73 @@ type SnapshotDTO struct {
 	Uptime      float64         `json:"uptime"`
 	HasUptime   bool            `json:"has_uptime"`
 	Incidents   int             `json:"incidents"`
+	// ChannelTests is each channel's newest test request.
+	ChannelTests []ChannelTestDTO `json:"channel_tests"`
 }
+
+// CheckDTO is a check on the wire, in both directions.
+//
+// In a snapshot (and in write responses) protected values show only whether
+// they are set: BodySet and HeaderDTO.ValueSet. In a write, Body and
+// HeaderDTO.Value carry the edit (ProtectedDTO; absent keeps) and the *Set
+// fields are ignored. Kind is "http" or "tcp" (empty on write means http) and
+// Method is the HTTP method (empty on write means GET). Host has no brackets
+// for IPv6.
 type CheckDTO struct {
-	Name           string `json:"name"`
-	URL            string `json:"url"`
-	IntervalMS     int64  `json:"interval_ms"`
-	TimeoutMS      int64  `json:"timeout_ms"`
-	ExpectedStatus int    `json:"expected_status"`
-	Channel        string `json:"channel"`
-	AlertAfter     int    `json:"alert_after"`
-	RecoverAfter   int    `json:"recover_after"`
-	TLSOff         bool   `json:"tls_off"`
+	Name           string        `json:"name"`
+	URL            string        `json:"url"`
+	IntervalMS     int64         `json:"interval_ms"`
+	TimeoutMS      int64         `json:"timeout_ms"`
+	ExpectedStatus int           `json:"expected_status"`
+	Channel        string        `json:"channel"`
+	AlertAfter     int           `json:"alert_after"`
+	RecoverAfter   int           `json:"recover_after"`
+	TLSOff         bool          `json:"tls_off"`
+	Kind           string        `json:"kind"`
+	Method         string        `json:"method"`
+	Headers        []HeaderDTO   `json:"headers"`
+	Body           *ProtectedDTO `json:"body,omitempty"`
+	BodySet        bool          `json:"body_set"`
+	ExpectText     string        `json:"expect_text"`
+	Host           string        `json:"host"`
+	Port           int           `json:"port"`
+}
+
+// HeaderDTO is one request header: a plain name and a protected value.
+type HeaderDTO struct {
+	Name     string        `json:"name"`
+	ValueSet bool          `json:"value_set"`
+	Value    *ProtectedDTO `json:"value,omitempty"`
+}
+
+// MaintenanceDTO is a stored maintenance window. Weekdays are 0 (Sunday) to 6.
+type MaintenanceDTO struct {
+	ID          int64  `json:"id"`
+	Weekdays    []int  `json:"weekdays"`
+	StartMinute int    `json:"start_minute"`
+	DurationMS  int64  `json:"duration_ms"`
+	Zone        string `json:"zone"`
+}
+
+// MaintenanceWriteDTO is the body that creates or replaces a window; the
+// check and ID come from the path.
+type MaintenanceWriteDTO struct {
+	Weekdays    []int  `json:"weekdays"`
+	StartMinute int    `json:"start_minute"`
+	DurationMS  int64  `json:"duration_ms"`
+	Zone        string `json:"zone"`
+}
+
+// ChannelTestDTO is a channel test request. Status is pending, sending, ok or
+// error; Error is short and secret-free. Unset times are the zero time.
+type ChannelTestDTO struct {
+	ID        int64     `json:"id"`
+	Channel   string    `json:"channel"`
+	Status    string    `json:"status"`
+	Error     string    `json:"error"`
+	Requested time.Time `json:"requested"`
+	Started   time.Time `json:"started"`
+	Finished  time.Time `json:"finished"`
 }
 type ResultDTO struct {
 	At         time.Time    `json:"at"`
@@ -80,6 +136,13 @@ type ServiceDTO struct {
 	HasMute   bool        `json:"has_mute"`
 	Cert      CertDTO     `json:"cert"`
 	HasCert   bool        `json:"has_cert"`
+	// Maintenance are the monitor's windows; InMaintenance and
+	// MaintenanceEnd are their evaluation at ServerTime.
+	Maintenance    []MaintenanceDTO `json:"maintenance"`
+	InMaintenance  bool             `json:"in_maintenance"`
+	MaintenanceEnd time.Time        `json:"maintenance_end"`
+	// KnownAlerting is whether the recipients were last told it is down.
+	KnownAlerting bool `json:"known_alerting"`
 }
 type SMTPServerDTO struct {
 	Name          string         `json:"name"`
@@ -90,12 +153,70 @@ type SMTPServerDTO struct {
 	Sender        string         `json:"sender"`
 	PasswordState string         `json:"password_state"`
 }
+
+// ChannelDTO is a channel as the snapshot and write responses show it. A
+// webhook shows only its origin (scheme and host) and whether its URL and
+// auth value are set; the protected values never leave the server.
 type ChannelDTO struct {
-	Name       string   `json:"name"`
-	Kind       string   `json:"kind"`
-	SMTPServer string   `json:"smtp_server"`
-	Recipients []string `json:"recipients"`
+	Name            string   `json:"name"`
+	Kind            string   `json:"kind"`
+	SMTPServer      string   `json:"smtp_server"`
+	Recipients      []string `json:"recipients"`
+	WebhookOrigin   string   `json:"webhook_origin"`
+	WebhookURLSet   bool     `json:"webhook_url_set"`
+	WebhookAuthName string   `json:"webhook_auth_name"`
+	WebhookAuthSet  bool     `json:"webhook_auth_set"`
 }
+
+func channelDTO(c config.Channel) ChannelDTO {
+	return ChannelDTO{Name: c.Name, Kind: c.Kind, SMTPServer: c.SMTPServer, Recipients: c.Recipients, WebhookOrigin: c.WebhookOrigin,
+		WebhookURLSet: !c.WebhookURL.Empty(), WebhookAuthName: c.WebhookAuthName, WebhookAuthSet: !c.WebhookAuth.Empty()}
+}
+
+// checkDTO is the read form of a check: plain fields and "set" flags.
+func checkDTO(c config.Check) CheckDTO {
+	d := CheckDTO{Name: c.Name, URL: c.URL, IntervalMS: c.Interval.Milliseconds(), TimeoutMS: c.Timeout.Milliseconds(), ExpectedStatus: c.ExpectedStatus,
+		Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
+		Kind: c.Kind, Method: c.Method, BodySet: !c.Body.Empty(), ExpectText: c.ExpectText, Host: c.Host, Port: c.Port}
+	if d.Kind == "" {
+		d.Kind = config.CheckHTTP
+	}
+	if d.Kind == config.CheckHTTP && d.Method == "" {
+		d.Method = "GET"
+	}
+	for _, h := range c.Headers {
+		d.Headers = append(d.Headers, HeaderDTO{Name: h.Name, ValueSet: !h.Value.Empty()})
+	}
+	return d
+}
+
+func maintenanceDTO(w config.MaintenanceWindow) MaintenanceDTO {
+	d := MaintenanceDTO{ID: w.ID, StartMinute: w.StartMinute, DurationMS: w.Duration.Milliseconds(), Zone: w.Zone, Weekdays: []int{}}
+	for _, day := range w.Weekdays {
+		d.Weekdays = append(d.Weekdays, int(day))
+	}
+	return d
+}
+
+func (d MaintenanceDTO) window(check string) config.MaintenanceWindow {
+	w := config.MaintenanceWindow{ID: d.ID, Check: check, StartMinute: d.StartMinute, Duration: time.Duration(d.DurationMS) * time.Millisecond, Zone: d.Zone}
+	for _, day := range d.Weekdays {
+		w.Weekdays = append(w.Weekdays, time.Weekday(day))
+	}
+	return w
+}
+
+func channelTestDTO(t config.ChannelTest) ChannelTestDTO {
+	return ChannelTestDTO{ID: t.ID, Channel: t.Channel, Status: string(t.Status), Error: t.Error, Requested: t.Requested.UTC(), Started: t.Started.UTC(), Finished: t.Finished.UTC()}
+}
+
+// ChannelTest converts the wire form back.
+func (d ChannelTestDTO) ChannelTest() config.ChannelTest {
+	return config.ChannelTest{ID: d.ID, Channel: d.Channel, Status: config.ChannelTestStatus(d.Status), Error: d.Error, Requested: d.Requested, Started: d.Started, Finished: d.Finished}
+}
+
+// Window converts the wire form back for a check.
+func (d MaintenanceDTO) Window(check string) config.MaintenanceWindow { return d.window(check) }
 
 func resultDTO(r check.Result) ResultDTO {
 	return ResultDTO{r.At.UTC(), r.Status, r.Latency.Milliseconds(), r.StatusCode, r.Error}
@@ -109,13 +230,19 @@ func NewSnapshotDTO(s tui.Snapshot, now time.Time) SnapshotDTO {
 	d := SnapshotDTO{ServerTime: now.UTC(), PublicKey: s.PublicKey, HasKey: s.HasKey, LastBeat: s.LastBeat.UTC(), HasBeat: s.HasBeat, Uptime: s.Uptime, HasUptime: s.HasUptime, Incidents: s.Incidents}
 	for _, v := range s.Services {
 		c := v.Check
-		x := ServiceDTO{Check: CheckDTO{c.Name, c.URL, c.Interval.Milliseconds(), c.Timeout.Milliseconds(), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter, c.TLSOff}, Latest: resultDTO(v.Latest), HasResult: v.HasResult, DownSince: v.DownSince.UTC(), Streak: StreakDTO{v.Streak.Alerting, v.Streak.Failures, v.Streak.Successes}, Mute: MuteDTO{v.Mute.Until.UTC(), v.Mute.WasAlerting}, HasMute: v.HasMute, Cert: CertDTO{v.Cert.Host, v.Cert.Issuer, v.Cert.Serial, v.Cert.NotAfter.UTC(), v.Cert.Observed.UTC(), v.Cert.Notified}, HasCert: v.HasCert}
+		x := ServiceDTO{Check: checkDTO(c), Latest: resultDTO(v.Latest), HasResult: v.HasResult, DownSince: v.DownSince.UTC(), Streak: StreakDTO{v.Streak.Alerting, v.Streak.Failures, v.Streak.Successes}, Mute: MuteDTO{v.Mute.Until.UTC(), v.Mute.WasAlerting}, HasMute: v.HasMute, Cert: CertDTO{v.Cert.Host, v.Cert.Issuer, v.Cert.Serial, v.Cert.NotAfter.UTC(), v.Cert.Observed.UTC(), v.Cert.Notified}, HasCert: v.HasCert}
 		for _, r := range v.Recent {
 			x.Recent = append(x.Recent, resultDTO(r))
 		}
 		for _, o := range v.Outages {
 			x.Outages = append(x.Outages, OutageDTO{o.Start.UTC(), o.End.UTC(), o.Ongoing, o.Error})
 		}
+		x.Maintenance = []MaintenanceDTO{}
+		for _, w := range v.Maintenance {
+			x.Maintenance = append(x.Maintenance, maintenanceDTO(w))
+		}
+		x.InMaintenance, x.MaintenanceEnd = v.InMaintenance.Active, v.InMaintenance.End.UTC()
+		x.KnownAlerting = v.KnownAlerting
 		d.Services = append(d.Services, x)
 	}
 	for _, v := range s.SMTPServers {
@@ -129,7 +256,11 @@ func NewSnapshotDTO(s tui.Snapshot, now time.Time) SnapshotDTO {
 		d.SMTPServers = append(d.SMTPServers, SMTPServerDTO{v.Name, v.Host, v.Port, v.TLS, v.Username, v.Sender, state})
 	}
 	for _, v := range s.Channels {
-		d.Channels = append(d.Channels, ChannelDTO{v.Name, v.Kind, v.SMTPServer, v.Recipients})
+		d.Channels = append(d.Channels, channelDTO(v))
+	}
+	d.ChannelTests = []ChannelTestDTO{}
+	for _, t := range s.ChannelTests {
+		d.ChannelTests = append(d.ChannelTests, channelTestDTO(t))
 	}
 	return d
 }
@@ -139,7 +270,7 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 	s := tui.Snapshot{PublicKey: d.PublicKey, HasKey: d.HasKey, LastBeat: d.LastBeat, HasBeat: d.HasBeat, Uptime: d.Uptime, HasUptime: d.HasUptime, Incidents: d.Incidents}
 	for _, v := range d.Services {
 		c := v.Check
-		x := tui.Service{Check: config.Check{Name: c.Name, URL: c.URL, Interval: time.Duration(c.IntervalMS) * time.Millisecond, Timeout: time.Duration(c.TimeoutMS) * time.Millisecond, ExpectedStatus: c.ExpectedStatus, Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff}, Latest: v.Latest.result(c.Name), HasResult: v.HasResult, DownSince: v.DownSince, Streak: check.Streak{Alerting: v.Streak.Alerting, Failures: v.Streak.Failures, Successes: v.Streak.Successes}, Mute: config.Mute{Until: v.Mute.Until, WasAlerting: v.Mute.WasAlerting}, HasMute: v.HasMute, Cert: config.Cert{Host: v.Cert.Host, Issuer: v.Cert.Issuer, Serial: v.Cert.Serial, NotAfter: v.Cert.NotAfter, Observed: v.Cert.Observed, Notified: v.Cert.Notified}, HasCert: v.HasCert}
+		x := tui.Service{Check: c.snapshotCheck(d.PublicKey), Latest: v.Latest.result(c.Name), HasResult: v.HasResult, DownSince: v.DownSince, Streak: check.Streak{Alerting: v.Streak.Alerting, Failures: v.Streak.Failures, Successes: v.Streak.Successes}, Mute: config.Mute{Until: v.Mute.Until, WasAlerting: v.Mute.WasAlerting}, HasMute: v.HasMute, Cert: config.Cert{Host: v.Cert.Host, Issuer: v.Cert.Issuer, Serial: v.Cert.Serial, NotAfter: v.Cert.NotAfter, Observed: v.Cert.Observed, Notified: v.Cert.Notified}, HasCert: v.HasCert}
 		if v.HasMute {
 			x.Mute.Check = c.Name
 		}
@@ -155,6 +286,14 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 		for _, o := range v.Outages {
 			x.Outages = append(x.Outages, store.Outage{Start: o.Start, End: o.End, Ongoing: o.Ongoing, Error: o.Error})
 		}
+		for _, w := range v.Maintenance {
+			x.Maintenance = append(x.Maintenance, w.window(c.Name))
+		}
+		x.InMaintenance = config.Maintenance{Active: v.InMaintenance, End: v.MaintenanceEnd}
+		if !v.InMaintenance {
+			x.InMaintenance.End = time.Time{}
+		}
+		x.KnownAlerting = v.KnownAlerting
 		s.Services = append(s.Services, x)
 	}
 	for _, v := range d.SMTPServers {
@@ -168,7 +307,17 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 		s.SMTPServers = append(s.SMTPServers, config.SMTPServer{Name: v.Name, Host: v.Host, Port: v.Port, TLS: v.TLS, Username: v.Username, Sender: v.Sender, Password: p})
 	}
 	for _, v := range d.Channels {
-		s.Channels = append(s.Channels, config.Channel{Name: v.Name, Kind: v.Kind, SMTPServer: v.SMTPServer, Recipients: v.Recipients})
+		c := config.Channel{Name: v.Name, Kind: v.Kind, SMTPServer: v.SMTPServer, Recipients: v.Recipients, WebhookOrigin: v.WebhookOrigin, WebhookAuthName: v.WebhookAuthName}
+		if v.WebhookURLSet {
+			c.WebhookURL = placeholder(d.PublicKey)
+		}
+		if v.WebhookAuthSet {
+			c.WebhookAuth = placeholder(d.PublicKey)
+		}
+		s.Channels = append(s.Channels, c)
+	}
+	for _, t := range d.ChannelTests {
+		s.ChannelTests = append(s.ChannelTests, t.ChannelTest())
 	}
 	return s
 }
@@ -193,4 +342,27 @@ func SnapshotRoutes(load func(context.Context, time.Time) (tui.Snapshot, error))
 		writeJSON(w, http.StatusOK, NewSnapshotDTO(s, now))
 	})
 	return mux
+}
+
+// placeholder stands in for a protected value that is set: it is not a real
+// ciphertext and exists only so the TUI can tell "set" from "empty".
+func placeholder(key []byte) secret.Sealed { return secret.Sealed{Key: key, Data: []byte{1}} }
+
+// snapshotCheck rebuilds a check from a snapshot; protected values become
+// placeholders and canonical forms are restored.
+func (c CheckDTO) snapshotCheck(key []byte) config.Check {
+	out := config.Check{Name: c.Name, URL: c.URL, Interval: time.Duration(c.IntervalMS) * time.Millisecond, Timeout: time.Duration(c.TimeoutMS) * time.Millisecond,
+		ExpectedStatus: c.ExpectedStatus, Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
+		Kind: c.Kind, Method: c.Method, ExpectText: c.ExpectText, Host: c.Host, Port: c.Port}
+	if c.BodySet {
+		out.Body = placeholder(key)
+	}
+	for _, h := range c.Headers {
+		header := config.Header{Name: h.Name}
+		if h.ValueSet {
+			header.Value = placeholder(key)
+		}
+		out.Headers = append(out.Headers, header)
+	}
+	return out.Canonical()
 }

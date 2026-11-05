@@ -42,7 +42,11 @@ func TestFormModals(t *testing.T) {
 					t.Errorf("bad fallback: %s", out)
 				}
 			} else {
-				for _, want := range []string{"payments", "╭─ " + title, "╰"} {
+				wants := []string{"╭─ " + title, "╰"}
+				if size.h > 24 { // at 24 rows the taller form (Type and Advanced rows) covers the second monitor row
+					wants = append(wants, "payments")
+				}
+				for _, want := range wants {
 					if !strings.Contains(out, want) {
 						t.Errorf("%dx%d missing %q: %s", size.w, size.h, want, out)
 					}

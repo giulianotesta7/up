@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"net/url"
 	"strings"
 
 	"github.com/giulianotesta7/up/internal/secret"
@@ -22,11 +23,14 @@ const (
 // TLSModes lists the TLS modes in display order.
 var TLSModes = []TLSMode{TLSStartTLS, TLSImplicit, TLSNone}
 
-// KindEmail is the only channel kind so far.
-const KindEmail = "email"
+// Channel kinds.
+const (
+	KindEmail   = "email"
+	KindWebhook = "webhook"
+)
 
-// ChannelKinds lists the channel kinds in display order.
-var ChannelKinds = []string{KindEmail}
+// ChannelKinds lists the kinds the TUI offers, in display order.
+var ChannelKinds = []string{KindEmail, KindWebhook}
 
 // SMTPServer is an SMTP server that email channels send through.
 type SMTPServer struct {
@@ -42,12 +46,44 @@ type SMTPServer struct {
 }
 
 // Channel is where a monitor's alerts go. An email channel sends through
-// one SMTP server to one or more recipients.
+// one SMTP server to one or more recipients. A webhook channel posts to one
+// URL.
+//
+// Webhook fields follow the protected-value rules of Edit: WebhookURL and
+// WebhookAuth are sealed and never leave the store in snapshots or the API.
+// WebhookOrigin ("scheme://host[:port]", see WebhookOrigin) is the only part
+// of the URL shown; whoever seals the URL derives it from the same text.
+// WebhookAuthName is the plain header name ("Authorization"); the optional
+// WebhookAuth value is sent in that header.
 type Channel struct {
 	Name       string
 	Kind       string
 	SMTPServer string
 	Recipients []string
+
+	WebhookOrigin   string
+	WebhookURL      secret.Sealed
+	WebhookURLEdit  Edit
+	WebhookAuthName string
+	WebhookAuth     secret.Sealed
+	WebhookAuthEdit Edit
+}
+
+// WebhookOrigin returns the scheme and host (with port, if any) of a webhook
+// URL, lower-cased, for display. It never includes the path, query or
+// credentials, and its errors never echo credentials.
+func WebhookOrigin(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return "", errors.New("webhook URL must be http or https with a host and no credentials")
+	}
+	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host), nil
+}
+
+func validWebhookOrigin(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil &&
+		(u.Path == "" || u.Path == "/") && u.RawQuery == "" && u.Fragment == "" && !strings.HasSuffix(s, "/")
 }
 
 // ValidateSMTPServer validates an SMTP server definition. A server without
@@ -98,9 +134,19 @@ func ValidateChannel(c Channel) error {
 		// The monitor form offers "none" for no channel.
 		errs = append(errs, errors.New(`name "none" is reserved (it means no channel)`))
 	}
-	if c.Kind != KindEmail {
-		errs = append(errs, fmt.Errorf("kind %q is not supported (use email)", c.Kind))
+	switch c.Kind {
+	case KindEmail:
+		errs = append(errs, validateEmailChannel(c)...)
+	case KindWebhook:
+		errs = append(errs, validateWebhookChannel(c)...)
+	default:
+		errs = append(errs, fmt.Errorf("kind %q is not supported (use email or webhook)", c.Kind))
 	}
+	return errors.Join(errs...)
+}
+
+func validateEmailChannel(c Channel) []error {
+	var errs []error
 	if c.SMTPServer == "" {
 		errs = append(errs, errors.New("SMTP server is required"))
 	}
@@ -112,7 +158,38 @@ func ValidateChannel(c Channel) error {
 			errs = append(errs, fmt.Errorf("recipient %q is not a valid email address", r))
 		}
 	}
-	return errors.Join(errs...)
+	if c.WebhookOrigin != "" || !c.WebhookURL.Empty() || c.WebhookURLEdit != EditKeep || c.WebhookAuthName != "" || !c.WebhookAuth.Empty() || c.WebhookAuthEdit != EditKeep {
+		errs = append(errs, errors.New("webhook fields are only for webhook channels"))
+	}
+	return errs
+}
+
+// validateWebhookChannel checks a webhook channel. The URL cannot be cleared
+// (a webhook without one is meaningless); whether a "keep" has a stored URL
+// behind it is checked by the store.
+func validateWebhookChannel(c Channel) []error {
+	var errs []error
+	switch {
+	case c.WebhookOrigin == "":
+		errs = append(errs, errors.New("webhook origin is required"))
+	case !validWebhookOrigin(c.WebhookOrigin):
+		errs = append(errs, fmt.Errorf("webhook origin %q must be http or https with a host", c.WebhookOrigin))
+	}
+	errs = append(errs, validateEdit("webhook URL", c.WebhookURLEdit, c.WebhookURL, MaxSealedHeaderValue)...)
+	if c.WebhookURLEdit == EditClear {
+		errs = append(errs, errors.New("webhook URL cannot be cleared"))
+	}
+	if c.WebhookAuthName != "" && !ValidHeaderName(c.WebhookAuthName) {
+		errs = append(errs, fmt.Errorf("webhook auth header name %q is not valid", c.WebhookAuthName))
+	}
+	errs = append(errs, validateEdit("webhook auth value", c.WebhookAuthEdit, c.WebhookAuth, MaxSealedHeaderValue)...)
+	if c.WebhookAuthName == "" && !c.WebhookAuth.Empty() {
+		errs = append(errs, errors.New("webhook auth value requires a header name"))
+	}
+	if c.SMTPServer != "" || len(c.Recipients) > 0 {
+		errs = append(errs, errors.New("SMTP server and recipients are only for email channels"))
+	}
+	return errs
 }
 
 // ParseRecipients splits comma-separated addresses, trimming spaces and

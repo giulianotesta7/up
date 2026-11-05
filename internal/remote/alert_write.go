@@ -42,11 +42,31 @@ type smtpWrite struct {
 	PasswordSealed *sealedWire    `json:"password_sealed"`
 }
 
+// channelWrite is the body of a channel create or update. Webhook values are
+// ProtectedDTO objects: absent keeps, "replace" carries a sealed value.
 type channelWrite struct {
-	Name       string   `json:"name"`
-	Kind       string   `json:"kind"`
-	SMTPServer string   `json:"smtp_server"`
-	Recipients []string `json:"recipients"`
+	Name            string        `json:"name"`
+	Kind            string        `json:"kind"`
+	SMTPServer      string        `json:"smtp_server"`
+	Recipients      []string      `json:"recipients"`
+	WebhookOrigin   string        `json:"webhook_origin"`
+	WebhookURL      *ProtectedDTO `json:"webhook_url"`
+	WebhookAuthName string        `json:"webhook_auth_name"`
+	WebhookAuth     *ProtectedDTO `json:"webhook_auth"`
+}
+
+// channel converts the body, or returns a client message (400) or an error (500).
+func (in channelWrite) channel(ctx context.Context, keys keyReader, name string) (config.Channel, string, error) {
+	c := config.Channel{Name: name, Kind: in.Kind, SMTPServer: in.SMTPServer, Recipients: in.Recipients, WebhookOrigin: in.WebhookOrigin, WebhookAuthName: in.WebhookAuthName}
+	var msg string
+	var err error
+	if c.WebhookURL, c.WebhookURLEdit, msg, err = protectedEdit(ctx, keys, in.WebhookURL, "webhook_url", config.MaxSealedHeaderValue); msg != "" || err != nil {
+		return config.Channel{}, msg, err
+	}
+	if c.WebhookAuth, c.WebhookAuthEdit, msg, err = protectedEdit(ctx, keys, in.WebhookAuth, "webhook_auth", config.MaxSealedHeaderValue); msg != "" || err != nil {
+		return config.Channel{}, msg, err
+	}
+	return c, "", nil
 }
 
 // addressableName refuses names the router would normalize away.
@@ -57,19 +77,35 @@ func addressableName(name string) string {
 	return ""
 }
 
+// keyReader is the part of a store that knows the server's public key.
+type keyReader interface {
+	PublicKey(context.Context) ([]byte, bool, error)
+}
+
 // sealedPassword validates an inbound sealed password against the server key.
 // It never decrypts: it only makes sure the value was sealed to this server.
-func sealedPassword(ctx context.Context, s AlertWriteStore, in *sealedWire) (secret.Sealed, string, error) {
+func sealedPassword(ctx context.Context, s keyReader, in *sealedWire) (secret.Sealed, string, error) {
+	return sealedValue(ctx, s, in, "password_sealed", "password", maxSealedBytes)
+}
+
+// sealedValue validates one inbound sealed value: present, at most max bytes
+// and sealed to the server's key. field is the JSON path of the wire object
+// and noun names the value in the key-mismatch message. It returns a client
+// message (a 400) or an error (a 500), never both.
+func sealedValue(ctx context.Context, keys keyReader, in *sealedWire, field, noun string, max int) (secret.Sealed, string, error) {
 	if in == nil {
 		return secret.Sealed{}, "", nil
 	}
 	if len(in.Data) == 0 {
-		return secret.Sealed{}, "password_sealed.data is required", nil
+		return secret.Sealed{}, field + ".data is required", nil
 	}
-	if len(in.Data) > maxSealedBytes {
-		return secret.Sealed{}, "password_sealed.data is too large", nil
+	if len(in.Data) > max {
+		return secret.Sealed{}, field + ".data is too large", nil
 	}
-	key, ok, err := s.PublicKey(ctx)
+	if keys == nil {
+		return secret.Sealed{}, "the server has no encryption key yet", nil
+	}
+	key, ok, err := keys.PublicKey(ctx)
 	if err != nil {
 		return secret.Sealed{}, "", err
 	}
@@ -77,9 +113,37 @@ func sealedPassword(ctx context.Context, s AlertWriteStore, in *sealedWire) (sec
 		return secret.Sealed{}, "the server has no encryption key yet", nil
 	}
 	if !bytes.Equal(key, in.Key) {
-		return secret.Sealed{}, "password was sealed to a different key", nil
+		return secret.Sealed{}, noun + " was sealed to a different key", nil
 	}
 	return secret.Sealed{Key: bytes.Clone(in.Key), Data: bytes.Clone(in.Data)}, "", nil
+}
+
+// ProtectedDTO is the write form of one protected value (see config.Edit):
+// an action and, only for "replace", the value sealed to the server's public
+// key. An absent object means keep. It never appears in a snapshot.
+type ProtectedDTO struct {
+	Action string      `json:"action"`
+	Sealed *sealedWire `json:"sealed,omitempty"`
+}
+
+// protectedEdit converts one inbound protected value. field is its JSON path
+// ("body", "headers[0].value", "webhook_url") and max the sealed size limit.
+func protectedEdit(ctx context.Context, keys keyReader, p *ProtectedDTO, field string, max int) (secret.Sealed, config.Edit, string, error) {
+	if p == nil {
+		return secret.Sealed{}, config.EditKeep, "", nil
+	}
+	edit, err := config.ParseEdit(p.Action)
+	if err != nil {
+		return secret.Sealed{}, config.EditKeep, field + ".action: " + err.Error(), nil
+	}
+	switch {
+	case edit == config.EditReplace && p.Sealed == nil:
+		return secret.Sealed{}, edit, field + ".sealed is required to replace", nil
+	case edit != config.EditReplace && p.Sealed != nil:
+		return secret.Sealed{}, edit, field + ".sealed is only for replace", nil
+	}
+	sealed, msg, err := sealedValue(ctx, keys, p.Sealed, field+".sealed", field, max)
+	return sealed, edit, msg, err
 }
 
 // AlertWriteRoutes handles SMTP server and channel mutations after
@@ -152,12 +216,20 @@ func createAlertObject(w http.ResponseWriter, r *http.Request, s AlertWriteStore
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
-	channel := config.Channel{Name: in.Name, Kind: in.Kind, SMTPServer: in.SMTPServer, Recipients: in.Recipients}
+	channel, msg, err := in.channel(r.Context(), s, in.Name)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
 	if err := s.AddChannel(r.Context(), channel); err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, ChannelDTO{Name: channel.Name, Kind: channel.Kind, SMTPServer: channel.SMTPServer, Recipients: channel.Recipients})
+	writeJSON(w, http.StatusCreated, channelDTO(channel))
 }
 
 func changeAlertObject(w http.ResponseWriter, r *http.Request, s AlertWriteStore, smtp bool, name string) {
@@ -204,7 +276,16 @@ func changeAlertObject(w http.ResponseWriter, r *http.Request, s AlertWriteStore
 				writeError(w, http.StatusBadRequest, "name must match path")
 				return
 			}
-			err = s.UpdateChannel(r.Context(), config.Channel{Name: name, Kind: in.Kind, SMTPServer: in.SMTPServer, Recipients: in.Recipients})
+			channel, msg, e := in.channelWrite.channel(r.Context(), s, name)
+			if e != nil {
+				writeStoreError(w, e)
+				return
+			}
+			if msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+			err = s.UpdateChannel(r.Context(), channel)
 		}
 	default:
 		w.Header().Set("Allow", "PUT, DELETE")

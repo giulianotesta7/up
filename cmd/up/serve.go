@@ -32,6 +32,10 @@ check keeps its newest result older than the cutoff, so a current outage keeps
 its start. Monitor definitions are never removed.
 
 Alerts are sent when a monitor with a channel goes DOWN and when it recovers.
+Channel tests requested from the TUI or the API are sent by the daemon within
+about 2 seconds; they change no monitor data.
+A webhook channel POSTs a versioned JSON body; a 2xx answer is delivered, anything
+else is an error, redirects are not followed and there are no retries.
 SMTP servers and channels are managed in up tui. SMTP passwords are encrypted
 with a key kept in <db>.key (mode 0600) next to the database; back it up with
 the database. Without it stored passwords must be entered again. up serve refuses
@@ -140,6 +144,11 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = s.SetPublicKey(ctx, key.PublicKey())
 	}
 	if err != nil {
+		// A stop requested while starting is a clean shutdown, like one
+		// requested later, not a failure to start.
+		if ctx.Err() != nil {
+			return 0
+		}
 		fmt.Fprintf(stderr, "up: %v\n", err)
 		return 1
 	}
@@ -161,16 +170,24 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	notifyCtx, cancelNotify := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() { defer close(done); notifier.Run(notifyCtx) }()
+	testsDone := make(chan struct{})
+	go func() {
+		defer close(testsDone)
+		alert.TestRunner{Queue: s, Notifier: notifier, Logger: logger}.Run(notifyCtx)
+	}()
+	checker := check.New()
+	checker.Key = key
 	err = monitor.Run(ctx, monitor.Options{
 		Alerter:           notifier,
 		Store:             s,
-		Runner:            check.New(),
+		Runner:            checker,
 		HeartbeatInterval: monitor.DefaultHeartbeatInterval,
 		Retention:         *retention,
 		Logger:            logger,
 	})
 	cancelNotify()
 	<-done
+	<-testsDone
 	if err != nil {
 		fmt.Fprintf(stderr, "up: %v\n", err)
 		return 1

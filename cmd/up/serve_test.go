@@ -21,13 +21,48 @@ import (
 	"github.com/giulianotesta7/up/internal/store"
 )
 
+// A stop requested while serve is still starting is a clean shutdown, not an
+// error: the startup reads that take the context must not turn it into exit 1.
+func TestServeStopsCleanlyWhenCanceledDuringStartup(t *testing.T) {
+	isolateDefaultDatabase(t)
+	path := filepath.Join(t.TempDir(), "up.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	code, out, errOut := runCmd(ctx, "serve", "--db", path)
+	if code != 0 || out != "" || strings.Contains(errOut, "up:") {
+		t.Fatalf("serve = %d, stdout %q, stderr %q; want a clean stop", code, out, errOut)
+	}
+	if _, err := os.Stat(path + ".key"); err != nil {
+		t.Fatalf("key not created: %v", err)
+	}
+}
+
 func TestServeCreatesKey(t *testing.T) {
 	isolateDefaultDatabase(t)
 	path := filepath.Join(t.TempDir(), "up.db")
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	// Stop serve once startup has stored the public key, not after a fixed
+	// delay: startup time depends on the machine and the migrations it runs.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if code, _, errOut := runCmd(ctx, "serve", "--db", path); code != 0 {
-		t.Fatalf("%d %s", code, errOut)
+	type exit struct {
+		code   int
+		errOut string
+	}
+	done := make(chan exit, 1)
+	go func() { code, _, errOut := runCmd(ctx, "serve", "--db", path); done <- exit{code, errOut} }()
+	deadline := time.Now().Add(5 * time.Second)
+	for stored := false; !stored; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("serve did not store the public key within 5s")
+		}
+		if s, err := store.OpenReadOnly(path); err == nil {
+			_, stored, _ = s.PublicKey(context.Background())
+			s.Close()
+		}
+	}
+	cancel()
+	if got := <-done; got.code != 0 {
+		t.Fatalf("%d %s", got.code, got.errOut)
 	}
 	info, err := os.Stat(path + ".key")
 	if err != nil || info.Mode().Perm() != 0600 {
@@ -309,5 +344,115 @@ PRAGMA user_version = 1;`)
 		if _, err := os.Stat(sidecar); err == nil {
 			t.Fatalf("rejected start created %s", sidecar)
 		}
+	}
+}
+
+// The daemon sends a requested channel test and records the outcome without
+// touching monitor data. The SMTP server is a closed local port, so no
+// listener is needed and the test ends as an error.
+func TestServeProcessesChannelTest(t *testing.T) {
+	isolateDefaultDatabase(t)
+	path := filepath.Join(t.TempDir(), "up.db")
+	ctx := context.Background()
+	s, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddSMTPServer(ctx, config.SMTPServer{Name: "smtp", Host: "127.0.0.1", Port: 1, TLS: config.TLSNone, Sender: "up@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddChannel(ctx, config.Channel{Name: "mail", Kind: config.KindEmail, SMTPServer: "smtp", Recipients: []string{"a@example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnqueueChannelTest(ctx, "mail", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	run, cancel := context.WithCancel(ctx)
+	done := make(chan int, 1)
+	go func() { code, _, _ := runCmd(run, "serve", "--db", path); done <- code }()
+	reader, err := store.OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	deadline := time.Now().Add(10 * time.Second)
+	var got config.ChannelTest
+	for time.Now().Before(deadline) {
+		if got, _, err = reader.LatestChannelTest(ctx, "mail"); err == nil && got.Status == config.TestError {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if code := <-done; code != 0 {
+		t.Fatalf("serve exited %d", code)
+	}
+	if got.Status != config.TestError || got.Error == "" {
+		t.Fatalf("test = %+v, want a processed error", got)
+	}
+}
+
+func TestServeHelpMentionsChannelTests(t *testing.T) {
+	isolateDefaultDatabase(t)
+	if code, out, _ := runCmd(context.Background(), "serve", "-h"); code != 0 || !strings.Contains(out, "Channel tests") {
+		t.Fatalf("%d %q", code, out)
+	}
+}
+
+// The daemon opens sealed request headers and body with the key serve loads.
+func TestServeOpensSealedRequestSettings(t *testing.T) {
+	isolateDefaultDatabase(t)
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "up.db")
+	type seen struct{ method, token, body string }
+	got := make(chan seen, 8)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b := new(bytes.Buffer)
+		_, _ = b.ReadFrom(r.Body)
+		select {
+		case got <- seen{r.Method, r.Header.Get("X-Token"), b.String()}:
+		default:
+		}
+	}))
+	defer srv.Close()
+	key, _, err := secret.LoadOrCreate(dbPath + ".key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seal := func(v string) secret.Sealed {
+		s, err := secret.Seal(key.PublicKey(), v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	s, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	c := config.Check{Name: "api", URL: srv.URL, Interval: time.Hour, Timeout: time.Second, ExpectedStatus: 200,
+		Method: "POST", Headers: []config.Header{{Name: "X-Token", Value: seal("s3cret")}}, Body: seal("payload")}
+	if err := s.AddCheck(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var errOut string
+	go func() { defer close(done); _, _, errOut = runCmd(ctx, "serve", "--db", dbPath) }()
+	defer func() { cancel(); <-done }()
+	select {
+	case v := <-got:
+		if v != (seen{"POST", "s3cret", "payload"}) {
+			t.Fatalf("server saw %+v", v)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("daemon never sent the request")
+	}
+	cancel()
+	<-done
+	if strings.Contains(errOut, "s3cret") || strings.Contains(errOut, "payload") {
+		t.Fatalf("protected value logged: %s", errOut)
 	}
 }

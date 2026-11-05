@@ -21,13 +21,15 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 
 ## Features
 
-- **HTTP checks** with per-monitor interval, timeout and expected status. Redirects are followed.
+- **HTTP checks** with per-monitor interval, timeout and expected status. Redirects are followed. Optional method, headers, body and expected text.
+- **TCP checks** that connect to a host and port, for services without an HTTP endpoint.
 - **Managed from the TUI.** Add, edit, delete and mute monitors; the daemon picks up changes within ~2s.
 - **Remote TUI.** Run the daemon on a server and manage it from your laptop over an authenticated API.
 - **Check history.** Every result is stored and outages are derived from it. Results are kept for 30 days by default; retention is configurable.
-- **Email alerts** on down and recovery, with optional thresholds so a single timeout does not wake anyone up.
+- **Email and webhook alerts** on down and recovery, with optional thresholds so a single timeout does not wake anyone up.
 - **TLS expiry warnings** at 14, 7 and 3 days.
 - **Maintenance mute** from 1 minute to 7 days, without stopping checks or history.
+- **Recurring maintenance windows** that hold alerts and certificate warnings while checks and history continue.
 - **Stale-daemon detection.** If the daemon stops, the TUI says so and keeps the last known statuses instead of marking everything DOWN.
 
 ## Install
@@ -118,31 +120,84 @@ The database is resolved in this order: `--db`, `$UP_DB`, `/var/lib/up/up.db` if
 
 ### Keys
 
-`j`/`k` move · `enter` details · `n` new · `e` edit · `d` delete · `m` mute · `u` unmute · `s` SMTP servers · `c` channels · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
+`j`/`k` move · `enter` details · `n` new · `e` edit · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` SMTP servers · `c` channels (`t` test) · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
 
 In forms: `tab`/`shift+tab` switch fields · `←`/`→` choose · `enter` save · `esc` cancel.
+
+### Monitor fields
+
+Only **name** and **URL** are required; the rest uses the defaults above, with method `GET`. **Advanced** (`space` opens, `←` closes) sets the HTTP request:
+
+| Field | Meaning |
+|---|---|
+| Method | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE` or `OPTIONS`. |
+| Headers | Name/value pairs sent on every check. `space` on `+ Header` adds one, `ctrl+d` removes the focused one. Names must be unique, ignoring case. |
+| Request body | Text sent as the body. |
+| Expected text | Literal, case-sensitive text the body must contain. The status **and** the text must match. Not allowed with `HEAD`. |
+
+Only the first 1 MiB of a response is read; if the text is not in it, the check fails. Responses are not stored. Latency is the time until the response headers arrive. The detail view shows the method and expected text.
+
+A monitor with headers or a body does not follow a redirect to another scheme, host or port: it goes down saying so, so those values never reach a host you did not configure. Every other redirect is followed.
+
+### TCP monitors
+
+Set `Type` to `TCP` (first field, `←`/`→`) and enter a host (name or IP; IPv6 without brackets) and a port. The monitor is **up** when the connection opens and **down** if it is refused, DNS fails or it times out. Latency is the time to connect, including name resolution.
+
+It only proves that something is listening: no TLS, certificate or application check. TCP monitors have no URL, expected status or `TLS expiry`.
 
 ## Alerts
 
 1. `s`: add an SMTP server. For a relay without authentication, set **No login required** to **Yes**.
-2. `c`: add a channel with that server and one or more comma-separated recipients.
+2. `c`: add a channel: **email** (that server and one or more comma-separated recipients) or **webhook** (a URL).
 3. `e` on a monitor: pick the channel. Monitors without a channel never alert.
 
-`up serve` sends one email when a monitor goes down and one when it recovers, never one per failed check. **Alert after** and **Recover after** (default 1) set how many consecutive failures or successes are needed; meanwhile the list shows `FAILING 2/3` or `RECOVERING 1/2`. Restarting the daemon preserves the streak and does not resend alerts.
+`up serve` sends one alert when a monitor goes down and one when it recovers, never one per failed check. **Alert after** and **Recover after** (default 1) set how many consecutive failures or successes are needed; meanwhile the list shows `FAILING 2/3` or `RECOVERING 1/2`. Restarting the daemon preserves the streak and does not resend alerts. Recipients only know what was actually sent: if you pick a channel for a monitor that is already down, the down alert is sent right then (once a mute or maintenance window ends, if one holds it) and the recovery follows normally.
 
 TLS modes: `starttls` (default, usually port 587), `tls` (usually 465) and `none` for relays without login. `none` cannot be combined with a username.
 
-Run `up serve` once before entering SMTP passwords to create `up.db.key` (required mode `0600`). **Back up the key with the database**; losing it requires re-entering passwords.
+Run `up serve` once before entering SMTP passwords, header values, a request body or a webhook URL to create `up.db.key` (required mode `0600`). **Back up the key with the database**; losing it requires re-entering them.
+
+### Webhook channels
+
+In `c`, set **Kind** to `webhook` (`←`/`→`), then enter the URL and, optionally, an auth header name and value (for example `Authorization` and `Bearer …`). The list shows only the URL's origin. The URL cannot be cleared.
+
+`up serve` sends a JSON `POST` (`User-Agent: up/webhooks`):
+
+```json
+{
+  "version": 1,
+  "event": "monitor.down",
+  "occurred_at": "2025-01-02T18:04:05Z",
+  "monitor": {"name": "api", "type": "http"},
+  "result": {"status": "down", "reason": "status 500", "status_code": 500, "latency_ms": 1500}
+}
+```
+
+`event` is `monitor.down`, `monitor.recovered`, `cert.expiring` (`result` carries `days_remaining`) or `test` (no `monitor` or `result`; it carries `channel` and `message`). A `2xx` response means delivered. Any other status, a network error or a timeout (10s) is a failure. Redirects are not followed and failures are not retried.
+
+### Testing a channel
+
+In the channel list, `t` and then `enter` send a test to the selected channel and show success or the reason it failed. Success means the SMTP server accepted the message (not that it reached the inbox) or the webhook answered `2xx`. A test changes no monitor data, needs `up serve` running and runs one at a time per channel.
 
 ### Muting
 
 `m` offers presets and custom durations from 1 minute to 7 days; `u` ends the mute early. Checks and history keep running, and mutes survive restarts.
 
-When the mute ends, recipients only hear what they do not already know: a down email if it is still down and they were not told, or a recovery email if they were told about the outage before the mute. An outage that starts and ends during the mute sends nothing.
+When the mute ends, recipients only hear what they do not already know: a down alert if it is still down and they were not told, or a recovery alert if they were told about the outage before the mute. An outage that starts and ends during the mute sends nothing.
+
+### Maintenance windows
+
+`w` opens the selected monitor's windows: `a` adds, `e` edits, `d` deletes (up to 20 per monitor). A window repeats weekly on the weekdays you toggle (`←`/`→` move, `space` toggles). It has a local `HH:MM` start, a duration in the same format as a custom mute (`45m`, `2h`, `1h30m`; 1 minute to 7 days) and an IANA zone such as `America/New_York`. A window that runs past midnight is marked "crosses midnight"; the weekdays are the days it starts.
+
+While a window is active or the monitor is muted, alerts and certificate warnings are held. Checks, history and uptime keep counting, so downtime inside a window still lowers uptime. The list shows `◷ until HH:MM` for a window (`⏸` for a mute) and the detail shows the end time.
+
+When everything ends, recipients only hear what they do not already know, once, as after a mute. Overlapping or back-to-back windows, even in different zones, count as one. Certificate warnings due meanwhile are sent afterwards. Edits apply within about 2 seconds and windows survive restarts.
+
+Daylight saving: durations are elapsed time. A start that does not exist that day is skipped; one that happens twice runs once, at its first occurrence.
 
 ### Certificate expiry
 
-HTTPS monitors get a `CERT` column with the days left (amber under 14, red under 3) and one email per threshold: 14, 7 and 3 days. A certificate first seen with 2 days left sends one warning, not three. Renewal resets the warnings silently; muting delays them.
+HTTPS monitors get a `CERT` column with the days left (amber under 14, red under 3) and one alert per threshold: 14, 7 and 3 days. A certificate first seen with 2 days left sends one warning, not three. Renewal resets the warnings silently; muting delays them.
 
 Set `TLS expiry` to `off` in a monitor's form to disable certificate tracking and warnings. **TLS validation stays on**: an invalid or expired certificate still fails the check.
 
@@ -196,13 +251,15 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 | `PUT`/`DELETE /api/v1/checks/{name}/mute` | mutes (`duration_ms`, 1 minute to 7 days) or unmutes |
 | `POST /api/v1/smtp-servers`, `PUT`/`DELETE /api/v1/smtp-servers/{name}` | manages SMTP servers |
 | `POST /api/v1/channels`, `PUT`/`DELETE /api/v1/channels/{name}` | manages channels |
+| `GET`/`POST /api/v1/checks/{name}/maintenance`, `PUT`/`DELETE .../maintenance/{id}` | lists, adds, edits or deletes a monitor's maintenance windows (`weekdays` 0=Sunday, `start_minute`, `duration_ms`, `zone`); active windows hold alerts and certificate warnings |
+| `POST`/`GET /api/v1/channels/{name}/test` | requests a channel test (`202`, or `409` while one is active) and reads the newest one; the daemon sends it |
 
 Bodies are strict JSON, limited to 1 MiB. Errors: `400` invalid input, `404` not found, `409` duplicate or still in use. Rejected requests change nothing.
 
 ### Security
 
 - **One token, full access.** There are no roles or rate limiting. For an internet-facing API, a proxy with rate limiting is recommended.
-- SMTP passwords are sealed with the server's public key; the API rejects plaintext passwords and never returns passwords or ciphertext. The private key stays on the server.
+- SMTP passwords, header values, request bodies, webhook URLs and webhook auth values are sealed with the server's public key; the API rejects plaintext values and never returns them or their ciphertext. The private key stays on the server. Edit forms show saved values as `set`, with keep, replace or clear.
 - The server stores a SHA-256 token hash and compares it in constant time. Token and remote credential files readable by others are refused.
 - The client does not follow redirects or forward the token to another host. Server text is stripped of terminal escape sequences before display. There is no certificate pinning.
 

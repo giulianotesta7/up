@@ -15,8 +15,20 @@ const minDetailWidth = 32
 func splitListWidth(snap Snapshot, selected int, now time.Time) int {
 	list := renderList(snap, selected, now, nil, 1)
 	for _, line := range strings.Split(list, "\n") {
-		if strings.Contains(ansi.Strip(line), "MONITOR") && strings.Contains(ansi.Strip(line), "LAST CHECK") {
-			return ansi.StringWidth(line)
+		plain := ansi.Strip(line)
+		if strings.Contains(plain, "MONITOR") && strings.Contains(plain, "LAST CHECK") {
+			// The header ends where its last title does, but a held cell
+			// ("◷ until 05:00") is wider than that title: keep it whole.
+			width := ansi.StringWidth(line)
+			held := 0
+			for _, s := range snap.Services {
+				held = max(held, ansi.StringWidth(heldCell(s, now)))
+			}
+			if held > 0 {
+				_, header := heldColumn(snap, now)
+				width = max(width, ansi.StringWidth(plain[:strings.LastIndex(plain, header)])+held)
+			}
+			return width
 		}
 	}
 	return ansi.StringWidth("No checks configured.")
