@@ -146,6 +146,9 @@ func (m Model) handleChannelKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.channelForm != nil {
 		return m.handleChannelFormKey(msg)
 	}
+	if m.channelTest != nil {
+		return m.handleChannelTestKey(msg)
+	}
 	if m.channelDelete != nil {
 		p := *m.channelDelete
 		m.channelDelete = &p
@@ -182,6 +185,10 @@ func (m Model) handleChannelKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "n":
 		m.channelForm = newChannelForm(m.snap)
+	case "t":
+		if m.channelSelected < len(m.snap.Channels) {
+			m.channelTest = &channelTestPrompt{name: m.snap.Channels[m.channelSelected].Name}
+		}
 	case "e", "d":
 		if m.channelSelected < len(m.snap.Channels) {
 			c := m.snap.Channels[m.channelSelected]
@@ -237,7 +244,7 @@ func renderChannelList(snap Snapshot, selected int, now time.Time, loadErr error
 			b.WriteString(line(marker, row, strconv.Itoa(counts[i])) + "\n")
 		}
 	}
-	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · n new · e edit · d delete · esc back · q quit · ctrl+c quit"))
+	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · n new · e edit · d delete · t test · esc back · q quit · ctrl+c quit"))
 	return b.String()
 }
 func renderChannelForm(f channelForm, snap Snapshot, now time.Time, loadErr error) string {

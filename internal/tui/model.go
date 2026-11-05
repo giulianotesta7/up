@@ -75,6 +75,7 @@ type Model struct {
 	channelSelectName string
 	channelForm       *channelForm
 	channelDelete     *deletePrompt
+	channelTest       *channelTestPrompt
 	generation        uint64
 	selectName        string
 	animationOff      bool
@@ -350,6 +351,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.channelDelete = nil
 		}
 		return m, m.load
+	case channelTestMsg:
+		return m.channelTestResult(msg)
 	case tea.PasteMsg:
 		if m.channelForm != nil && !m.channelForm.saving {
 			f := *m.channelForm
@@ -555,6 +558,9 @@ func (m Model) View() tea.View {
 		}
 		if m.channelDelete != nil {
 			child = renderChannelDelete(*m.channelDelete, m.snap, now, m.err)
+		}
+		if m.channelTest != nil {
+			child = renderChannelTest(*m.channelTest, m.snap, now, m.err)
 		}
 		minimum := 0
 		if m.channelForm != nil {

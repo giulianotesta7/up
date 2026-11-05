@@ -347,6 +347,59 @@ PRAGMA user_version = 1;`)
 	}
 }
 
+// The daemon sends a requested channel test and records the outcome without
+// touching monitor data. The SMTP server is a closed local port, so no
+// listener is needed and the test ends as an error.
+func TestServeProcessesChannelTest(t *testing.T) {
+	isolateDefaultDatabase(t)
+	path := filepath.Join(t.TempDir(), "up.db")
+	ctx := context.Background()
+	s, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddSMTPServer(ctx, config.SMTPServer{Name: "smtp", Host: "127.0.0.1", Port: 1, TLS: config.TLSNone, Sender: "up@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddChannel(ctx, config.Channel{Name: "mail", Kind: config.KindEmail, SMTPServer: "smtp", Recipients: []string{"a@example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnqueueChannelTest(ctx, "mail", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	run, cancel := context.WithCancel(ctx)
+	done := make(chan int, 1)
+	go func() { code, _, _ := runCmd(run, "serve", "--db", path); done <- code }()
+	reader, err := store.OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	deadline := time.Now().Add(10 * time.Second)
+	var got config.ChannelTest
+	for time.Now().Before(deadline) {
+		if got, _, err = reader.LatestChannelTest(ctx, "mail"); err == nil && got.Status == config.TestError {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if code := <-done; code != 0 {
+		t.Fatalf("serve exited %d", code)
+	}
+	if got.Status != config.TestError || got.Error == "" {
+		t.Fatalf("test = %+v, want a processed error", got)
+	}
+}
+
+func TestServeHelpMentionsChannelTests(t *testing.T) {
+	isolateDefaultDatabase(t)
+	if code, out, _ := runCmd(context.Background(), "serve", "-h"); code != 0 || !strings.Contains(out, "Channel tests") {
+		t.Fatalf("%d %q", code, out)
+	}
+}
+
 // The daemon opens sealed request headers and body with the key serve loads.
 func TestServeOpensSealedRequestSettings(t *testing.T) {
 	isolateDefaultDatabase(t)
