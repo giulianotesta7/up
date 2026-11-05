@@ -4,7 +4,7 @@ Every change starts with a GitHub issue, including bugs, features, documentation
 
 ## Quick path
 
-1. Find or create an [issue](https://github.com/giulianotesta7/up/issues) describing the motivation and acceptance criteria.
+1. Find or create an [issue](https://github.com/giulianotesta7/up/issues/new/choose) describing the motivation and acceptance criteria. Pick the form that fits: bug report, feature request, documentation or task (chores, CI and tooling).
 2. Create a branch from `main` named `type/slug`, for example `fix/check-timeout` or `ci/issue-first`. Supported prefixes are `feat`, `fix`, `docs`, `chore`, `ci`, `refactor` and `test`.
 3. Implement the scoped change with tests and relevant documentation.
 4. Run the applicable checks below and open a PR using the [PR template](.github/PULL_REQUEST_TEMPLATE.md).
