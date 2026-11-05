@@ -46,7 +46,7 @@ func (r *holdingRunner) snapshot() ([]config.Check, int) {
 // is never stored (the store-level guard is tested in package store).
 func TestEditingEachNewFieldRestartsTheCheck(t *testing.T) {
 	edits := map[string]func(*config.Check){
-		"method":       func(c *config.Check) { c.Method = "HEAD" },
+		"method":       func(c *config.Check) { c.Method = "PUT" },
 		"header name":  func(c *config.Check) { c.Headers[0].Name = "X-Other" },
 		"header value": func(c *config.Check) { c.Headers[0].Value, c.Headers[0].Edit = sealedValue(8), config.EditReplace },
 		"header added": func(c *config.Check) { c.Headers = append(c.Headers, config.Header{Name: "Z"}) },

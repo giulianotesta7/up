@@ -489,7 +489,9 @@ func (m Model) View() tea.View {
 		case m.deletion != nil:
 			screen = renderDelete(*m.deletion, m.snap, now, m.err)
 		default:
-			screen = renderForm(*m.form, m.snap, now, m.err)
+			var focusLine int
+			screen, focusLine = renderFormFocus(*m.form, m.snap, now, m.err)
+			screen = scrollForm(screen, focusLine, m.height)
 			f := *m.form
 			for focus := 0; focus < focusCount; focus++ {
 				if f.editing && focus == 0 {
@@ -563,7 +565,7 @@ func (m Model) View() tea.View {
 		minimum := 0
 		if m.channelForm != nil {
 			f := *m.channelForm
-			for focus := range f.values {
+			for focus := 0; focus < f.fieldCount(); focus++ {
 				if f.editing && focus == 0 {
 					continue
 				}

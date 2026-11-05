@@ -178,7 +178,13 @@ func validateHTTPFields(c Check) []error {
 	if len(c.Headers) > MaxHeaders {
 		errs = append(errs, fmt.Errorf("at most %d headers are allowed", MaxHeaders))
 	}
+	seen := map[string]bool{}
 	for _, h := range c.Headers {
+		if key := strings.ToLower(h.Name); h.Name != "" && seen[key] {
+			errs = append(errs, fmt.Errorf("header %q is repeated (names are compared without regard to case)", h.Name))
+		} else {
+			seen[key] = true
+		}
 		switch {
 		case h.Name == "":
 			errs = append(errs, errors.New("header name is required"))
@@ -190,6 +196,9 @@ func validateHTTPFields(c Check) []error {
 	errs = append(errs, validateEdit("body", c.BodyEdit, c.Body, MaxSealedBody)...)
 	if len(c.ExpectText) > MaxExpectText {
 		errs = append(errs, fmt.Errorf("expected text must be at most %d bytes", MaxExpectText))
+	}
+	if c.Method == "HEAD" && c.ExpectText != "" {
+		errs = append(errs, errors.New("expected text needs a method that returns a body; HEAD does not"))
 	}
 	if c.Host != "" || c.Port != 0 {
 		errs = append(errs, errors.New("host and port are only for tcp checks"))

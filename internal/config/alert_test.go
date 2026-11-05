@@ -37,7 +37,7 @@ func TestAlertValidation(t *testing.T) {
 		mutate func(*Channel)
 		want   string
 	}{
-		{"valid", func(*Channel) {}, ""}, {"name", func(c *Channel) { c.Name = "" }, "name is required"}, {"kind", func(c *Channel) { c.Kind = "sms" }, `kind "sms" is not supported (use email)`}, {"server", func(c *Channel) { c.SMTPServer = "" }, "SMTP server is required"}, {"recipients", func(c *Channel) { c.Recipients = nil }, "at least one recipient is required"}, {"display", func(c *Channel) { c.Recipients = []string{"Name <a@example.com>"} }, `recipient "Name <a@example.com>" is not a valid email address`},
+		{"valid", func(*Channel) {}, ""}, {"name", func(c *Channel) { c.Name = "" }, "name is required"}, {"kind", func(c *Channel) { c.Kind = "sms" }, `kind "sms" is not supported (use email or webhook)`}, {"server", func(c *Channel) { c.SMTPServer = "" }, "SMTP server is required"}, {"recipients", func(c *Channel) { c.Recipients = nil }, "at least one recipient is required"}, {"display", func(c *Channel) { c.Recipients = []string{"Name <a@example.com>"} }, `recipient "Name <a@example.com>" is not a valid email address`},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {

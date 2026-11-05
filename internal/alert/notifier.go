@@ -163,6 +163,6 @@ func certMessage(c config.Check, cert config.Cert, remaining time.Duration) (str
 		line = fmt.Sprintf("  Next warning %d days before expiry\n", next)
 	}
 	subject := fmt.Sprintf("[up] %s: TLS certificate expires in %s", c.Name, left)
-	body := fmt.Sprintf("The certificate served by %s expires in %s\n\n  Monitor   %s\n  Issuer    %s\n%s\nIf the certificate is renewed, up will detect it and stop warning.\n", c.URL, left, c.Name, cert.Issuer, line)
+	body := fmt.Sprintf("The certificate served by %s expires in %s\n\n  Monitor   %s\n  Issuer    %s\n%s\nIf the certificate is renewed, up will detect it and stop warning.\n", c.Target(), left, c.Name, cert.Issuer, line)
 	return subject, body
 }

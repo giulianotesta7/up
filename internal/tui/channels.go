@@ -21,6 +21,7 @@ type channelForm struct {
 	focus, cursor   int
 	editing, saving bool
 	err             error
+	hook            hookForm
 }
 type channelSaveMsg struct {
 	generation uint64
@@ -47,10 +48,14 @@ func newChannelForm(snap Snapshot) *channelForm {
 	return f
 }
 func editChannelForm(c config.Channel) *channelForm {
-	return &channelForm{values: [4]string{c.Name, c.Kind, c.SMTPServer, strings.Join(c.Recipients, ", ")}, focus: 1, editing: true}
+	return &channelForm{values: [4]string{c.Name, c.Kind, c.SMTPServer, strings.Join(c.Recipients, ", ")}, focus: 1, editing: true, hook: editHookForm(c)}
 }
 func (f *channelForm) insert(text string) {
-	if f.focus == 1 || f.focus == 2 {
+	if f.focus == 1 || (f.focus == 2 && !f.isWebhook()) {
+		return
+	}
+	if f.isWebhook() && f.focus >= hookURLRow {
+		f.hookInsert(text)
 		return
 	}
 	editor := monitorForm{focus: 0, cursor: f.cursor}
@@ -60,6 +65,13 @@ func (f *channelForm) insert(text string) {
 	f.cursor = editor.cursor
 }
 func (f *channelForm) edit(msg tea.KeyPressMsg, snap Snapshot) {
+	if f.isWebhook() && f.focus >= hookURLRow {
+		f.hookEdit(msg)
+		return
+	}
+	if f.focus == 1 && f.editing {
+		return // the kind of a saved channel does not change
+	}
 	if f.focus == 1 || f.focus == 2 {
 		options := config.ChannelKinds
 		if f.focus == 2 {
@@ -97,11 +109,19 @@ func (m Model) handleChannelFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if f.editing {
 			first = 1
 		}
-		count := len(f.values) - first
+		count := f.fieldCount() - first
 		f.focus = first + (f.focus-first+delta+count)%count
-		f.cursor = len([]rune(f.values[f.focus]))
+		f.cursor = len([]rune(f.fieldText()))
 	case "enter":
 		channel := config.Channel{Name: f.values[0], Kind: f.values[1], SMTPServer: f.values[2], Recipients: config.ParseRecipients(f.values[3])}
+		if f.isWebhook() {
+			var err error
+			if channel, err = f.webhookChannel(m.snap); err != nil {
+				f.err = err
+				return m, nil
+			}
+			f.err = nil
+		}
 		editing := f.editing
 		f.saving = true
 		m.generation++
@@ -187,12 +207,13 @@ func renderChannelList(snap Snapshot, selected int, now time.Time, loadErr error
 	if len(snap.Channels) == 0 {
 		b.WriteString(helpStyle.Render("No channels configured.") + "\n")
 	} else {
-		widths := [4]int{4, 4, len("SMTP SERVER"), len("RECIPIENTS")}
+		widths := [4]int{4, 4, len("SMTP SERVER / ORIGIN"), len("RECIPIENTS / AUTH")}
 		rows := make([][4]string, len(snap.Channels))
 		counts := make([]int, len(rows))
 		countWidth := len("MONITORS")
 		for i, c := range snap.Channels {
-			rows[i] = [4]string{c.Name, c.Kind, c.SMTPServer, strings.Join(c.Recipients, ", ")}
+			target, detail := channelTarget(c)
+			rows[i] = [4]string{c.Name, c.Kind, target, detail}
 			for j, v := range rows[i] {
 				widths[j] = max(widths[j], ansi.StringWidth(v))
 			}
@@ -213,7 +234,7 @@ func renderChannelList(snap Snapshot, selected int, now time.Time, loadErr error
 			out.WriteString(strings.Repeat(" ", countWidth-ansi.StringWidth(last)) + last)
 			return out.String()
 		}
-		b.WriteString(headerStyle.Render(line(" ", [4]string{"NAME", "KIND", "SMTP SERVER", "RECIPIENTS"}, "MONITORS")) + "\n")
+		b.WriteString(headerStyle.Render(line(" ", [4]string{"NAME", "KIND", "SMTP SERVER / ORIGIN", "RECIPIENTS / AUTH"}, "MONITORS")) + "\n")
 		for i, row := range rows {
 			marker := " "
 			if i == selected {
@@ -233,6 +254,24 @@ func renderChannelForm(f channelForm, snap Snapshot, now time.Time, loadErr erro
 		title = "Edit channel"
 	}
 	b.WriteString(titleStyle.Render(title) + "\n" + renderBanners(snap, now, loadErr))
+	if f.isWebhook() {
+		f.renderHookRows(&b, snap)
+		if f.err != nil {
+			b.WriteString("\n" + warnStyle.Render("Cannot save channel: "+f.err.Error()) + "\n")
+		}
+		b.WriteString(f.hookHelp())
+		switch {
+		case f.saving:
+			b.WriteString(renderHelp("Saving channel… · ctrl+c quit"))
+		case f.focus == 1:
+			b.WriteString(renderHelp("←/→ choose kind · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
+		case f.focus == hookURLRow || f.focus == hookAuthRow:
+			b.WriteString(renderHelp("←/→ keep/replace/clear a saved value · type to replace · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
+		default:
+			b.WriteString(renderHelp("tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
+		}
+		return b.String()
+	}
 	for i, label := range channelLabels {
 		marker := " "
 		value := f.values[i]

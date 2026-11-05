@@ -41,6 +41,9 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			certWidth = 9
 		}
 		showTrend := width <= 0 || width >= max(78, nameWidth+55+statusWidth+certWidth)
+		// A tcp tag follows the name when the list has room for it.
+		tcpTag := tcpTagWidth(snap, width, nameWidth, statusWidth, certWidth)
+		nameWidth += tcpTag
 		row := func(marker, dot, name, status, latency, trend, cert, last, muted, reason string) string {
 			padding := strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name)))
 			middle := ""
@@ -72,8 +75,9 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			if i == selected {
 				name = selectedNameStyle.Render(name)
 			}
+			name = tagTCP(name, s.Check, nameWidth, tcpTag)
 			cert := ""
-			if anyCert {
+			if anyCert && s.Check.Kind != kindTCP {
 				cert = helpStyle.Render("—")
 			}
 			if s.HasCert {
@@ -104,7 +108,7 @@ func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width 
 
 func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr error, width int, opts detailOptions) string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + s.Check.URL + "\n")
+	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + s.Check.Target() + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
 
 	// Sections are separated by one blank line; a header sits right above its rows.
@@ -145,18 +149,19 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		section("CONFIG")
 		field("Interval", s.Check.Interval.String())
 		field("Timeout", s.Check.Timeout.String())
-		field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
+		if s.Check.Kind == kindTCP {
+			field("Type", "TCP connect · no TLS validation, no application health")
+		} else {
+			field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
+			renderRequestFields(field, s.Check)
+		}
 		channel := s.Check.Channel
 		if channel == "" {
 			channel = "none"
 		}
 		for _, c := range snap.Channels {
 			if c.Name == s.Check.Channel && s.Check.Channel != "" {
-				noun := "recipients"
-				if len(c.Recipients) == 1 {
-					noun = "recipient"
-				}
-				channel += " " + helpStyle.Render(fmt.Sprintf("(%s via %s → %d %s)", c.Kind, c.SMTPServer, len(c.Recipients), noun))
+				channel += " " + helpStyle.Render(channelSummary(c))
 				break
 			}
 		}

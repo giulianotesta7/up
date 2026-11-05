@@ -79,9 +79,11 @@ func TestSendTestReturnsErrors(t *testing.T) {
 	if err := n.SendTest(context.Background(), "missing"); err == nil || !strings.Contains(err.Error(), `"missing" not found`) {
 		t.Fatalf("SendTest = %v, want not found", err)
 	}
+	// A webhook channel that cannot be delivered (here: no daemon key to open
+	// its sealed URL) surfaces the transport error instead of succeeding.
 	n = NewNotifier(Options{Store: customStore{found: true, channel: config.Channel{Kind: config.KindWebhook}}, Logger: quiet()})
-	if err := n.SendTest(context.Background(), "hook"); !errors.Is(err, ErrWebhookUnavailable) {
-		t.Fatalf("SendTest = %v, want ErrWebhookUnavailable surfaced", err)
+	if err := n.SendTest(context.Background(), "hook"); err == nil {
+		t.Fatal("SendTest succeeded on an undeliverable webhook channel")
 	}
 }
 
