@@ -160,20 +160,23 @@ func TestUpdateCheckProtectedValueEdits(t *testing.T) {
 	}
 }
 
-func TestDuplicateHeaderNamesKeepInOrder(t *testing.T) {
+// Header names are unique without regard to case: keep-by-name could
+// otherwise keep the wrong value after a row is removed.
+func TestDuplicateHeaderNamesAreRejected(t *testing.T) {
 	s, _ := seeded(t)
 	c := definition("dup")
 	c.Headers = []config.Header{{Name: "X", Value: seal(1), Edit: config.EditReplace}, {Name: "x", Value: seal(2), Edit: config.EditReplace}}
-	if err := s.AddCheck(ctx, c); err != nil {
+	if err := s.AddCheck(ctx, c); !errors.Is(err, store.ErrValidation) {
+		t.Fatalf("AddCheck = %v, want ErrValidation", err)
+	}
+	checks, err := s.Checks(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	got := stored(t, s, "dup")
-	got.Headers = []config.Header{{Name: "X"}, {Name: "x"}}
-	if err := s.UpdateCheck(ctx, got); err != nil {
-		t.Fatal(err)
-	}
-	if h := stored(t, s, "dup").Headers; !reflect.DeepEqual(h[0].Value, seal(1)) || !reflect.DeepEqual(h[1].Value, seal(2)) {
-		t.Fatalf("headers = %+v", h)
+	for _, got := range checks {
+		if got.Name == "dup" {
+			t.Fatal("rejected check was stored")
+		}
 	}
 }
 

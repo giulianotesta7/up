@@ -153,6 +153,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 			field("Type", "TCP connect · no TLS validation, no application health")
 		} else {
 			field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
+			renderRequestFields(field, s.Check)
 		}
 		channel := s.Check.Channel
 		if channel == "" {

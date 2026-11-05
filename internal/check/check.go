@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/giulianotesta7/up/internal/config"
+	"github.com/giulianotesta7/up/internal/secret"
 )
 
 // Status is the outcome of one check run.
@@ -61,6 +62,9 @@ type Checker struct {
 	Now    func() time.Time
 	// Dial opens TCP check connections; nil dials directly.
 	Dial DialFunc
+	// Key opens the sealed request headers and body; nil when the daemon has
+	// none, in which case checks with protected values are down.
+	Key *secret.Key
 }
 
 // New returns a Checker using its own HTTP client and the wall clock.
@@ -69,7 +73,7 @@ func New() *Checker {
 }
 
 // Run performs one check for c: a TCP connect for Kind tcp, otherwise one
-// GET request. Redirects are followed and the final
+// request (GET unless it sets a method). Redirects are followed and the final
 // status is compared with c.ExpectedStatus.
 func (ch *Checker) Run(ctx context.Context, c config.Check) Result {
 	if c.Kind == config.CheckTCP {
@@ -80,19 +84,20 @@ func (ch *Checker) Run(ctx context.Context, c config.Check) Result {
 	reqCtx, cancel := context.WithTimeout(ctx, c.Timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, c.URL, nil)
+	req, err := ch.newRequest(reqCtx, c)
 	if err != nil {
 		res.Status, res.Error = StatusDown, err.Error()
 		return res
 	}
-	req.Header.Set("User-Agent", userAgent)
 
 	start := time.Now()
-	resp, err := ch.Client.Do(req)
+	resp, err := ch.client(c).Do(req)
 	if err != nil {
 		switch {
 		case ctx.Err() != nil:
 			res.Status = StatusCanceled
+		case errors.Is(err, errRedirectLeavesOrigin):
+			res.Status, res.Error = StatusDown, errRedirectLeavesOrigin.Error()
 		case errors.Is(err, context.DeadlineExceeded) || isTimeout(err):
 			res.Status, res.Error = StatusDown, fmt.Sprintf("timeout after %s", c.Timeout)
 		default:
@@ -101,8 +106,7 @@ func (ch *Checker) Run(ctx context.Context, c config.Check) Result {
 		return res
 	}
 	res.Latency = time.Since(start)
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrain))
-	resp.Body.Close()
+	defer resp.Body.Close()
 
 	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
 		cert := resp.TLS.PeerCertificates[0]
@@ -114,11 +118,29 @@ func (ch *Checker) Run(ctx context.Context, c config.Check) Result {
 	}
 	res.StatusCode = resp.StatusCode
 	if resp.StatusCode != c.ExpectedStatus {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrain))
 		res.Status = StatusDown
 		res.Error = fmt.Sprintf("unexpected status %d (expected %d)", resp.StatusCode, c.ExpectedStatus)
 		return res
 	}
-	res.Status = StatusUp
+	if c.ExpectText == "" {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrain))
+		res.Status = StatusUp
+		return res
+	}
+	found, truncated, err := findText(resp.Body, c.ExpectText)
+	switch {
+	case err != nil && ctx.Err() != nil:
+		res.Status = StatusCanceled
+	case err != nil && (errors.Is(err, context.DeadlineExceeded) || isTimeout(err)):
+		res.Status, res.Error = StatusDown, fmt.Sprintf("timeout after %s", c.Timeout)
+	case err != nil:
+		res.Status, res.Error = StatusDown, err.Error()
+	case !found:
+		res.Status, res.Error = StatusDown, textFailure(truncated)
+	default:
+		res.Status = StatusUp
+	}
 	return res
 }
 

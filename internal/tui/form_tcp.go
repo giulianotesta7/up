@@ -28,7 +28,9 @@ func (f monitorForm) kindName() string {
 }
 
 // choiceFocus reports whether the focused row is chosen with ←/→ instead of typed.
-func (f monitorForm) choiceFocus() bool { return f.focus >= focusChannel && f.focus != focusPort }
+func (f monitorForm) choiceFocus() bool {
+	return f.focus >= focusChannel && f.focus < focusAdvanced && f.focus != focusPort
+}
 
 // order is the tab order of the focusable rows, Type first. An existing
 // monitor's name is displayed, never focused.
@@ -42,6 +44,12 @@ func (f monitorForm) order() []int {
 	if f.editing {
 		rows = append(rows[:1:1], rows[2:]...)
 	}
+	if !f.isTCP() {
+		rows = append(rows, focusAdvanced)
+		for i := range f.adv.stops() {
+			rows = append(rows, focusCount+i)
+		}
+	}
 	return rows
 }
 
@@ -53,7 +61,7 @@ func (f *monitorForm) text() *string {
 	case f.focus == focusPort:
 		return &f.port
 	}
-	return nil
+	return f.advText()
 }
 
 // setKind switches the monitor type. The other type's values are dropped, not
@@ -70,6 +78,7 @@ func (f *monitorForm) setKind(kind string) {
 		f.values[4] = "200"
 	}
 	f.base = config.Check{Name: f.base.Name}
+	f.adv = advancedForm{}
 }
 
 func editTCPForm(c config.Check, detail bool) *monitorForm {
