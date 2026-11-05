@@ -243,7 +243,7 @@ func TestDetailView(t *testing.T) {
 		"Status      DOWN", "Last error  " + reason, "Down since  Oct 25 03:44:00 (1m ago)",
 		"84ms", "older", "AVG      P95      MAX      FAILED", "84ms     84ms     84ms     3 of 5",
 		"Oct 25 03:44:00 → ongoing",
-		"Oct 25 03:12:00 → Oct 25 03:40:00 (28m0s)",
+		"Oct 25 03:12:00 → Oct 25 03:40:00 (28m)",
 		"esc back",
 	} {
 		if !strings.Contains(out, want) {

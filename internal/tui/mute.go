@@ -157,6 +157,22 @@ func renderMute(p mutePrompt, snap Snapshot, now time.Time, loadErr error) strin
 	return b.String()
 }
 
+// outageDuration renders how long an outage lasted as "45s", "1m 33s",
+// "28m", "3h 12m" or "2d 2h": seconds matter for short outages only.
+func outageDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", max(0, int(d.Seconds())))
+	}
+	if d < time.Hour {
+		minutes, seconds := int(d.Minutes()), int(d.Seconds())%60
+		if seconds == 0 {
+			return fmt.Sprintf("%dm", minutes)
+		}
+		return fmt.Sprintf("%dm %ds", minutes, seconds)
+	}
+	return timeLeft(d)
+}
+
 // timeLeft renders a remaining mute as "45s", "28m" or "3h 12m".
 func timeLeft(d time.Duration) string {
 	switch {
