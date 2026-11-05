@@ -232,7 +232,7 @@ func TestDetailShowsMethodAndExpectedTextWithoutSecrets(t *testing.T) {
 	c := config.Check{Name: "api", URL: "https://example.com", Interval: 30e9, Timeout: 5e9, ExpectedStatus: 200,
 		Method: "POST", ExpectText: "Ready", Headers: []config.Header{{Name: "X", Value: secret.Sealed{Key: []byte{1}, Data: []byte("sealed-data")}}}, Body: secret.Sealed{Key: []byte{1}, Data: []byte("sealed-body")}}
 	out := ansi.Strip(renderDetail(Snapshot{}, Service{Check: c}, now, nil, 80))
-	if !strings.Contains(out, "Method      POST") || !strings.Contains(out, `Text        contains "Ready"`) || strings.Contains(out, "sealed") {
+	if !strings.Contains(out, "Method       POST") || !strings.Contains(out, `Text         contains "Ready"`) || strings.Contains(out, "sealed") {
 		t.Fatalf("detail:\n%s", out)
 	}
 	plain := ansi.Strip(renderDetail(Snapshot{}, Service{Check: config.Check{Name: "api", URL: "https://example.com", Interval: 30e9, Timeout: 5e9, ExpectedStatus: 200}}, now, nil, 80))

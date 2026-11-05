@@ -60,7 +60,7 @@ func TestMaintenancePopupListsWindows(t *testing.T) {
 	requireText(t, m, "Maintenance · api",
 		"Mon, Fri 23:00 + 2h · America/New_York · crosses midnight",
 		"Sun 03:00 + 2h · UTC",
-		"Alerts are held during a window or while muted. Checks and uptime keep counting.",
+		"Alerts are held during a maintenance window or while muted.", "Checks and uptime keep counting.",
 		"↑/↓ choose · a add · e edit · d delete · esc close")
 	if strings.Contains(view(m), "Sun 03:00 + 2h · UTC · crosses") {
 		t.Fatalf("a window inside the day is not crossing midnight:\n%s", view(m))
@@ -74,14 +74,14 @@ func TestMaintenancePopupListsWindows(t *testing.T) {
 func TestMaintenancePopupWithoutWindows(t *testing.T) {
 	_, m := maintenanceModel(t)
 	m, _ = press(t, m, keyW)
-	requireText(t, m, "No windows yet. Press a to add one.")
+	requireText(t, m, "No maintenance windows yet. Press a to add one.")
 }
 
 func TestMaintenanceAddWindow(t *testing.T) {
 	s, m := maintenanceModel(t)
 	m, _ = press(t, m, keyW, keyA)
 	// The zone defaults to the viewer's, and the start and duration to 02:00 and 1h.
-	requireText(t, m, "Add window", "02:00", "1h", "UTC")
+	requireText(t, m, "Add maintenance window", "02:00", "1h", "UTC")
 	// Monday and Friday: the day cursor starts on Monday.
 	m, _ = press(t, m, keySpace, keyRight, keyRight, keyRight, keyRight, keySpace)
 	m, _ = press(t, m, keyTab)
@@ -130,7 +130,7 @@ func TestMaintenanceRejectedWindowsStoreNothingAndShowWhy(t *testing.T) {
 			if cmd != nil {
 				t.Fatal("an invalid window was submitted")
 			}
-			requireText(t, m, "Cannot save: ", tc.want, "Add window")
+			requireText(t, m, "Cannot save: ", tc.want, "Add maintenance window")
 			if got := windowsOf(t, s); len(got) != 0 {
 				t.Fatalf("stored %+v", got)
 			}
@@ -142,7 +142,7 @@ func TestMaintenanceEditAndDeleteWindow(t *testing.T) {
 	s, m := maintenanceModel(t, lateNight, sundayNight)
 	// The list is in store order; edit the first.
 	m, _ = press(t, m, keyW, keyE)
-	requireText(t, m, "Edit window", "23:00", "2h", "America/New_York")
+	requireText(t, m, "Edit maintenance window", "23:00", "2h", "America/New_York")
 	m, _ = press(t, m, keyTab)
 	m = replaceField(t, m, "23:00", "22:30")
 	m, cmd := press(t, m, keyEnter)
@@ -153,7 +153,7 @@ func TestMaintenanceEditAndDeleteWindow(t *testing.T) {
 	}
 	// Esc from the confirmation deletes nothing; y deletes the selected one.
 	m, _ = press(t, m, keyDown, keyD)
-	requireText(t, m, "Delete the window Sun 03:00 + 2h · UTC?", "y delete · n cancel")
+	requireText(t, m, "Delete the maintenance window Sun 03:00 + 2h · UTC?", "y delete · n cancel")
 	m, _ = press(t, m, keyEsc)
 	if len(windowsOf(t, s)) != 2 {
 		t.Fatal("cancelled delete removed a window")
@@ -173,7 +173,7 @@ func TestMaintenanceActiveWindowShownInListAndDetail(t *testing.T) {
 		t.Fatalf("list lacks the window or shows a mute:\n%s", list)
 	}
 	m, _ = press(t, m, keyEnter)
-	requireText(t, m, "Window", "until 05:00 (1h 15m left)", "nothing pending", "Windows", "1 window (w to edit)")
+	requireText(t, m, "Maintenance  until 05:00 (1h 15m left)", "nothing pending", "Maintenance  1 window (w to edit)")
 	if strings.Contains(view(m), "Muted") {
 		t.Fatalf("detail shows a mute:\n%s", view(m))
 	}
@@ -316,7 +316,7 @@ func TestMaintenanceWithoutWriterShowsAnError(t *testing.T) {
 	m, _ = press(t, next.(Model), keyW, keyA, keySpace)
 	m, cmd := press(t, m, keyEnter)
 	m = finishCommand(t, m, cmd)
-	requireText(t, m, "Cannot save: this server does not support maintenance windows", "Add window")
+	requireText(t, m, "Cannot save: this server does not support maintenance windows", "Add maintenance window")
 	if got := windowsOf(t, s); len(got) != 0 {
 		t.Fatalf("stored %+v", got)
 	}

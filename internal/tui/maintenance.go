@@ -293,12 +293,13 @@ func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.
 	if held := heldLine(svc, now); held != "" {
 		b.WriteString(held + "\n")
 	}
-	b.WriteString(helpStyle.Render("Alerts are held during a window or while muted. Checks and uptime keep counting.") + "\n\n")
+	b.WriteString(helpStyle.Render("Alerts are held during a maintenance window or while muted.") + "\n")
+	b.WriteString(helpStyle.Render("Checks and uptime keep counting.") + "\n\n")
 	if p.form != nil {
 		renderWindowForm(&b, *p.form)
 	} else {
 		if len(svc.Maintenance) == 0 {
-			b.WriteString(helpStyle.Render("No windows yet. Press a to add one.") + "\n")
+			b.WriteString(helpStyle.Render("No maintenance windows yet. Press a to add one.") + "\n")
 		}
 		first, last := 0, len(svc.Maintenance)
 		if height > 0 {
@@ -335,7 +336,7 @@ func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.
 		}
 	}
 	if p.confirm && p.selected < len(svc.Maintenance) {
-		b.WriteString("\n" + fmt.Sprintf("Delete the window %s?", describeWindow(svc.Maintenance[p.selected])) + "\n")
+		b.WriteString("\n" + fmt.Sprintf("Delete the maintenance window %s?", describeWindow(svc.Maintenance[p.selected])) + "\n")
 	}
 	if p.err != nil {
 		b.WriteString("\n")
@@ -357,9 +358,9 @@ func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.
 }
 
 func renderWindowForm(b *strings.Builder, f windowForm) {
-	title := "Add window"
+	title := "Add maintenance window"
 	if f.id != 0 {
-		title = "Edit window"
+		title = "Edit maintenance window"
 	}
 	b.WriteString(headerStyle.Render(title) + "\n")
 	marker := func(on bool) string {

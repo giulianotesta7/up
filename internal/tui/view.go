@@ -114,7 +114,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		b.WriteString("\n" + headerStyle.Render(title) + "\n")
 	}
 	field := func(label, value string) {
-		fmt.Fprintf(&b, "  %-10s  %s\n", label, value)
+		fmt.Fprintf(&b, "  %-11s  %s\n", label, value)
 	}
 
 	b.WriteString("\n" + headerStyle.Render("STATUS") + "\n")
@@ -141,7 +141,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		case "recovery":
 			held = "1 alert pending (recovery)"
 		}
-		field("Window", warnStyle.Render(fmt.Sprintf("until %s (%s left)", clockWithDay(s.InMaintenance.End, now), timeLeft(s.InMaintenance.End.Sub(now))))+" · "+held)
+		field("Maintenance", warnStyle.Render(fmt.Sprintf("until %s (%s left)", clockWithDay(s.InMaintenance.End, now), timeLeft(s.InMaintenance.End.Sub(now))))+" · "+held)
 	}
 	field("Last error", orDash(s.Latest.Error))
 	if streak := streakLine(s, now); streak != "" {
@@ -175,7 +175,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		}
 		field("Channel", channel)
 		if n := len(s.Maintenance); n > 0 {
-			field("Windows", plural(n, "window")+helpStyle.Render(" (w to edit)"))
+			field("Maintenance", plural(n, "window")+helpStyle.Render(" (w to edit)"))
 		}
 		if !s.thresholdsDefault() {
 			field("Alerting", fmt.Sprintf("after %s · recovers after %s", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success")))
