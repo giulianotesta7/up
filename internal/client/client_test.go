@@ -68,6 +68,10 @@ func realServer(t *testing.T) (*Client, *store.Store, *secret.Key) {
 	for _, p := range []string{"/api/v1/smtp-servers", "/api/v1/smtp-servers/", "/api/v1/channels", "/api/v1/channels/"} {
 		mux.Handle(p, alerts)
 	}
+	maintenance := remote.MaintenanceRoutes(s)
+	mux.Handle("/api/v1/checks/{name}/maintenance", maintenance)
+	mux.Handle("/api/v1/checks/{name}/maintenance/{id}", maintenance)
+	mux.Handle("/api/v1/channels/{name}/test", remote.ChannelTestRoutes(s))
 	srv := httptest.NewServer(remote.NewHandler(remote.Options{Verifier: verifier, Version: "test", Routes: mux}))
 	t.Cleanup(srv.Close)
 	return New(srv.URL, testToken), s, key
