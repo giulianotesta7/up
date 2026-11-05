@@ -146,6 +146,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		field("Interval", s.Check.Interval.String())
 		field("Timeout", s.Check.Timeout.String())
 		field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
+		renderRequestFields(field, s.Check)
 		channel := s.Check.Channel
 		if channel == "" {
 			channel = "none"

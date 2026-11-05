@@ -31,6 +31,11 @@ func TestValidateCheck(t *testing.T) {
 		{"status high", func(c *config.Check) { c.ExpectedStatus = 600 }, "must be between 100 and 599"},
 		{"status lower bound", func(c *config.Check) { c.ExpectedStatus = 100 }, ""},
 		{"status upper bound", func(c *config.Check) { c.ExpectedStatus = 599 }, ""},
+		{"duplicate header", func(c *config.Check) { c.Headers = []config.Header{{Name: "X-A"}, {Name: "x-a"}} }, `header "x-a" is repeated`},
+		{"distinct headers", func(c *config.Check) { c.Headers = []config.Header{{Name: "X-A"}, {Name: "X-B"}} }, ""},
+		{"HEAD with expected text", func(c *config.Check) { c.Method, c.ExpectText = "HEAD", "ok" }, "expected text needs a method that returns a body; HEAD does not"},
+		{"HEAD without expected text", func(c *config.Check) { c.Method = "HEAD" }, ""},
+		{"POST with expected text", func(c *config.Check) { c.Method, c.ExpectText = "POST", "ok" }, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

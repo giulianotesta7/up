@@ -27,6 +27,7 @@ const (
 	focusAlertAfter
 	focusRecoverAfter
 	focusTLS
+	focusAdvanced // fold row; the fields inside follow (form_advanced.go)
 	focusCount
 )
 
@@ -36,6 +37,7 @@ type monitorForm struct {
 	alertAfter   string
 	recoverAfter string
 	tlsExpiry    string
+	adv          advancedForm
 	focus        int
 	cursor       int // rune offset in the focused field
 	err          error
@@ -55,12 +57,17 @@ func editMonitorForm(c config.Check, detail bool) *monitorForm {
 	return &monitorForm{
 		values:  [5]string{c.Name, c.URL, c.Interval.String(), c.Timeout.String(), strconv.Itoa(c.ExpectedStatus)},
 		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: tlsChoice(c.TLSOff),
+		adv:   newAdvanced(c),
 		focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail, base: c,
 	}
 }
 
 // check converts text only; all semantic rules belong to config.ValidateCheck.
-func (f monitorForm) check() (config.Check, error) {
+func (f monitorForm) check() (config.Check, error) { return f.checkWith(nil) }
+
+// checkWith is check with the daemon public key that new protected values are
+// sealed to.
+func (f monitorForm) checkWith(key []byte) (config.Check, error) {
 	c := f.base
 	c.Name, c.URL, c.Channel = f.values[0], f.values[1], f.channel
 	var err error
@@ -80,6 +87,9 @@ func (f monitorForm) check() (config.Check, error) {
 		return c, fmt.Errorf("recover after: %w", err)
 	}
 	c.TLSOff = f.tlsExpiry == "off"
+	if err := f.applyAdvanced(&c, key); err != nil {
+		return c, err
+	}
 	return c, config.ValidateCheck(c)
 }
 
@@ -130,15 +140,11 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if f.editing {
 			first = 1 // The stored name is displayed, never focused or editable.
 		}
-		count := focusCount - first
+		count := f.stopCount() - first
 		f.focus = first + (f.focus-first+delta+count)%count
-		if f.focus < len(f.values) {
-			f.cursor = len([]rune(f.values[f.focus]))
-		} else {
-			f.cursor = 0
-		}
+		f.cursor = f.focusCursor()
 	case "enter":
-		c, err := f.check()
+		c, err := f.checkWith(m.snap.PublicKey)
 		f.err = err
 		if err != nil {
 			return m, nil
@@ -148,6 +154,9 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.generation++
 		return m, m.save(c)
 	default:
+		if f.handleAdvancedKey(msg, m.snap.HasKey) {
+			return m, nil
+		}
 		if f.focus >= focusChannel {
 			delta := 0
 			switch msg.String() {
@@ -240,7 +249,15 @@ func (f *monitorForm) edit(msg tea.KeyPressMsg) {
 }
 
 func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) string {
+	s, _ := renderFormFocus(f, snap, now, loadErr)
+	return s
+}
+
+// renderFormFocus also returns the line the focused field is on, so a tall
+// form can scroll to it.
+func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error) (string, int) {
 	var b strings.Builder
+	focusLine := 0
 	title := "New monitor"
 	if f.editing {
 		title = "Edit monitor"
@@ -256,6 +273,7 @@ func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) stri
 			value = string(runes[:f.cursor]) + accentStyle.Render("│") + string(runes[f.cursor:])
 			label = accentStyle.Render(label)
 			marker = accentStyle.Render(marker)
+			focusLine = strings.Count(b.String(), "\n")
 		}
 		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, value)
 	}
@@ -270,6 +288,7 @@ func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) stri
 		marker := " "
 		if f.focus == position {
 			marker, label = accentStyle.Render(">"), accentStyle.Render(label)
+			focusLine = strings.Count(b.String(), "\n")
 		}
 		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, rendered)
 	}
@@ -277,6 +296,7 @@ func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) stri
 	choiceLine(focusAlertAfter, "Alert after", renderChoiceUnit(f.alertAfter, "failures in a row", thresholdChoices, f.focus == focusAlertAfter))
 	choiceLine(focusRecoverAfter, "Recover after", renderChoiceUnit(f.recoverAfter, "successes in a row", thresholdChoices, f.focus == focusRecoverAfter))
 	choiceLine(focusTLS, "TLS expiry", renderChoiceUnit(f.tlsExpiry, "", tlsChoices, f.focus == focusTLS)+"   "+helpStyle.Render("HTTPS only"))
+	f.renderAdvanced(&b, snap.HasKey, &focusLine)
 	if hint := detectionHint(f); hint != "" {
 		b.WriteString("\n" + helpStyle.Render(hint) + "\n")
 	}
@@ -285,10 +305,12 @@ func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) stri
 	}
 	if f.saving {
 		b.WriteString("\n" + renderHelp("Saving monitor… · ctrl+c quit"))
+	} else if f.focus >= focusAdvanced {
+		b.WriteString("\n" + renderHelp(f.advancedHelp()))
 	} else if focused {
 		b.WriteString("\n" + renderHelp("←/→ choose · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
 	} else {
 		b.WriteString("\n" + renderHelp("tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
 	}
-	return b.String()
+	return b.String(), focusLine
 }
