@@ -118,7 +118,7 @@ The database is resolved in this order: `--db`, `$UP_DB`, `/var/lib/up/up.db` if
 
 ### Keys
 
-`j`/`k` move · `enter` details · `n` new · `e` edit · `d` delete · `m` mute · `u` unmute · `s` SMTP servers · `c` channels · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
+`j`/`k` move · `enter` details · `n` new · `e` edit · `d` delete · `m` mute · `u` unmute · `s` SMTP servers · `c` channels (`t` test the selected channel) · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
 
 In forms: `tab`/`shift+tab` switch fields · `←`/`→` choose · `enter` save · `esc` cancel.
 
@@ -133,6 +133,12 @@ In forms: `tab`/`shift+tab` switch fields · `←`/`→` choose · `enter` save 
 TLS modes: `starttls` (default, usually port 587), `tls` (usually 465) and `none` for relays without login. `none` cannot be combined with a username.
 
 Run `up serve` once before entering SMTP passwords to create `up.db.key` (required mode `0600`). **Back up the key with the database**; losing it requires re-entering passwords.
+
+### Testing a channel
+
+In the channel list (`c`), `t` opens **Test channel** for the selected channel and `enter` sends a test message. It shows **Sending test…** until the daemon answers, then either success or the reason it failed. Success means the SMTP server accepted the message ("inbox delivery is not confirmed") or the webhook answered with HTTP 2xx; it is never just "queued". The email subject and body say it is a test.
+
+A test sends no monitor checks and changes no results, streaks, mutes or certificate warnings. The daemon sends it within about 2 seconds, one at a time and with a 30 second limit; if `up serve` is not running the popup says so and nothing is queued. A channel can have one test at a time; asking for another says a test is already running. This works the same in a remote TUI.
 
 ### Muting
 
@@ -197,7 +203,7 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 | `POST /api/v1/smtp-servers`, `PUT`/`DELETE /api/v1/smtp-servers/{name}` | manages SMTP servers |
 | `POST /api/v1/channels`, `PUT`/`DELETE /api/v1/channels/{name}` | manages channels |
 | `GET`/`POST /api/v1/checks/{name}/maintenance`, `PUT`/`DELETE .../maintenance/{id}` | lists, adds, edits or deletes a monitor's maintenance windows (stored only for now) |
-| `POST`/`GET /api/v1/channels/{name}/test` | requests a channel test and reads the newest one (recorded only for now) |
+| `POST`/`GET /api/v1/channels/{name}/test` | requests a channel test (`202`, or `409` while one is active) and reads the newest one; the daemon sends it |
 
 Bodies are strict JSON, limited to 1 MiB. Errors: `400` invalid input, `404` not found, `409` duplicate or still in use. Rejected requests change nothing.
 

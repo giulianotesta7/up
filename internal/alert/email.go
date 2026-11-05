@@ -42,7 +42,9 @@ func (n *Notifier) deliverEmail(ctx context.Context, ch config.Channel, e event)
 	}
 	at := r.At.In(n.opts.Location).Format("Jan 02 15:04:05 (MST)")
 	msg := Message{From: server.Sender, To: ch.Recipients, Date: r.At}
-	if e.cert != nil {
+	if e.test {
+		msg = testMessage(ch, server.Sender, n.opts.Hostname, time.Now())
+	} else if e.cert != nil {
 		msg.Date = e.cert.Observed
 		msg.Subject, msg.Body = certMessage(c, *e.cert, e.remaining)
 	} else if r.Status == check.StatusDown {
