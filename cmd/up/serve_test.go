@@ -21,6 +21,22 @@ import (
 	"github.com/giulianotesta7/up/internal/store"
 )
 
+// A stop requested while serve is still starting is a clean shutdown, not an
+// error: the startup reads that take the context must not turn it into exit 1.
+func TestServeStopsCleanlyWhenCanceledDuringStartup(t *testing.T) {
+	isolateDefaultDatabase(t)
+	path := filepath.Join(t.TempDir(), "up.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	code, out, errOut := runCmd(ctx, "serve", "--db", path)
+	if code != 0 || out != "" || strings.Contains(errOut, "up:") {
+		t.Fatalf("serve = %d, stdout %q, stderr %q; want a clean stop", code, out, errOut)
+	}
+	if _, err := os.Stat(path + ".key"); err != nil {
+		t.Fatalf("key not created: %v", err)
+	}
+}
+
 func TestServeCreatesKey(t *testing.T) {
 	isolateDefaultDatabase(t)
 	path := filepath.Join(t.TempDir(), "up.db")
