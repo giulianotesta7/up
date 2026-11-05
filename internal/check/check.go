@@ -1,4 +1,4 @@
-// Package check runs a single HTTP check.
+// Package check runs a single HTTP or TCP check.
 package check
 
 import (
@@ -59,6 +59,8 @@ type Result struct {
 type Checker struct {
 	Client *http.Client
 	Now    func() time.Time
+	// Dial opens TCP check connections; nil dials directly.
+	Dial DialFunc
 }
 
 // New returns a Checker using its own HTTP client and the wall clock.
@@ -66,9 +68,13 @@ func New() *Checker {
 	return &Checker{Client: &http.Client{}, Now: time.Now}
 }
 
-// Run performs one GET request for c. Redirects are followed and the final
+// Run performs one check for c: a TCP connect for Kind tcp, otherwise one
+// GET request. Redirects are followed and the final
 // status is compared with c.ExpectedStatus.
 func (ch *Checker) Run(ctx context.Context, c config.Check) Result {
+	if c.Kind == config.CheckTCP {
+		return ch.runTCP(ctx, c)
+	}
 	res := Result{CheckName: c.Name, At: ch.Now()}
 
 	reqCtx, cancel := context.WithTimeout(ctx, c.Timeout)
