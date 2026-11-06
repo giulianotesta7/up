@@ -34,6 +34,23 @@ type SnapshotDTO struct {
 	LastAttempts []AttemptDTO `json:"last_attempts"`
 	// Defaults are what new monitors and maintenance windows start from.
 	Defaults DefaultsDTO `json:"defaults"`
+	// API is the daemon's API listener, which heartbeat pings reach.
+	API APIDTO `json:"api"`
+}
+
+// APIDTO is the address the daemon's API listens on, as bound, and whether
+// it serves HTTPS. An empty listen means no API.
+type APIDTO struct {
+	Listen string `json:"listen"`
+	TLS    bool   `json:"tls"`
+}
+
+// HeartbeatDTO is a heartbeat monitor's ping state (see tui.HeartbeatState).
+// The ping token is never part of it.
+type HeartbeatDTO struct {
+	Waiting  bool      `json:"waiting"`
+	LastPing time.Time `json:"last_ping"`
+	Deadline time.Time `json:"deadline"`
 }
 
 // CheckDTO is a check on the wire, in both directions.
@@ -43,7 +60,8 @@ type SnapshotDTO struct {
 // HeaderDTO.Value carry the edit (ProtectedDTO; absent keeps) and the *Set
 // fields are ignored. Kind is "http" or "tcp" (empty on write means http) and
 // Method is the HTTP method (empty on write means GET). Host has no brackets
-// for IPv6.
+// for IPv6. A heartbeat has kind "heartbeat", PeriodMS and GraceMS and none of
+// the HTTP or TCP fields; its ping token is never in a CheckDTO.
 type CheckDTO struct {
 	Name           string        `json:"name"`
 	URL            string        `json:"url"`
@@ -62,6 +80,8 @@ type CheckDTO struct {
 	ExpectText     string        `json:"expect_text"`
 	Host           string        `json:"host"`
 	Port           int           `json:"port"`
+	PeriodMS       int64         `json:"period_ms"`
+	GraceMS        int64         `json:"grace_ms"`
 }
 
 // HeaderDTO is one request header: a plain name and a protected value.
@@ -158,6 +178,8 @@ type ServiceDTO struct {
 	PeriodUpMS       int64         `json:"period_up_ms"`
 	PeriodObservedMS int64         `json:"period_observed_ms"`
 	PeriodIncidents  int           `json:"period_incidents"`
+	// Heartbeat is set for heartbeat monitors only.
+	Heartbeat *HeartbeatDTO `json:"heartbeat,omitempty"`
 }
 
 // IncidentDTO is an outage with the worst outcome of its alerts (sent,
@@ -235,7 +257,8 @@ func channelDTO(c config.Channel) ChannelDTO {
 func checkDTO(c config.Check) CheckDTO {
 	d := CheckDTO{Name: c.Name, URL: c.URL, IntervalMS: c.Interval.Milliseconds(), TimeoutMS: c.Timeout.Milliseconds(), ExpectedStatus: c.ExpectedStatus,
 		Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
-		Kind: c.Kind, Method: c.Method, BodySet: !c.Body.Empty(), ExpectText: c.ExpectText, Host: c.Host, Port: c.Port}
+		Kind: c.Kind, Method: c.Method, BodySet: !c.Body.Empty(), ExpectText: c.ExpectText, Host: c.Host, Port: c.Port,
+		PeriodMS: c.Period.Milliseconds(), GraceMS: c.Grace.Milliseconds()}
 	if d.Kind == "" {
 		d.Kind = config.CheckHTTP
 	}
@@ -307,6 +330,9 @@ func NewSnapshotDTO(s tui.Snapshot, now time.Time) SnapshotDTO {
 			x.Incidents = append(x.Incidents, IncidentDTO{i.Start.UTC(), i.End.UTC(), i.Ongoing, i.Error, string(i.Alert), i.Channel, i.Reason})
 		}
 		x.PeriodUpMS, x.PeriodObservedMS, x.PeriodIncidents = v.PeriodUp.Milliseconds(), v.PeriodObserved.Milliseconds(), v.PeriodIncidents
+		if c.Kind == config.CheckHeartbeat {
+			x.Heartbeat = &HeartbeatDTO{v.Heartbeat.Waiting, v.Heartbeat.LastPing.UTC(), v.Heartbeat.Deadline.UTC()}
+		}
 		d.Services = append(d.Services, x)
 	}
 	for _, v := range s.SMTPServers {
@@ -324,6 +350,7 @@ func NewSnapshotDTO(s tui.Snapshot, now time.Time) SnapshotDTO {
 	}
 	d.Attempts, d.LastAttempts = attemptDTOs(s.Attempts), attemptDTOs(s.LastAttempts)
 	d.Defaults = defaultsDTO(s.Defaults)
+	d.API = APIDTO{Listen: s.API.Address, TLS: s.API.TLS}
 	d.ChannelTests = []ChannelTestDTO{}
 	for _, t := range s.ChannelTests {
 		d.ChannelTests = append(d.ChannelTests, channelTestDTO(t))
@@ -365,6 +392,9 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 			x.Incidents = append(x.Incidents, tui.Incident{Outage: store.Outage{Start: i.Start, End: i.End, Ongoing: i.Ongoing, Error: i.Error}, Alert: store.Outcome(i.Alert), Channel: i.Channel, Reason: i.Reason})
 		}
 		x.PeriodUp, x.PeriodObserved, x.PeriodIncidents = time.Duration(v.PeriodUpMS)*time.Millisecond, time.Duration(v.PeriodObservedMS)*time.Millisecond, v.PeriodIncidents
+		if h := v.Heartbeat; h != nil {
+			x.Heartbeat = tui.HeartbeatState{Waiting: h.Waiting, LastPing: zeroUTC(h.LastPing), Deadline: zeroUTC(h.Deadline)}
+		}
 		s.Services = append(s.Services, x)
 	}
 	for _, v := range d.SMTPServers {
@@ -392,7 +422,17 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 	}
 	s.Attempts, s.LastAttempts = Attempts(d.Attempts), Attempts(d.LastAttempts)
 	s.Defaults = d.Defaults.defaults()
+	s.API = config.APIListener{Address: d.API.Listen, TLS: d.API.TLS}
 	return s
+}
+
+// zeroUTC keeps an unset time the zero value, which JSON turns into a
+// non-zero location otherwise.
+func zeroUTC(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Time{}
+	}
+	return t
 }
 
 // SnapshotRoutes serves the authenticated snapshot endpoint.
@@ -426,7 +466,8 @@ func placeholder(key []byte) secret.Sealed { return secret.Sealed{Key: key, Data
 func (c CheckDTO) snapshotCheck(key []byte) config.Check {
 	out := config.Check{Name: c.Name, URL: c.URL, Interval: time.Duration(c.IntervalMS) * time.Millisecond, Timeout: time.Duration(c.TimeoutMS) * time.Millisecond,
 		ExpectedStatus: c.ExpectedStatus, Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
-		Kind: c.Kind, Method: c.Method, ExpectText: c.ExpectText, Host: c.Host, Port: c.Port}
+		Kind: c.Kind, Method: c.Method, ExpectText: c.ExpectText, Host: c.Host, Port: c.Port,
+		Period: time.Duration(c.PeriodMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond}
 	if c.BodySet {
 		out.Body = placeholder(key)
 	}

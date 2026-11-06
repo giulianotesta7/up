@@ -27,11 +27,16 @@ func TestTUICreationHelp(t *testing.T) {
 		"n new monitor", "tab/shift+tab", "enter save", "esc cancel", "ctrl+c quit",
 		"30s", "5s", "200", "created if missing", "edit cannot rename", "delete removes history",
 		"e edit", "d delete", "y delete", "n cancel",
-		"Keys: ↑/↓ or k/j select · enter details (small terminals) · n new monitor · e edit · d delete · s SMTP servers · c channels · a toggle animation · ? all keys · esc back · q/ctrl+c quit",
+		"Keys: ↑/↓ or k/j select · enter details (small terminals) · n new monitor · e edit · d delete · s SMTP servers · c channels · v ping URL (heartbeats) · a toggle animation · ? all keys · esc back · q/ctrl+c quit",
 		"Terminals of at least 110x30 show the selected monitor's detail beside the list, with an activity feed below; enter is not needed there.",
 		"Manage SMTP servers and channels for email alerts with s and c; choose a monitor's channel in its form.",
 		"SMTP passwords are encrypted with the key that 'up serve' keeps in <db>.key; run it once before entering a password, and back up that file with the database.",
 		"Channels are email or webhook (a generic JSON POST, not a native Slack or Discord format); webhook URLs and auth values use the same key and are never shown again.",
+		"Type chooses HTTP, TCP or Heartbeat with ←/→",
+		"A heartbeat takes a period and a grace; its job POSTs to a ping URL, which needs 'up serve --api-listen'.",
+		"WAITING until the first ping",
+		"The URL is shown once after saving; v in the detail shows it again, and Token: new in Edit monitor replaces it.",
+		"v ping URL (heartbeats)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help missing %q: %s", want, out)

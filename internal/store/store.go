@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 8
+const schemaVersion = 9
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -166,6 +166,25 @@ CREATE TABLE delivery_attempts (
 CREATE INDEX delivery_attempts_by_time ON delivery_attempts (at_ns);
 CREATE INDEX delivery_attempts_by_channel ON delivery_attempts (channel, at_ns);
 CREATE INDEX delivery_attempts_by_monitor ON delivery_attempts (monitor, at_ns);
+`,
+	// v8 -> v9: heartbeat monitors and the daemon's API address. Additive:
+	// existing rows read period and grace 0 and no token (HTTP and TCP checks
+	// have none). The ping token is sealed like webhook URLs so it can be
+	// shown again, and its SHA-256 hash finds the monitor without opening any
+	// token. daemon_api is one row (id = 1) written by every `up serve` start;
+	// an empty listen means the daemon has no API.
+	`
+ALTER TABLE checks ADD COLUMN period_ns       INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE checks ADD COLUMN grace_ns        INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE checks ADD COLUMN ping_token      BLOB    NOT NULL DEFAULT x'';
+ALTER TABLE checks ADD COLUMN ping_token_key  BLOB    NOT NULL DEFAULT x'';
+ALTER TABLE checks ADD COLUMN ping_token_hash BLOB    NOT NULL DEFAULT x'';
+CREATE UNIQUE INDEX checks_by_ping_token ON checks (ping_token_hash) WHERE ping_token_hash != x'';
+CREATE TABLE daemon_api (
+	id     INTEGER PRIMARY KEY CHECK (id = 1),
+	listen TEXT    NOT NULL,
+	tls    INTEGER NOT NULL
+);
 `,
 }
 
@@ -368,9 +387,14 @@ func insertCheck(ctx context.Context, tx *sql.Tx, position int, c config.Check, 
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx,
+	if _, err = tx.ExecContext(ctx,
 		"INSERT INTO checks (position, "+checkColumns+") VALUES (?, "+checkPlaceholders+")",
-		append([]any{position}, f.values(c)...)...)
+		append([]any{position}, f.values(c)...)...); err != nil {
+		return err
+	}
+	if c.Kind == config.CheckHeartbeat {
+		_, err = setPingToken(ctx, tx, c.Name)
+	}
 	return err
 }
 

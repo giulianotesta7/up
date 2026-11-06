@@ -14,6 +14,7 @@ import (
 
 	"github.com/giulianotesta7/up/internal/alert"
 	"github.com/giulianotesta7/up/internal/check"
+	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/monitor"
 	"github.com/giulianotesta7/up/internal/remote"
 	"github.com/giulianotesta7/up/internal/secret"
@@ -46,6 +47,13 @@ or HTTPS with --tls-cert and --tls-key together.
 The access token hash is stored in <db>.token (0600); a new token is shown once on
 stderr. Use up token reset to replace it. GET /api/v1/snapshot returns the current
 monitoring snapshot without SMTP passwords.
+
+Heartbeat monitors are pinged on the same listener, without the access token:
+POST /api/v1/heartbeat/<token> when the job succeeds and
+POST /api/v1/heartbeat/<token>/fail when it fails. Each monitor has its own token,
+shown and replaced in up tui; it only records pings. Without --api-listen pings
+cannot arrive. Requests are rate limited per token, per client address and overall
+(429 when exceeded).
 
 API and retention flags also read environment variables: UP_API_LISTEN,
 UP_TLS_CERT, UP_TLS_KEY and UP_RETENTION. An explicit flag overrides its variable.
@@ -157,12 +165,19 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var apiDone <-chan error
 	if *apiListen != "" {
 		var err error
-		apiDone, err = startAPI(apiCtx, cancelAPI, *apiListen, *tlsCert, *tlsKey, *dbPath+".token", stderr, s)
+		apiDone, err = startAPI(apiCtx, cancelAPI, *apiListen, *tlsCert, *tlsKey, *dbPath+".token", stderr, s, key)
 		if err != nil {
 			fmt.Fprintf(stderr, "up: %v\n", err)
 			return 1
 		}
 		defer func() { cancelAPI(); <-apiDone }()
+	} else if err := s.SetAPIListener(ctx, config.APIListener{}); err != nil {
+		// Without an API no heartbeat ping can arrive; the TUI says so.
+		if ctx.Err() != nil {
+			return 0
+		}
+		fmt.Fprintf(stderr, "up: %v\n", err)
+		return 1
 	}
 	ctx = apiCtx
 	hostname, _ := os.Hostname()

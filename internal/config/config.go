@@ -27,14 +27,14 @@ type Mute struct {
 	WasAlerting bool
 }
 
-// Check is one validated check, HTTP (the default) or TCP.
+// Check is one validated check, HTTP (the default), TCP or heartbeat.
 //
 // A Check holds a slice, so it is not comparable with ==; use SameDefinition.
 // Build one from external input (API, form) and call Canonical before storing
 // or comparing it; the store does so on every write.
 type Check struct {
 	Name string
-	// Kind is CheckHTTP or CheckTCP; empty means HTTP.
+	// Kind is CheckHTTP, CheckTCP or CheckHeartbeat; empty means HTTP.
 	Kind           string
 	URL            string
 	Interval       time.Duration
@@ -67,6 +67,12 @@ type Check struct {
 	// TLSOff turns off certificate monitoring for an HTTPS check: no
 	// expiry warnings and no stored certificate. The zero value keeps it on.
 	TLSOff bool
+	// Period is how often a heartbeat's job pings and Grace how late a ping
+	// may still arrive: the check is down when no ping arrives within
+	// Period + Grace of the last one. Heartbeat checks only, which have no
+	// URL, method, expected status, interval or timeout.
+	Period time.Duration
+	Grace  time.Duration
 }
 
 // MaxAlertThreshold is the largest AlertAfter and RecoverAfter.
@@ -99,9 +105,32 @@ func ValidateCheck(c Check) error {
 	var errs []error
 	switch c.Kind {
 	case "", CheckHTTP, CheckTCP:
+	case CheckHeartbeat:
+		errs = validateHeartbeatFields(c)
 	default:
-		errs = append(errs, fmt.Errorf("kind %q must be http or tcp", c.Kind))
+		errs = append(errs, fmt.Errorf("kind %q must be http, tcp or heartbeat", c.Kind))
 	}
+	switch {
+	case c.Kind == CheckHeartbeat:
+	case c.Period != 0 || c.Grace != 0:
+		errs = append(errs, errors.New("period and grace are only for heartbeat checks"))
+		fallthrough
+	default:
+		errs = append(errs, validateProbe(c)...)
+	}
+	if c.AlertAfter < 0 || c.AlertAfter > MaxAlertThreshold {
+		errs = append(errs, fmt.Errorf("alert after %d must be between 1 and %d", c.AlertAfter, MaxAlertThreshold))
+	}
+	if c.RecoverAfter < 0 || c.RecoverAfter > MaxAlertThreshold {
+		errs = append(errs, fmt.Errorf("recover after %d must be between 1 and %d", c.RecoverAfter, MaxAlertThreshold))
+	}
+	return errors.Join(errs...)
+}
+
+// validateProbe checks the fields of a check the daemon runs itself: HTTP
+// and TCP.
+func validateProbe(c Check) []error {
+	var errs []error
 	raw := rawFromCheck(c)
 	raw.TCP = c.Kind == CheckTCP
 	_, parsed := parseCheck(raw)
@@ -111,13 +140,7 @@ func ValidateCheck(c Check) error {
 	} else {
 		errs = append(errs, validateHTTPFields(c)...)
 	}
-	if c.AlertAfter < 0 || c.AlertAfter > MaxAlertThreshold {
-		errs = append(errs, fmt.Errorf("alert after %d must be between 1 and %d", c.AlertAfter, MaxAlertThreshold))
-	}
-	if c.RecoverAfter < 0 || c.RecoverAfter > MaxAlertThreshold {
-		errs = append(errs, fmt.Errorf("recover after %d must be between 1 and %d", c.RecoverAfter, MaxAlertThreshold))
-	}
-	return errors.Join(errs...)
+	return errs
 }
 
 func rawFromCheck(c Check) rawCheck {

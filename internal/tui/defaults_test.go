@@ -47,7 +47,7 @@ func TestDefaultsPopupShowsGroupsAndBuiltinValues(t *testing.T) {
 	_, m := defaultsModel(t)
 	m, _ = press(t, m, keyF)
 	requireText(t, m, "Defaults", "New items only; existing ones keep their values.",
-		"NEW MAINTENANCE WINDOWS", "IANA zone: UTC",
+		"NEW MAINTENANCE WINDOWS", "IANA zone: UTC", "Also the time in heartbeat reasons.",
 		"NEW MONITORS", "Channel: ‹ none ›", "Add a channel with c on the list",
 		"Interval: 30s", "Timeout: 5s", "Expected status: 200",
 		"Alert after: ‹ 1 › failures in a row", "Recover after: ‹ 1 › successes in a row",

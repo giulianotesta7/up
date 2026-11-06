@@ -219,6 +219,8 @@ func (c *Client) LoadSnapshot(ctx context.Context, now time.Time) (tui.Snapshot,
 			v.Incidents[j].Start = shift(v.Incidents[j].Start)
 			v.Incidents[j].End = shift(v.Incidents[j].End)
 		}
+		v.Heartbeat.LastPing = shift(v.Heartbeat.LastPing)
+		v.Heartbeat.Deadline = shift(v.Heartbeat.Deadline)
 	}
 	return s, nil
 }
@@ -297,6 +299,8 @@ type checkWrite struct {
 	ExpectText     string          `json:"expect_text,omitempty"`
 	Host           string          `json:"host,omitempty"`
 	Port           int             `json:"port,omitempty"`
+	PeriodMS       int64           `json:"period_ms,omitempty"`
+	GraceMS        int64           `json:"grace_ms,omitempty"`
 	// CopyFrom (create only) names the stored monitor whose protected values
 	// the server copies for every value this check keeps.
 	CopyFrom string `json:"copy_from,omitempty"`
@@ -310,7 +314,8 @@ type headerWrite struct {
 func checkDTO(v config.Check) checkWrite {
 	d := checkWrite{Name: v.Name, URL: v.URL, IntervalMS: v.Interval.Milliseconds(), TimeoutMS: v.Timeout.Milliseconds(), ExpectedStatus: v.ExpectedStatus, Channel: v.Channel,
 		AlertAfter: v.AlertAfter, RecoverAfter: v.RecoverAfter, TLSOff: v.TLSOff, Kind: v.Kind, Method: v.Method,
-		Body: protectedFor(v.BodyEdit, v.Body), ExpectText: v.ExpectText, Host: v.Host, Port: v.Port}
+		Body: protectedFor(v.BodyEdit, v.Body), ExpectText: v.ExpectText, Host: v.Host, Port: v.Port,
+		PeriodMS: v.Period.Milliseconds(), GraceMS: v.Grace.Milliseconds()}
 	for _, h := range v.Headers {
 		d.Headers = append(d.Headers, headerWrite{Name: h.Name, Value: protectedFor(h.Edit, h.Value)})
 	}
@@ -471,6 +476,37 @@ var _ tui.MaintenanceStore = (*Client)(nil)
 var _ tui.CheckCopier = (*Client)(nil)
 var _ tui.ChannelTester = (*Client)(nil)
 var _ tui.DefaultsStore = (*Client)(nil)
+var _ tui.HeartbeatTokens = (*Client)(nil)
+
+// RevealHeartbeatToken asks the server, which holds the key, for the ping
+// token of the heartbeat monitor n.
+func (c *Client) RevealHeartbeatToken(ctx context.Context, n string) (string, error) {
+	return c.heartbeatToken(ctx, http.MethodGet, n)
+}
+
+// RegenerateHeartbeatToken asks the server to replace the ping token of the
+// heartbeat monitor n and returns the new one.
+func (c *Client) RegenerateHeartbeatToken(ctx context.Context, n string) (string, error) {
+	return c.heartbeatToken(ctx, http.MethodPost, n)
+}
+
+func (c *Client) heartbeatToken(ctx context.Context, method, n string) (string, error) {
+	if err := addressable(n); err != nil {
+		return "", err
+	}
+	status, b, err := c.request(ctx, method, item("checks", n)+"/heartbeat-token", nil)
+	if err != nil {
+		return "", err
+	}
+	if status < 200 || status >= 300 {
+		return "", c.responseError(status, b)
+	}
+	var d remote.HeartbeatTokenDTO
+	if json.Unmarshal(b, &d) != nil || d.Token == "" || clean(d.Token) != d.Token || strings.ContainsAny(d.Token, "/?#") {
+		return "", errors.New("client: invalid response")
+	}
+	return d.Token, nil
+}
 
 // SetDefaults replaces the server's defaults; they come back in the next
 // snapshot.

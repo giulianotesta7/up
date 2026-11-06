@@ -107,7 +107,7 @@ func tables(t *testing.T, path string) []string {
 	return names
 }
 
-var v2Tables = []string{"alert_state", "certs", "channel_tests", "channels", "checks", "daemon", "defaults", "delivery_attempts", "maintenance_windows", "mutes", "results", "secret_key", "smtp_servers", "sqlite_sequence"}
+var v2Tables = []string{"alert_state", "certs", "channel_tests", "channels", "checks", "daemon", "daemon_api", "defaults", "delivery_attempts", "maintenance_windows", "mutes", "results", "secret_key", "smtp_servers", "sqlite_sequence"}
 
 func TestOpenMigratesV1AndKeepsData(t *testing.T) {
 	path := v1Database(t)
@@ -119,8 +119,8 @@ func TestOpenMigratesV1AndKeepsData(t *testing.T) {
 	}
 	defer s.Close()
 
-	if got := version(t, path); got != 8 {
-		t.Fatalf("user_version after Open = %d, want 8", got)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version after Open = %d, want %d", got, schemaVersion)
 	}
 	if got := tables(t, path); !reflect.DeepEqual(got, v2Tables) {
 		t.Fatalf("tables after migration = %v, want %v", got, v2Tables)
@@ -159,8 +159,8 @@ func TestOpenCreatesV2AndReopenIsIdempotent(t *testing.T) {
 	s, path := openTemp(t)
 	record(t, s, result("api", 0, check.StatusUp))
 	s.Close()
-	if got := version(t, path); got != 8 {
-		t.Fatalf("user_version of a new database = %d, want 8", got)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version of a new database = %d, want %d", got, schemaVersion)
 	}
 
 	again, err := Open(path)
@@ -180,7 +180,7 @@ func TestOpenReadOnlyRejectsV1WithUpgradeHint(t *testing.T) {
 	path := v1Database(t)
 
 	_, err := OpenReadOnly(path)
-	if err == nil || !strings.Contains(err.Error(), "database schema version 1 is older than this up (8); open it with `up serve` or `up tui` to upgrade it") {
+	if err == nil || !strings.Contains(err.Error(), "database schema version 1 is older than this up (9); open it with `up serve` or `up tui` to upgrade it") {
 		t.Fatalf("OpenReadOnly(v1) error = %v, want upgrade hint", err)
 	}
 	if got := version(t, path); got != 1 {
@@ -220,8 +220,8 @@ func TestOpenMigratesV5KeepingBehavior(t *testing.T) {
 		t.Fatalf("Open(v5) error = %v", err)
 	}
 	defer s.Close()
-	if got := version(t, path); got != 8 {
-		t.Fatalf("user_version = %d, want 8", got)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version = %d, want %d", got, schemaVersion)
 	}
 	ctx := context.Background()
 	checks, err := s.Checks(ctx)
@@ -247,7 +247,7 @@ func TestOpenMigratesV5KeepingBehavior(t *testing.T) {
 
 func TestOpenReadOnlyRejectsV5AndOpenUpgradesIt(t *testing.T) {
 	path := v5Database(t)
-	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 5 is older than this up (8)") {
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 5 is older than this up (9)") {
 		t.Fatalf("OpenReadOnly(v5) error = %v", err)
 	}
 	s, err := Open(path)
@@ -286,7 +286,7 @@ INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_statu
 
 func TestOpenMigratesV6WithBuiltinDefaultsAndKeepsMonitors(t *testing.T) {
 	path := v6Database(t)
-	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 6 is older than this up (8)") {
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 6 is older than this up (9)") {
 		t.Fatalf("OpenReadOnly(v6) error = %v", err)
 	}
 	s, err := Open(path)
@@ -294,8 +294,8 @@ func TestOpenMigratesV6WithBuiltinDefaultsAndKeepsMonitors(t *testing.T) {
 		t.Fatalf("Open(v6) error = %v", err)
 	}
 	defer s.Close()
-	if got := version(t, path); got != 8 {
-		t.Fatalf("user_version = %d, want 8", got)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version = %d, want %d", got, schemaVersion)
 	}
 	ctx := context.Background()
 	if d, err := s.Defaults(ctx); err != nil || d != config.BuiltinDefaults() {
@@ -369,9 +369,10 @@ func dumpTables(t *testing.T, path string, tables ...string) map[string][]string
 
 func TestOpenMigratesV7AddingOnlyTheAttemptLog(t *testing.T) {
 	path := v7Database(t)
-	tables := []string{"smtp_servers", "channels", "checks", "results", "mutes", "alert_state", "defaults", "daemon", "certs", "maintenance_windows", "channel_tests", "secret_key"}
-	before := dumpTables(t, path, tables...)
-	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 7 is older than this up (8)") {
+	// checks gains columns in v9; its v7 (and v8) columns are compared alone.
+	tables := []string{"smtp_servers", "channels", "results", "mutes", "alert_state", "defaults", "daemon", "certs", "maintenance_windows", "channel_tests", "secret_key"}
+	before, beforeChecks := dumpTables(t, path, tables...), v8Checks(t, path)
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 7 is older than this up (9)") {
 		t.Fatalf("OpenReadOnly(v7) error = %v", err)
 	}
 	s, err := Open(path)
@@ -379,11 +380,14 @@ func TestOpenMigratesV7AddingOnlyTheAttemptLog(t *testing.T) {
 		t.Fatalf("Open(v7) error = %v", err)
 	}
 	defer s.Close()
-	if got := version(t, path); got != 8 {
-		t.Fatalf("user_version = %d, want 8", got)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version = %d, want %d", got, schemaVersion)
 	}
 	if after := dumpTables(t, path, tables...); !reflect.DeepEqual(before, after) {
 		t.Fatalf("migration changed existing rows:\nbefore %v\nafter  %v", before, after)
+	}
+	if after := v8Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
+		t.Fatalf("migration changed existing checks:\nbefore %v\nafter  %v", beforeChecks, after)
 	}
 	ctx := context.Background()
 	if got, err := s.Attempts(ctx, AttemptFilter{}); err != nil || len(got) != 0 {

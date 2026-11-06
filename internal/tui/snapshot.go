@@ -3,12 +3,15 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/giulianotesta7/up/internal/check"
 	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/monitor"
+	"github.com/giulianotesta7/up/internal/secret"
 	"github.com/giulianotesta7/up/internal/store"
 )
 
@@ -79,6 +82,37 @@ type Service struct {
 	// store.UptimeWindow).
 	PeriodUp, PeriodObserved time.Duration
 	PeriodIncidents          int
+	// Heartbeat is the ping state of a heartbeat monitor; zero for other
+	// kinds. The ping token is never part of a snapshot (see HeartbeatTokens).
+	Heartbeat HeartbeatState
+}
+
+// HeartbeatState is what a heartbeat monitor's results say about its job.
+// Results come from pings, reported failures (check.Failed) and missed
+// deadlines (check.Missed).
+type HeartbeatState struct {
+	// Waiting is true before the first result: no deadline and no alerts.
+	Waiting bool
+	// LastPing is the newest ping among Recent; zero when none.
+	LastPing time.Time
+	// Deadline is when the monitor is missed without another ping: the
+	// newest result + period + grace. Zero while waiting.
+	Deadline time.Time
+}
+
+// heartbeatState derives the state from newest-first results.
+func heartbeatState(c config.Check, recent []check.Result) HeartbeatState {
+	if len(recent) == 0 {
+		return HeartbeatState{Waiting: true}
+	}
+	h := HeartbeatState{Deadline: check.NextDeadline(c, recent[0].At)}
+	for _, r := range recent {
+		if r.Status == check.StatusUp {
+			h.LastPing = r.At
+			break
+		}
+	}
+	return h
 }
 
 // Incident is an outage with the outcome of its alerts: the down alert and
@@ -168,6 +202,8 @@ func (s Service) thresholdsDefault() bool {
 // recovering one RECOVERING n/M until the recovery alert fires.
 func (s Service) Label() string {
 	switch {
+	case !s.HasResult && s.Check.Kind == config.CheckHeartbeat:
+		return "WAITING"
 	case !s.HasResult:
 		return "PENDING"
 	case s.thresholdsDefault():
@@ -211,6 +247,10 @@ type Snapshot struct {
 	// from. The zero value (no Zone) means config.BuiltinDefaults; use
 	// Snapshot.NewItemDefaults.
 	Defaults config.Defaults
+	// API is the daemon's API listener, which receives heartbeat pings. The
+	// zero value (API.Enabled false) means the daemon has no API: heartbeats
+	// need `up serve --api-listen`. API.BaseURL builds the ping URL's base.
+	API config.APIListener
 }
 
 // NewItemDefaults returns the defaults, or the built-in ones for a snapshot
@@ -308,6 +348,73 @@ type DefaultsStore interface {
 // DefaultsReader lets Load fill Snapshot.Defaults.
 type DefaultsReader interface {
 	Defaults(context.Context) (config.Defaults, error)
+}
+
+// APIListenerReader lets Load fill Snapshot.API.
+type APIListenerReader interface {
+	APIListener(context.Context) (config.APIListener, error)
+}
+
+var _ APIListenerReader = (*store.Store)(nil)
+
+// HeartbeatTokens shows and replaces heartbeat ping tokens, the only way a
+// token leaves the store. The remote client implements it through the
+// authenticated API; locally use NewLocalHeartbeatTokens. A monitor that is
+// missing or not a heartbeat is store.ErrNotFound.
+type HeartbeatTokens interface {
+	// RevealHeartbeatToken returns the current token. When it cannot be
+	// opened here the error wraps ErrRevealUnavailable and its text says why
+	// and what to do, ready to show in place of the URL.
+	RevealHeartbeatToken(ctx context.Context, name string) (string, error)
+	// RegenerateHeartbeatToken replaces the token and returns the new one;
+	// the old one stops working at once. It needs no private key.
+	RegenerateHeartbeatToken(ctx context.Context, name string) (string, error)
+}
+
+// ErrRevealUnavailable means a ping token cannot be shown on this machine.
+var ErrRevealUnavailable = errors.New("the ping URL cannot be shown here")
+
+// LocalHeartbeatTokens opens tokens with the daemon's private key, which
+// `up serve` keeps next to the database (<db>.key, mode 0600). It is read on
+// every reveal and never created, so a TUI run by a user who cannot read it
+// (a system service) gets ErrRevealUnavailable with a hint instead.
+type LocalHeartbeatTokens struct {
+	Store   *store.Store
+	KeyPath string
+}
+
+// NewLocalHeartbeatTokens uses the key of the database at databasePath.
+func NewLocalHeartbeatTokens(s *store.Store, databasePath string) LocalHeartbeatTokens {
+	return LocalHeartbeatTokens{Store: s, KeyPath: databasePath + ".key"}
+}
+
+var _ HeartbeatTokens = LocalHeartbeatTokens{}
+
+// RevealHeartbeatToken opens the stored token with the key file.
+func (l LocalHeartbeatTokens) RevealHeartbeatToken(ctx context.Context, name string) (string, error) {
+	sealed, err := l.Store.HeartbeatToken(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	// LoadOrCreate would create a missing key; only an existing one is read.
+	_, err = os.Lstat(l.KeyPath)
+	var key *secret.Key
+	if err == nil {
+		key, _, err = secret.LoadOrCreate(l.KeyPath)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%w: cannot read the encryption key %s (%v); run up tui as the user that runs up serve, or use up tui --remote", ErrRevealUnavailable, l.KeyPath, err)
+	}
+	token, err := key.Open(sealed)
+	if err != nil {
+		return "", fmt.Errorf("%w: the token was sealed with another encryption key; replace the token", ErrRevealUnavailable)
+	}
+	return token, nil
+}
+
+// RegenerateHeartbeatToken replaces the token in the store.
+func (l LocalHeartbeatTokens) RegenerateHeartbeatToken(ctx context.Context, name string) (string, error) {
+	return l.Store.RegenerateHeartbeatToken(ctx, name)
 }
 
 // MaintenanceReader lets Load fill Service.Maintenance.
@@ -439,6 +546,11 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 			return Snapshot{}, err
 		}
 	}
+	if r, ok := s.(APIListenerReader); ok {
+		if snap.API, err = r.APIListener(ctx); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	var observedMonitors int
 	checks, err := s.Checks(ctx)
 	if err != nil {
@@ -467,6 +579,9 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 		}
 		if len(svc.Recent) > 0 {
 			svc.Latest, svc.HasResult = svc.Recent[0], true
+		}
+		if c.Kind == config.CheckHeartbeat {
+			svc.Heartbeat = heartbeatState(c, svc.Recent)
 		}
 		svc.Streak = check.Replay(svc.Recent, c.FailuresToAlert(), c.SuccessesToRecover())
 		svc.KnownAlerting = svc.Streak.Alerting && c.Channel != ""

@@ -8,13 +8,23 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/remote"
+	"github.com/giulianotesta7/up/internal/secret"
 	"github.com/giulianotesta7/up/internal/tui"
 )
 
-func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, tokenPath string, stderr io.Writer, s tui.Store) (<-chan error, error) {
+// apiRecorder records the API the daemon serves. *store.Store implements it.
+type apiRecorder interface {
+	SetAPIListener(context.Context, config.APIListener) error
+}
+
+// startAPI serves the API on addr. secretKey opens heartbeat ping tokens
+// for the authenticated reveal route.
+func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, tokenPath string, stderr io.Writer, s tui.Store, secretKey *secret.Key) (<-chan error, error) {
 	_, err := remote.LoadVerifier(tokenPath)
 	missing := errors.Is(err, remote.ErrNoToken)
 	if err != nil && !missing {
@@ -40,6 +50,13 @@ func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, t
 			return nil, err
 		}
 		fmt.Fprintf(stderr, "up: access token (shown once): %s\n", token)
+	}
+	// The TUI builds heartbeat ping URLs from the bound address.
+	if r, ok := s.(apiRecorder); ok {
+		if err := r.SetAPIListener(ctx, config.APIListener{Address: listener.Addr().String(), TLS: cert != ""}); err != nil {
+			listener.Close()
+			return nil, err
+		}
 	}
 	fmt.Fprintf(stderr, "up: API listening on %s\n", listener.Addr())
 	routes := http.NewServeMux()
@@ -68,7 +85,20 @@ func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, t
 	if ts, ok := s.(remote.ChannelTestStore); ok {
 		routes.Handle("/api/v1/channels/{name}/test", remote.ChannelTestRoutes(ts))
 	}
+	if ts, ok := s.(remote.HeartbeatTokenStore); ok {
+		routes.Handle("/api/v1/checks/{name}/heartbeat-token", remote.HeartbeatTokenRoutes(ts, secretKey))
+	}
+	// Heartbeat pings carry their own token in the path and skip the access
+	// token, which never belongs in a crontab.
+	var pings http.Handler
+	if ps, ok := s.(remote.PingStore); ok {
+		pings = remote.HeartbeatRoutes(ps, remote.PingOptions{Limits: remote.DefaultPingLimits})
+	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if pings != nil && strings.HasPrefix(r.URL.Path, remote.HeartbeatPrefix) {
+			pings.ServeHTTP(w, r)
+			return
+		}
 		verifier, err := remote.LoadVerifier(tokenPath)
 		if err != nil {
 			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
