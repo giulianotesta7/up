@@ -28,7 +28,7 @@ func TestSMTPNoLoginCreateWithoutKey(t *testing.T) {
 	m = typeText(t, m, "up@example.com")
 	m, cmd := press(t, m, keyEnter)
 	m = finishCommand(t, m, cmd)
-	requireText(t, m, "SMTP servers", "relay")
+	requireText(t, m, "Mail servers", "relay")
 	servers, err := s.SMTPServers(context.Background())
 	if err != nil || len(servers) != 1 {
 		t.Fatalf("servers = %+v, %v", servers, err)
@@ -81,7 +81,7 @@ func TestSMTPNoLoginDiscardsCredentialsOnSave(t *testing.T) {
 			m, _ = press(t, m, keyRight)
 			m, cmd := press(t, m, keyEnter)
 			m = finishCommand(t, m, cmd)
-			requireText(t, m, "SMTP servers", "gmail")
+			requireText(t, m, "Mail servers", "gmail")
 			servers, err := m.store.SMTPServers(context.Background())
 			if err != nil || len(servers) != 1 {
 				t.Fatalf("servers = %+v, %v", servers, err)

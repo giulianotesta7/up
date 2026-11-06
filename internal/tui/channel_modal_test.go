@@ -25,7 +25,7 @@ func TestChannelModalStack(t *testing.T) {
 			before := view(m)
 			m, _ = press(t, m, keyC)
 			parent := view(m)
-			for _, want := range []string{"payments", "╭─ Channels", "ops@example.com"} {
+			for _, want := range []string{"Mail servers    Channels    Deliveries", "ops@example.com"} {
 				if !strings.Contains(parent, want) {
 					t.Errorf("%dx%d parent missing %q: %s", size.w, size.h, want, parent)
 				}
@@ -39,7 +39,7 @@ func TestChannelModalStack(t *testing.T) {
 				m, _ = press(t, m, keyD)
 			}
 			out := view(m)
-			for _, want := range []string{"╭─ Channels", "╭─ " + child.title, child.field} {
+			for _, want := range []string{"Mail servers    Channels    Deliveries", "╭─ " + child.title, child.field} {
 				if !strings.Contains(out, want) {
 					t.Errorf("%dx%d child missing %q: %s", size.w, size.h, want, out)
 				}
@@ -69,7 +69,7 @@ func TestChannelSmallFallback(t *testing.T) {
 	before := view(m)
 	m, _ = press(t, m, keyC)
 	parent := view(m)
-	if strings.Contains(parent, "╭") || !strings.Contains(parent, "Channels") || !strings.Contains(parent, "ops@example.com") {
+	if strings.Contains(parent, "╭") || !strings.Contains(parent, "Channels") || !strings.Contains(parent, "ops ") {
 		t.Errorf("parent fallback: %s", parent)
 	}
 	for _, tc := range []struct{ key, title string }{{"n", "New channel"}, {"e", "Edit channel"}, {"d", "Delete channel"}} {
@@ -121,7 +121,7 @@ func TestChannelModalDetailReturn(t *testing.T) {
 	before := view(m)
 	m, _ = press(t, m, keyC)
 	parent := view(m)
-	if !strings.Contains(parent, "╭─ Channels") || !strings.Contains(parent, "esc back") {
+	if !strings.Contains(parent, "Mail servers    Channels    Deliveries") || !strings.Contains(parent, "esc back") {
 		t.Errorf("detail background missing: %s", parent)
 	}
 	m, _ = press(t, m, keyN, keyEsc)

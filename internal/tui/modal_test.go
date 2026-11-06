@@ -98,7 +98,7 @@ func TestSMTPModalStack(t *testing.T) {
 			before := view(m)
 			m, _ = press(t, m, keyS)
 			parent := view(m)
-			for _, want := range []string{"payments", "╭─ SMTP servers", "relay"} {
+			for _, want := range []string{"Mail servers    Channels    Deliveries", "relay"} {
 				if !strings.Contains(parent, want) {
 					t.Errorf("%dx%d parent missing %q: %s", size.w, size.h, want, parent)
 				}
@@ -112,7 +112,7 @@ func TestSMTPModalStack(t *testing.T) {
 				m, _ = press(t, m, keyD)
 			}
 			out := view(m)
-			for _, want := range []string{"╭─ SMTP servers", "╭─ " + child.title, child.field} {
+			for _, want := range []string{"Mail servers    Channels    Deliveries", "╭─ " + child.title, child.field} {
 				if !strings.Contains(out, want) {
 					t.Errorf("%dx%d child missing %q: %s", size.w, size.h, want, out)
 				}
@@ -145,7 +145,7 @@ func TestSMTPSmallFallback(t *testing.T) {
 	before := view(m)
 	m, _ = press(t, m, keyS)
 	parent := view(m)
-	if strings.Contains(parent, "╭") || !strings.Contains(parent, "SMTP servers") || !strings.Contains(parent, "relay") {
+	if strings.Contains(parent, "╭") || !strings.Contains(parent, "Mail servers") || !strings.Contains(parent, "relay") {
 		t.Errorf("parent fallback: %s", parent)
 	}
 	for _, tc := range []struct{ key, title string }{{"n", "New SMTP server"}, {"e", "Edit SMTP server"}, {"d", "Delete SMTP server"}} {
@@ -181,7 +181,7 @@ func TestSMTPModalMaskAndDetail(t *testing.T) {
 	before := view(m)
 	m, _ = press(t, m, keyS)
 	parent := view(m)
-	if !strings.Contains(parent, "╭─ SMTP servers") || !strings.Contains(parent, "esc back") {
+	if !strings.Contains(parent, "Mail servers    Channels    Deliveries") || !strings.Contains(parent, "esc back") {
 		t.Errorf("detail background missing: %s", parent)
 	}
 	m, _ = press(t, m, keyN, keyTab, keyTab, keyTab, keyTab, keyTab, keyTab)
@@ -206,11 +206,11 @@ func TestSMTPParentFallbackChildFits(t *testing.T) {
 	m.width, m.height = 80, 24
 	m, _ = press(t, m, keyS)
 	parent := view(m)
-	if strings.Contains(parent, "╭") || !strings.Contains(parent, "SMTP servers") {
+	if strings.Contains(parent, "╭") || !strings.Contains(parent, "Mail servers") {
 		t.Fatalf("parent should fall back: %s", parent)
 	}
 	m, _ = press(t, m, keyN)
-	if out := view(m); !strings.Contains(out, "╭─ New SMTP server") || !strings.Contains(out, "SMTP servers") {
+	if out := view(m); !strings.Contains(out, "╭─ New SMTP server") || !strings.Contains(out, "Mail servers") {
 		t.Errorf("fitting child over fallback parent: %s", out)
 	}
 	m, _ = press(t, m, keyEsc)

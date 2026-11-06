@@ -38,7 +38,7 @@ func TestFootersFitEightyColumns(t *testing.T) {
 func TestHelpOverlayListsEveryKey(t *testing.T) {
 	m, _ := press(t, modelWith(seededSnapshot(t, now)), keyHelp)
 	out := view(m)
-	for _, want := range []string{"↑/↓ k/j", "enter", "new monitor", "edit", "delete", "mute", "unmute", "SMTP servers", "channels", "animation", "quit", "? or esc  close"} {
+	for _, want := range []string{"↑/↓ k/j", "enter", "new monitor", "edit", "delete", "mute", "unmute", "mail servers", "channels", "animation", "quit", "? or esc  close"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("overlay missing %q:\n%s", want, out)
 		}

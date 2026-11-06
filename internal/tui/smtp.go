@@ -11,7 +11,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/secret"
 	"github.com/giulianotesta7/up/internal/store"
@@ -168,10 +167,6 @@ func (m Model) handleSMTPKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch msg.String() {
-	case "q":
-		return m, tea.Quit
-	case "esc":
-		m.smtpScreen = false
 	case "up", "k":
 		if m.smtpSelected > 0 {
 			m.smtpSelected--
@@ -194,51 +189,17 @@ func (m Model) handleSMTPKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
-func renderSMTPList(snap Snapshot, selected int, now time.Time, loadErr error) string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("SMTP servers") + "\n" + renderBanners(snap, now, loadErr))
-	if len(snap.SMTPServers) == 0 {
-		b.WriteString(helpStyle.Render("No SMTP servers configured.") + "\n")
-	} else {
-		widths := [5]int{4, 4, 4, 3, 4}
-		rows := make([][5]string, len(snap.SMTPServers))
-		for i, s := range snap.SMTPServers {
-			rows[i] = [5]string{s.Name, s.Host, strconv.Itoa(s.Port), string(s.TLS), orDash(s.Username)}
-			for j, v := range rows[i] {
-				widths[j] = max(widths[j], ansi.StringWidth(v))
-			}
-		}
-		line := func(marker string, cols [5]string, last string) string {
-			var out strings.Builder
-			out.WriteString(marker + "   ")
-			for j, v := range cols {
-				out.WriteString(v)
-				out.WriteString(strings.Repeat(" ", widths[j]-ansi.StringWidth(v)+2))
-			}
-			out.WriteString(last)
-			return out.String()
-		}
-		b.WriteString(headerStyle.Render(line(" ", [5]string{"NAME", "HOST", "PORT", "TLS", "USER"}, "PASSWORD")) + "\n")
-		for i, s := range snap.SMTPServers {
-			marker := " "
-			cols := rows[i]
-			if i == selected {
-				marker = accentStyle.Render("▌")
-				cols[0] = selectedNameStyle.Render(cols[0])
-			}
-			password := "—"
-			if !s.Password.Empty() {
-				if snap.HasKey && bytes.Equal(s.Password.Key, snap.PublicKey) {
-					password = upStyle.Render("set")
-				} else {
-					password = warnStyle.Render("needs re-entry")
-				}
-			}
-			b.WriteString(line(marker, cols, password) + "\n")
-		}
+
+// smtpPasswordState says whether a server's password is set and readable
+// with the current key.
+func smtpPasswordState(snap Snapshot, s config.SMTPServer) string {
+	if s.Password.Empty() {
+		return "—"
 	}
-	b.WriteString("\n" + renderHelp("↑/↓ select (k/j) · n new · e edit · d delete · esc back · q quit · ctrl+c quit"))
-	return b.String()
+	if snap.HasKey && bytes.Equal(s.Password.Key, snap.PublicKey) {
+		return upStyle.Render("set")
+	}
+	return warnStyle.Render("needs re-entry")
 }
 func renderSMTPForm(f smtpForm, snap Snapshot, now time.Time, loadErr error) string {
 	var b strings.Builder
