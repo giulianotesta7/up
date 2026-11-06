@@ -28,9 +28,8 @@ type listFilter struct {
 	tab          int
 	open         bool
 	total, shown int
-	// split marks the two-pane layout, which draws the bar across both panes;
-	// listWidth is the width the left pane keeps whatever the filter hides.
-	split     bool
+	// listWidth is the width the split layout's left pane keeps whatever
+	// the filter hides.
 	listWidth int
 }
 

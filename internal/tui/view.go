@@ -20,14 +20,9 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 	if len(filters) > 0 {
 		filter = filters[0]
 	}
-	if filter.active() && !filter.split {
-		// The two rows stay while the bar closes, so the list does not jump.
-		b.WriteString(filter.bar(width) + "\n\n")
-	}
-
-	if len(snap.Services) == 0 && filter.active() && filter.total > 0 {
-		b.WriteString("\n  " + noMatchLine + "\n")
-	} else if len(snap.Services) == 0 {
+	// No match keeps the table header and says so on the first row's line.
+	noMatch := len(snap.Services) == 0 && filter.active() && filter.total > 0
+	if len(snap.Services) == 0 && !noMatch {
 		b.WriteString(helpStyle.Render("No checks configured.") + "\n")
 	} else {
 		nameWidth := ansi.StringWidth("MONITOR")
@@ -104,6 +99,9 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			}
 			muted := heldCell(s, now)
 			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, statusWidth), latency, sparkline(s.Recent, 16), cert, last, muted, reason) + "\n")
+		}
+		if noMatch {
+			b.WriteString("  " + noMatchLine + "\n")
 		}
 	}
 

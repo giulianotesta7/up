@@ -656,6 +656,10 @@ func (m Model) View() tea.View {
 	if split {
 		rule = renderHostRuleCells(m.snap, m.hostname, now, m.width, position)
 	}
+	if filter.open {
+		// The bar takes the rule's row, so the list never moves.
+		rule = filter.bar(m.width)
+	}
 	header := renderTitleWidth(m.snap, m.width)
 	if filter.active() && !filter.open {
 		header = ansi.Truncate(header+"  "+helpStyle.Render(filter.summary()), max(m.width, ansi.StringWidth(header)), "")

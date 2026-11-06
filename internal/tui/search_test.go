@@ -233,8 +233,8 @@ func TestNoMatchEmptyState(t *testing.T) {
 	m, _ := press(t, searchModel(100, 30), keySlash)
 	m = typeKeys(t, m, "pagos")
 	requireText(t, m, "/ pagos█", "0 of 6 monitors", wantNoMatch)
-	if out := view(m); strings.Contains(out, "No checks configured.") || strings.Contains(out, "MONITOR") {
-		t.Errorf("unexpected list chrome:\n%s", out)
+	if out := view(m); strings.Contains(out, "No checks configured.") || headerLine(m) != 2 || strings.Index(out, wantNoMatch) < strings.Index(out, "MONITOR") {
+		t.Errorf("want the table header in place and the message under it:\n%s", out)
 	}
 	// Actions do nothing without a visible monitor.
 	m, _ = press(t, m, keyEnter)
@@ -523,5 +523,98 @@ func TestListKeysStillActOnSelectionWithoutFilter(t *testing.T) {
 	}
 	if strings.Contains(view(m), "of 6 monitors") {
 		t.Error("counter shown without a filter")
+	}
+}
+
+func lineOf(m Model, prefix func(string) bool) int {
+	for i, line := range strings.Split(view(m), "\n") {
+		if prefix(line) {
+			return i
+		}
+	}
+	return -1
+}
+
+func headerLine(m Model) int {
+	return lineOf(m, func(l string) bool { return strings.Contains(l, "MONITOR") && strings.Contains(l, "STATUS") })
+}
+
+func selectedLine(m Model) int {
+	return lineOf(m, func(l string) bool { return strings.HasPrefix(l, "▌ ") })
+}
+
+func TestFilteringNeverMovesTheList(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		w, h        int
+		destination string
+	}{
+		{"local list", 100, 30, ""},
+		{"remote list", 100, 30, "https://up.acme.com"},
+		{"local 80x24", 80, 24, ""},
+		{"remote 80x24", 80, 24, "https://up.acme.com"},
+		{"local split", 140, 40, ""},
+		{"remote split", 140, 40, "https://up.acme.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(nil, func() time.Time { return now }, Options{Destination: tc.destination})
+			next, _ := m.Update(snapshotMsg{snap: searchSnapshot()})
+			m = sized(next.(Model), tc.w, tc.h)
+			header := headerLine(m)
+			if header < 0 || selectedLine(m) != header+1 {
+				t.Fatalf("header %d selected %d in:\n%s", header, selectedLine(m), view(m))
+			}
+			rowsBefore := strings.Join(rows(m), ",")
+			// Every state keeps the table header where it was; states that hide
+			// nothing keep every row too.
+			steps := []struct {
+				name    string
+				key     []tea.KeyPressMsg
+				allRows bool
+			}{
+				{"bar open", []tea.KeyPressMsg{keySlash}, true},
+				{"typing", []tea.KeyPressMsg{{Code: 'p', Text: "p"}, {Code: 'a', Text: "a"}, {Code: 'y', Text: "y"}}, false},
+				{"no match", []tea.KeyPressMsg{{Code: 'z', Text: "z"}}, false},
+				{"query erased", []tea.KeyPressMsg{keyBack, keyBack, keyBack, keyBack}, true},
+				{"tab down", []tea.KeyPressMsg{keyTab}, false},
+				{"tab failing", []tea.KeyPressMsg{keyTab}, false},
+				{"tab held", []tea.KeyPressMsg{keyTab}, false},
+				{"tab all", []tea.KeyPressMsg{keyTab}, true},
+				{"kept", []tea.KeyPressMsg{{Code: 'p', Text: "p"}, keyEnter}, false},
+				{"cleared", []tea.KeyPressMsg{keyEsc}, true},
+			}
+			for _, step := range steps {
+				m, _ = press(t, m, step.key...)
+				if got := headerLine(m); got != header {
+					t.Errorf("%s: table header on line %d, want %d:\n%s", step.name, got, header, view(m))
+				}
+				if !step.allRows {
+					continue
+				}
+				position := 0
+				for i, name := range rows(m) {
+					if name == selectedRow(m) {
+						position = i
+					}
+				}
+				if strings.Join(rows(m), ",") != rowsBefore || selectedLine(m) != header+1+position {
+					t.Errorf("%s: rows moved (selected line %d, want %d):\n%s", step.name, selectedLine(m), header+1+position, view(m))
+				}
+			}
+		})
+	}
+}
+
+func TestBarReplacesTheRuleRow(t *testing.T) {
+	m := searchModel(100, 30)
+	closed := strings.Split(view(m), "\n")
+	m, _ = press(t, m, keySlash)
+	open := strings.Split(view(m), "\n")
+	if !strings.HasPrefix(closed[1], "└") || !strings.HasPrefix(open[1], "/ █") || len(open) != len(closed) {
+		t.Errorf("bar not in the rule row:\n%s", view(m))
+	}
+	m, _ = press(t, m, keyEnter)
+	if got := strings.Split(view(m), "\n"); !strings.HasPrefix(got[1], "└") {
+		t.Errorf("rule not restored after enter: %q", got[1])
 	}
 }
