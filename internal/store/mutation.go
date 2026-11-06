@@ -78,6 +78,9 @@ func (s *Store) DeleteCheck(ctx context.Context, name string) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM results WHERE check_name = ?", name); err != nil {
 		return fmt.Errorf("store: delete check: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM delivery_attempts WHERE monitor = ?", name); err != nil {
+		return fmt.Errorf("store: delete check: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM mutes WHERE check_name = ?", name); err != nil {
 		return fmt.Errorf("store: delete check: %w", err)
 	}

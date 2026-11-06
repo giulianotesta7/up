@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 7
+const schemaVersion = 8
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -148,6 +148,24 @@ CREATE TABLE defaults (
 	alert_after     INTEGER NOT NULL,
 	recover_after   INTEGER NOT NULL
 );
+`,
+	// v7 -> v8: the log of alert delivery attempts (monitor.down,
+	// monitor.recovered, cert.expiring), one row per monitor and channel.
+	// Additive: no existing table or row changes. Events and outcomes are
+	// validated in Go; the reason is short and secret-free.
+	`
+CREATE TABLE delivery_attempts (
+	id      INTEGER PRIMARY KEY AUTOINCREMENT,
+	at_ns   INTEGER NOT NULL,
+	monitor TEXT    NOT NULL,
+	channel TEXT    NOT NULL,
+	event   TEXT    NOT NULL,
+	outcome TEXT    NOT NULL CHECK (outcome IN ('sent', 'failed', 'held')),
+	reason  TEXT    NOT NULL
+);
+CREATE INDEX delivery_attempts_by_time ON delivery_attempts (at_ns);
+CREATE INDEX delivery_attempts_by_channel ON delivery_attempts (channel, at_ns);
+CREATE INDEX delivery_attempts_by_monitor ON delivery_attempts (monitor, at_ns);
 `,
 }
 
@@ -405,8 +423,16 @@ func (s *Store) Record(ctx context.Context, r check.Result) error {
 // history that remains still starts from the state in force at the cutoff
 // (an ongoing outage keeps its start, a check silent for longer than the
 // window keeps its last result). Definitions and the heartbeat are untouched.
+//
+// Delivery attempts older than before are deleted too (they keep nothing
+// back); the count is of results only.
 func (s *Store) Prune(ctx context.Context, before time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("store: prune: %w", err)
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `
 DELETE FROM results
  WHERE at_ns < ?1
    AND id NOT IN (SELECT id FROM (
@@ -417,6 +443,12 @@ DELETE FROM results
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
+		return 0, fmt.Errorf("store: prune: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM delivery_attempts WHERE at_ns < ?", before.UnixNano()); err != nil {
+		return 0, fmt.Errorf("store: prune: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("store: prune: %w", err)
 	}
 	return n, nil
