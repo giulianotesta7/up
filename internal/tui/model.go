@@ -83,6 +83,7 @@ type Model struct {
 	selectName        string
 	animationOff      bool
 	help              bool
+	filter            listFilter
 	sweeping          bool
 	sweepPosition     int
 	sweepGeneration   uint64
@@ -156,7 +157,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sweepGeneration++
 				frame = m.sweepTick()
 			}
+			previous := ""
+			if m.filter.active() && m.selected < len(m.snap.Services) {
+				previous = m.snap.Services[m.selected].Check.Name
+			}
 			m.snap = msg.snap
+			for i, svc := range m.snap.Services {
+				if previous != "" && svc.Check.Name == previous {
+					m.selected = i
+				}
+			}
 			if !m.snap.HasKey && m.smtpForm != nil && !m.smtpForm.saving {
 				f := *m.smtpForm
 				f.values[5] = ""
@@ -204,6 +214,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.snap.Services) == 0 {
 				m.detail = false
 			}
+		}
+		m = m.reselect()
+		if !m.hasSelection() {
+			m.detail = false
 		}
 		poll := tea.Tick(pollInterval, func(time.Time) tea.Msg { return tickMsg{generation: m.generation} })
 		if frame != nil {
@@ -265,6 +279,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.snap.Services = services
 			m.selected = min(m.selected, max(0, len(services)-1))
 			m.deletion, m.detail, m.selectName = nil, false, ""
+			m = m.reselect()
 		}
 		return m, m.load
 	case muteMsg:
@@ -361,6 +376,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case channelTestMsg:
 		return m.channelTestResult(msg)
 	case tea.PasteMsg:
+		if m.filter.open && m.form == nil && m.deletion == nil && m.mute == nil && !m.help && !m.channelScreen && !m.smtpScreen {
+			m.filter.query += strings.NewReplacer("\r", "", "\n", " ").Replace(msg.Content)
+			return m.reselect(), nil
+		}
 		if m.defaults != nil {
 			return m.handleDefaultsPaste(msg.Content), nil
 		}
@@ -422,7 +441,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.filter.open {
+		return m.handleSearchKey(msg)
+	}
 	switch msg.String() {
+	case "/":
+		if !m.detail {
+			m.filter.open = true
+		}
 	case "r":
 		if m.destination != "" {
 			m.generation++
@@ -453,7 +479,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "f":
 		m.defaults = newDefaultsPopup(m.snap)
 	case "e", "d":
-		if m.selected < len(m.snap.Services) {
+		if m.hasSelection() {
 			c := m.snap.Services[m.selected].Check
 			if msg.String() == "e" {
 				m.form = editMonitorForm(c, m.detail)
@@ -464,7 +490,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "w":
 		m = m.openMaintenance()
 	case "m", "u":
-		if m.selected < len(m.snap.Services) {
+		if m.hasSelection() {
 			svc := m.snap.Services[m.selected]
 			if msg.String() == "m" {
 				m.mute = &mutePrompt{name: svc.Check.Name, wasAlerting: svc.KnownAlerting}
@@ -474,18 +500,21 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "up", "k":
-		if !m.detail && m.selected > 0 {
-			m.selected--
+		if !m.detail {
+			m = m.move(-1)
 		}
 	case "down", "j":
-		if !m.detail && m.selected < len(m.snap.Services)-1 {
-			m.selected++
+		if !m.detail {
+			m = m.move(1)
 		}
 	case "enter":
-		if len(m.snap.Services) > 0 && !m.splitMode() {
+		if m.hasSelection() && !m.splitMode() {
 			m.detail = true
 		}
 	case "esc", "backspace":
+		if msg.String() == "esc" && !m.detail {
+			m.filter = listFilter{}
+		}
 		m.detail = false
 	}
 	return m, nil
@@ -494,11 +523,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // View renders the list, or the detail of the selected service.
 func (m Model) View() tea.View {
 	now := m.now()
-	content := renderList(m.snap, m.selected, now, m.err, m.width)
+	shown, shownSelected, filter := m.filtered()
+	content := renderList(shown, shownSelected, now, m.err, m.width, filter)
 	split := m.splitMode()
 	if split {
-		content = renderSplit(m.snap, m.selected, now, m.err, m.width, m.height, m.noticeLine())
-	} else if m.detail && m.selected < len(m.snap.Services) {
+		content = renderSplit(shown, shownSelected, now, m.err, m.width, m.height, m.noticeLine(), filter)
+	} else if m.detail && m.hasSelection() {
 		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width)
 	}
 	if m.help && !helpPopupFits(m.width, m.height) {
@@ -630,7 +660,11 @@ func (m Model) View() tea.View {
 	if split {
 		rule = renderHostRuleCells(m.snap, m.hostname, now, m.width, position)
 	}
-	content = renderTitleWidth(m.snap, m.width) + "\n" + rule + "\n" + content
+	header := renderTitleWidth(m.snap, m.width)
+	if filter.active() && !filter.open {
+		header = ansi.Truncate(header+"  "+helpStyle.Render(filter.summary()), max(m.width, ansi.StringWidth(header)), "")
+	}
+	content = header + "\n" + rule + "\n" + content
 	if modal != "" || stackParent != "" || stackChild != "" || (m.help && helpPopupFits(m.width, m.height)) {
 		content = padForPopup(content, m.popupPadHeight(modal, stackParent, stackChild))
 	}

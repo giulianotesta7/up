@@ -142,7 +142,7 @@ func (m Model) maintenanceService(name string) (Service, bool) {
 }
 
 func (m Model) openMaintenance() Model {
-	if m.selected < len(m.snap.Services) {
+	if m.hasSelection() {
 		m.maint = &maintenancePopup{name: m.snap.Services[m.selected].Check.Name}
 	}
 	return m
