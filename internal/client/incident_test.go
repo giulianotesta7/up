@@ -37,10 +37,13 @@ func TestIncidentsAndRecentAlertsLocalAndRemote(t *testing.T) {
 	if err := c.AddCheck(ctx, newCheck("api")); err != nil {
 		t.Fatal(err)
 	}
-	// Half a minute off the minute, so the small clock-skew shift of the
-	// remote snapshot cannot change a shown minute.
-	clock := time.Now().Truncate(time.Minute).Add(30 * time.Second)
-	base := clock.Add(-48 * time.Hour)
+	// The server stamps its snapshot with the real clock and the client
+	// shifts every time by the difference to the TUI clock, so the TUI clock
+	// must be real too: a synthetic one would shift times by up to a minute.
+	// The recorded times sit 20s and 25s into their minute, so the remaining
+	// skew of a few milliseconds cannot change a shown minute.
+	clock := time.Now()
+	base := clock.Truncate(time.Minute).Add(-48*time.Hour + 20*time.Second)
 	result := func(minutes int, status check.Status, reason string) check.Result {
 		return check.Result{CheckName: "api", At: base.Add(time.Duration(minutes) * time.Minute), Status: status, Latency: 50 * time.Millisecond, Error: reason}
 	}
