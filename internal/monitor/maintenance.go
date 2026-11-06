@@ -99,10 +99,40 @@ func loggedHold(ctx context.Context, opts Options, c config.Check, alerting, not
 	if alerting {
 		owed = store.EventDown
 	}
-	if a, held := latestHeld(ctx, opts, c, store.EventDown, store.EventRecovered); held && a.Event == owed {
-		return owed
+	a, held := latestHeld(ctx, opts, c, store.EventDown, store.EventRecovered)
+	if !held || a.Event != owed || clearedSince(ctx, opts, c, a.At, alerting, notified) {
+		return ""
 	}
-	return ""
+	return owed
+}
+
+// clearedSince reports whether the results after a hold logged at since
+// cleared the alert it held: replayed from the held state with the current
+// thresholds, the streak once matched what the recipients know. An edit to
+// the thresholds can make a later outage owed at once, which is a new hold.
+func clearedSince(ctx context.Context, opts Options, c config.Check, since time.Time, alerting, notified bool) bool {
+	reader, ok := opts.Store.(RecentReader)
+	if !ok {
+		return false
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	results, err := reader.Recent(readCtx, c.Name, replayLimit)
+	if err != nil {
+		opts.Logger.Error("reading recent results failed", "check", c.Name, "error", err)
+		return false
+	}
+	streak := check.Streak{Alerting: alerting}
+	for i := len(results) - 1; i >= 0; i-- {
+		if !results[i].At.After(since) {
+			continue
+		}
+		streak.Observe(results[i].Status, c.AlertAfter, c.RecoverAfter)
+		if streak.Alerting == notified {
+			return true
+		}
+	}
+	return false
 }
 
 // loggedCertHold is the certificate threshold the delivery log already shows

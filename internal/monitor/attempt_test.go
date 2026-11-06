@@ -271,3 +271,60 @@ func TestHeldCertWarningIsRecordedOncePerThresholdAcrossRestartAndEdit(t *testin
 		t.Fatalf("cert warnings: %v", got)
 	}
 }
+
+// setThresholds changes the check's alert-after and recover-after; when the
+// daemon runs, it waits for the restarted loop.
+func (r *maintenanceRig) setThresholds(alertAfter, recoverAfter int) {
+	r.t.Helper()
+	c, err := r.s.Checks(context.Background())
+	if err != nil || len(c) != 1 {
+		r.t.Fatalf("checks = %v, %v", c, err)
+	}
+	c[0].AlertAfter, c[0].RecoverAfter = alertAfter, recoverAfter
+	before := r.runner.entered.Load()
+	if err := r.s.UpdateCheck(context.Background(), c[0]); err != nil {
+		r.t.Fatal(err)
+	}
+	if r.cancel != nil {
+		waitFor(r.t, "the restarted loop", func() bool { return r.runner.entered.Load() > before })
+	}
+}
+
+// An edit that makes a new outage's down alert owed when the loop restarts
+// logs a new hold: the earlier hold ended when the monitor recovered.
+func TestHeldDownAfterRecoveryIsRecordedWhenAlertAfterIsEdited(t *testing.T) {
+	r := newRig(t)
+	r.addWindow(10, 2)
+	r.setThresholds(2, 1)
+	r.start()
+	r.feed(10, 10, down)
+	r.feed(10, 20, down)
+	r.feed(10, 30, up)
+	r.feed(10, 40, down)
+	r.setThresholds(1, 1)
+	r.feed(10, 50, down)
+	r.want()
+	held := brief{store.EventDown, store.OutcomeHeld, "maintenance window"}
+	wantBriefs(t, r.s, held, held)
+}
+
+// The same for a recovery: an outage between the two recoveries ended the
+// earlier hold.
+func TestHeldRecoveryAfterNewOutageIsRecordedWhenRecoverAfterIsEdited(t *testing.T) {
+	r := newRig(t)
+	r.addWindow(10, 2)
+	r.setThresholds(1, 2)
+	r.start()
+	r.feed(9, 30, down)
+	r.want(down)
+	r.sent(store.EventDown)
+	r.feed(10, 10, up)
+	r.feed(10, 20, up)
+	r.feed(10, 30, down)
+	r.feed(10, 40, up)
+	r.setThresholds(1, 1)
+	r.feed(10, 50, up)
+	r.want(down)
+	held := brief{store.EventRecovered, store.OutcomeHeld, "maintenance window"}
+	wantBriefs(t, r.s, brief{store.EventDown, store.OutcomeSent, ""}, held, held)
+}
