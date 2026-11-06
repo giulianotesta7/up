@@ -62,6 +62,7 @@ All routes need the bearer token; bodies are strict JSON (unknown fields are 400
 | `GET /api/v1/channels/{name}/test` | 200 `ChannelTestDTO`, 404 if none |
 | `GET /api/v1/defaults` | 200 `DefaultsDTO` |
 | `PUT /api/v1/defaults` | `DefaultsDTO` (every field); 200 `DefaultsDTO`, 400 on invalid input or an unknown channel |
+| `GET /api/v1/deliveries?monitor=&channel=&limit=` | 200 `{"server_time","attempts":[{"at","monitor","channel","event","outcome","reason"}]}` newest first; `limit` defaults to 50, max 500; 400 on an invalid limit |
 
 JSON shapes:
 

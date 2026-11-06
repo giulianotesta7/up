@@ -72,3 +72,14 @@ func TestServeMountsDefaultsRoute(t *testing.T) {
 		t.Fatalf("snapshot defaults = %+v, %v", snap.Defaults, err)
 	}
 }
+
+// serve mounts GET /api/v1/deliveries behind the token.
+func TestServeMountsDeliveriesRoute(t *testing.T) {
+	call := startTestAPI(t)
+	if status, body := call("GET", "/api/v1/deliveries", ""); status != 200 || !strings.Contains(body, `"attempts":[]`) {
+		t.Fatalf("GET deliveries = %d %s", status, body)
+	}
+	if status, body := call("GET", "/api/v1/deliveries?limit=abc", ""); status != 400 {
+		t.Fatalf("GET deliveries bad limit = %d %s, want 400", status, body)
+	}
+}
