@@ -21,6 +21,14 @@ const (
 	outageLimit = 5
 )
 
+// The monitor detail lists the incidents of the last IncidentPeriod, at most
+// IncidentLimit, newest first. It matches them to at most
+// store.MaxAttemptLimit delivery attempts of the monitor.
+const (
+	IncidentPeriod = 30 * day
+	IncidentLimit  = 50
+)
+
 // Delivery attempts in a snapshot are bounded, newest first, so a snapshot
 // does not grow with retention: AttemptLimit across all monitors and
 // ServiceAttemptLimit for each monitor.
@@ -61,6 +69,76 @@ type Service struct {
 	// Attempts are the monitor's latest alert delivery attempts, newest
 	// first, at most ServiceAttemptLimit.
 	Attempts []store.Attempt
+	// Incidents are the outages of the last IncidentPeriod (ongoing or ended
+	// after its start), newest first, at most IncidentLimit, with what became
+	// of their alerts.
+	Incidents []Incident
+	// PeriodUp and PeriodObserved are the time spent up and observed in the
+	// last IncidentPeriod (up to the last heartbeat when the daemon stopped),
+	// and PeriodIncidents the outages intersecting it (see
+	// store.UptimeWindow).
+	PeriodUp, PeriodObserved time.Duration
+	PeriodIncidents          int
+}
+
+// Incident is an outage with the outcome of its alerts: the down alert and
+// the recovery alert, through every channel.
+type Incident struct {
+	store.Outage
+	// Alert is the worst outcome of those attempts (failed, then held, then
+	// sent); empty when none was made. When the channels had different
+	// outcomes, Channel names the channel with the worst one. Reason is the
+	// reason of that outcome.
+	Alert   store.Outcome
+	Channel string
+	Reason  string
+}
+
+func outcomeRank(o store.Outcome) int {
+	switch o {
+	case store.OutcomeFailed:
+		return 3
+	case store.OutcomeHeld:
+		return 2
+	case store.OutcomeSent:
+		return 1
+	}
+	return 0
+}
+
+// matchAlerts gives each outage (newest first) the monitor.down and
+// monitor.recovered attempts made from its start until the start of the next
+// outage: its down alert and, after it ended, its recovery alert.
+func matchAlerts(outages []store.Outage, attempts []store.Attempt) []Incident {
+	var incidents []Incident
+	for i, o := range outages {
+		incident := Incident{Outage: o}
+		worst := map[string]store.Attempt{}
+		for _, a := range attempts {
+			if a.Event != store.EventDown && a.Event != store.EventRecovered {
+				continue
+			}
+			if a.At.Before(o.Start) || (i > 0 && !a.At.Before(outages[i-1].Start)) {
+				continue
+			}
+			if outcomeRank(a.Outcome) > outcomeRank(worst[a.Channel].Outcome) {
+				worst[a.Channel] = a
+			}
+		}
+		outcomes := map[store.Outcome]bool{}
+		for channel, a := range worst {
+			outcomes[a.Outcome] = true
+			rank, best := outcomeRank(a.Outcome), outcomeRank(incident.Alert)
+			if rank > best || (rank == best && channel < incident.Channel) {
+				incident.Alert, incident.Channel, incident.Reason = a.Outcome, channel, a.Reason
+			}
+		}
+		if len(outcomes) < 2 {
+			incident.Channel = ""
+		}
+		incidents = append(incidents, incident)
+	}
+	return incidents
 }
 
 // Muted reports whether the service's alerts are being held at now.
@@ -288,6 +366,7 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 		until = snap.LastBeat
 	}
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	since := now.Add(-IncidentPeriod)
 	mutes, err := s.Mutes(ctx)
 	if err != nil {
 		return Snapshot{}, err
@@ -366,8 +445,32 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 				return Snapshot{}, err
 			}
 		}
-		if svc.Outages, err = s.Outages(ctx, c.Name, outageLimit); err != nil {
+		outages, err := s.Outages(ctx, c.Name, IncidentLimit)
+		if err != nil {
 			return Snapshot{}, err
+		}
+		svc.Outages = outages[:min(len(outages), outageLimit)]
+		var period []store.Outage
+		for _, o := range outages {
+			if o.Ongoing || o.End.After(since) {
+				period = append(period, o)
+			}
+		}
+		var matched []store.Attempt
+		if hasAttempts && len(period) > 0 {
+			if matched, err = attempts.Attempts(ctx, store.AttemptFilter{Monitor: c.Name, Since: period[len(period)-1].Start, Limit: store.MaxAttemptLimit}); err != nil {
+				return Snapshot{}, err
+			}
+		}
+		svc.Incidents = matchAlerts(period, matched)
+		// Like today's uptime, the period's needs a heartbeat to end at.
+		periodUp, periodObserved, periodIncidents, err := s.UptimeWindow(ctx, c.Name, since, until)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		svc.PeriodIncidents = periodIncidents
+		if snap.HasBeat {
+			svc.PeriodUp, svc.PeriodObserved = periodUp, periodObserved
 		}
 		if len(svc.Outages) > 0 && svc.Outages[0].Ongoing {
 			svc.DownSince = svc.Outages[0].Start

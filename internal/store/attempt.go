@@ -51,10 +51,12 @@ type Attempt struct {
 	Reason  string
 }
 
-// AttemptFilter selects attempts. Empty Monitor or Channel match any.
+// AttemptFilter selects attempts. Empty Monitor or Channel match any; a
+// nonzero Since keeps attempts at or after it.
 type AttemptFilter struct {
 	Monitor string
 	Channel string
+	Since   time.Time
 	Limit   int
 }
 
@@ -128,10 +130,14 @@ func (s *Store) Attempts(ctx context.Context, f AttemptFilter) ([]Attempt, error
 		limit = DefaultAttemptLimit
 	}
 	limit = min(limit, MaxAttemptLimit)
+	var since int64
+	if !f.Since.IsZero() {
+		since = f.Since.UnixNano()
+	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT `+attemptColumns+` FROM delivery_attempts
- WHERE (?1 = '' OR monitor = ?1) AND (?2 = '' OR channel = ?2)
- ORDER BY at_ns DESC, id DESC LIMIT ?3`, f.Monitor, f.Channel, limit)
+ WHERE (?1 = '' OR monitor = ?1) AND (?2 = '' OR channel = ?2) AND (?4 = 0 OR at_ns >= ?4)
+ ORDER BY at_ns DESC, id DESC LIMIT ?3`, f.Monitor, f.Channel, limit, since)
 	if err != nil {
 		return nil, fmt.Errorf("store: attempts: %w", err)
 	}

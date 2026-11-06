@@ -110,13 +110,78 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 }
 
 type detailOptions struct {
-	compact               bool
-	config, cert, outages bool
-	chartRows             int
+	compact                 bool
+	config, cert, incidents bool
+	chartRows               int
+	// tight drops the blank lines between sections; hideStats drops the
+	// latency numbers under the chart.
+	tight, hideStats bool
+	// incidentRows and alertRows are the most incidents and recent alerts
+	// shown; cursor and offset place the incident window (see
+	// incidentWindow).
+	incidentRows, alertRows int
+	cursor, offset          int
+}
+
+func fullDetail() detailOptions {
+	return detailOptions{config: true, cert: true, incidents: true, chartRows: 5, incidentRows: 6, alertRows: 3}
 }
 
 func renderDetail(snap Snapshot, s Service, now time.Time, loadErr error, width int) string {
-	return renderDetailWithOptions(snap, s, now, loadErr, width, detailOptions{config: true, cert: true, outages: true, chartRows: 5})
+	return renderDetailWithOptions(snap, s, now, loadErr, width, fullDetail())
+}
+
+// shrink takes the next step that makes the detail shorter, in this order:
+// a 3-row chart, no CONFIG, no CERTIFICATE, no blank lines, a 2-row chart, no
+// latency numbers, fewer incident rows (down to 3), fewer recent alerts (down
+// to 1), fewer incident rows (down to 1). None of them depends on the
+// incident scroll position, so scrolling never moves the screen. It reports
+// false when nothing is left to take.
+func (o *detailOptions) shrink() bool {
+	switch {
+	case o.chartRows > 3:
+		o.chartRows = 3
+	case o.config:
+		o.config = false
+	case o.cert:
+		o.cert = false
+	case !o.tight:
+		o.tight = true
+	case o.chartRows > 2:
+		o.chartRows = 2
+	case !o.hideStats:
+		o.hideStats = true
+	case o.incidentRows > 3:
+		o.incidentRows--
+	case o.alertRows > 1:
+		o.alertRows--
+	case o.incidentRows > 1:
+		o.incidentRows--
+	default:
+		return false
+	}
+	return true
+}
+
+// fitDetail renders the detail with opts shrunk until it has at most height
+// lines; a nonpositive height keeps opts. It returns the options used.
+func fitDetail(snap Snapshot, s Service, now time.Time, loadErr error, width, height int, opts detailOptions) (string, detailOptions) {
+	for {
+		detail := renderDetailWithOptions(snap, s, now, loadErr, width, opts)
+		if height <= 0 || strings.Count(detail, "\n")+1 <= height || !opts.shrink() {
+			return detail, opts
+		}
+	}
+}
+
+// detailHelp is the detail's key help; it mentions scrolling when there are
+// more incidents than rows.
+func detailHelp(s Service, opts detailOptions) string {
+	help := "esc back · e edit · d delete · m mute · ? more · q quit"
+	if opts.incidents && len(s.Incidents) > opts.incidentRows {
+		help = "↑/↓ scroll incidents · " + help
+	}
+	return help
 }
 
 func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr error, width int, opts detailOptions) string {
@@ -125,14 +190,18 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 	b.WriteString(renderBanners(snap, now, loadErr))
 
 	// Sections are separated by one blank line; a header sits right above its rows.
+	blank := "\n"
+	if opts.tight {
+		blank = ""
+	}
 	section := func(title string) {
-		b.WriteString("\n" + headerStyle.Render(title) + "\n")
+		b.WriteString(blank + headerStyle.Render(title) + "\n")
 	}
 	field := func(label, value string) {
 		fmt.Fprintf(&b, "  %-11s  %s\n", label, value)
 	}
 
-	b.WriteString("\n" + headerStyle.Render("STATUS") + "\n")
+	section("STATUS")
 	status := styledLabel(s, 0)
 	if s.HasResult {
 		status += "   last check " + ago(now, s.Latest.At) + " (" + formatLatency(s.Latest.Latency) + ")"
@@ -212,34 +281,27 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		window := graphWindow(s.Recent, chartWidth)
 		b.WriteString("  " + strings.Join(chart(window, chartWidth, opts.chartRows), "\n  ") + "\n")
 		avg, p95, maximum, failed, total := latencyStats(window)
-		if failed == total {
-			fmt.Fprintf(&b, "\n  no successful checks · %d failed of %d\n", failed, total)
-		} else {
+		switch {
+		case opts.hideStats:
+		case failed == total:
+			fmt.Fprintf(&b, "%s  no successful checks · %d failed of %d\n", blank, failed, total)
+		default:
 			_, hi, _ := chartScale(window)
-			b.WriteString("\n" + renderLatencyStats(avg, p95, maximum, hi, failed, total))
+			b.WriteString(blank + renderLatencyStats(avg, p95, maximum, hi, failed, total))
 		}
 	}
 
 	if opts.cert {
 		if block := renderCert(s, now); block != "" {
-			b.WriteString("\n" + block)
+			b.WriteString(blank + block)
 		}
 	}
 
-	if opts.outages {
-		section("RECENT OUTAGES")
-		if len(s.Outages) == 0 {
-			b.WriteString("  No outages recorded.\n")
-		}
-		for _, o := range s.Outages {
-			if o.Ongoing {
-				fmt.Fprintf(&b, "  %s → ongoing   %s\n", formatTime(o.Start, now), o.Error)
-				continue
-			}
-			fmt.Fprintf(&b, "  %s → %s (%s)   %s\n", formatTime(o.Start, now), formatTime(o.End, now), outageDuration(o.End.Sub(o.Start)), o.Error)
-		}
+	if opts.incidents {
+		b.WriteString(blank + strings.Join(renderIncidents(s, now, width, opts.incidentRows, opts.cursor, opts.offset), "\n") + "\n")
+		b.WriteString(blank + strings.Join(renderRecentAlerts(s, now, width, opts.alertRows), "\n") + "\n")
 	}
-	b.WriteString("\n" + renderHelp("esc back · e edit · d delete · m mute · ? more · q quit"))
+	b.WriteString(blank + renderHelp(detailHelp(s, opts)))
 	return b.String()
 }
 
@@ -250,10 +312,7 @@ func renderTitleWidth(snap Snapshot, width int) string {
 	if !snap.HasUptime {
 		return line
 	}
-	percent := "100%"
-	if snap.Uptime < 100 {
-		percent = fmt.Sprintf("%.1f%%", math.Floor(snap.Uptime*10)/10)
-	}
+	percent := uptimePercent(snap.Uptime)
 	style := downStyle
 	if snap.Uptime >= 99.9 {
 		style = upStyle
@@ -272,6 +331,15 @@ func renderTitleWidth(snap Snapshot, width int) string {
 		}
 	}
 	return line
+}
+
+// uptimePercent rounds down to one decimal, so a monitor that was down at
+// all never reads 100%.
+func uptimePercent(p float64) string {
+	if p >= 100 {
+		return "100%"
+	}
+	return fmt.Sprintf("%.1f%%", math.Floor(p*10)/10)
 }
 
 // serverError marks a failed read from a remote server, so the banner names
@@ -417,6 +485,7 @@ func renderKeys(remote ...bool) string {
 		row("y", "duplicate", "w", "maintenance"),
 		row("d", "delete", "f", "defaults"),
 		row("/", "search", "", ""),
+		row("pgup/dn", "scroll incidents", "", ""),
 		"",
 		headerStyle.Render("VIEW"),
 		"",

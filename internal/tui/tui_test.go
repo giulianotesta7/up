@@ -242,8 +242,8 @@ func TestDetailView(t *testing.T) {
 		"Interval     1m0s", "Timeout      10s", "Expected     204",
 		"Status       DOWN", "Last error   " + reason, "Down since   Oct 25 03:44:00 (1m ago)",
 		"84ms", "older", "AVG      P95      MAX      FAILED", "84ms     84ms     84ms     3 of 5",
-		"Oct 25 03:44:00 → ongoing",
-		"Oct 25 03:12:00 → Oct 25 03:40:00 (28m)",
+		"Oct 25 03:44  ongoing 1m  unexpected status 503 (expect…  — none",
+		"Oct 25 03:12  28m         unexpected status 503 (expect…  — none",
 		"esc back",
 	} {
 		if !strings.Contains(out, want) {
@@ -256,7 +256,7 @@ func TestDetailViewOfUpAndPendingServices(t *testing.T) {
 	snap := seededSnapshot(t, now.Add(-5*time.Second))
 
 	apiView := view(func() Model { m, _ := press(t, modelWith(snap), keyEnter); return m }())
-	for _, want := range []string{"Status       UP", "Last error   —", "Down since   —", "No outages recorded."} {
+	for _, want := range []string{"Status       UP", "Last error   —", "Down since   —", "No incidents."} {
 		if !strings.Contains(apiView, want) {
 			t.Errorf("api detail missing %q:\n%s", want, apiView)
 		}

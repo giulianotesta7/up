@@ -215,6 +215,10 @@ func (c *Client) LoadSnapshot(ctx context.Context, now time.Time) (tui.Snapshot,
 			v.Outages[j].Start = shift(v.Outages[j].Start)
 			v.Outages[j].End = shift(v.Outages[j].End)
 		}
+		for j := range v.Incidents {
+			v.Incidents[j].Start = shift(v.Incidents[j].Start)
+			v.Incidents[j].End = shift(v.Incidents[j].End)
+		}
 	}
 	return s, nil
 }

@@ -62,7 +62,9 @@ func renderHelpPopup(split bool, remote ...bool) string {
 	monitors := [][2]string{{"↑/↓ k/j", "select"}, {"enter", "details"}, {"n", "new monitor"}, {"e", "edit"}, {"y", "duplicate"}, {"d", "delete"}, {"/", "search"}}
 	alerting := [][2]string{{"m", "mute selected"}, {"u", "unmute"}, {"s", "SMTP servers"}, {"c", "channels"}, {"w", "maintenance"}, {"f", "defaults"}}
 	if split {
-		monitors = append(monitors[:1:1], monitors[2:]...)
+		// enter opens nothing in the split layout; the page keys scroll the
+		// selected monitor's incidents instead.
+		monitors = append(append(monitors[:1:1], monitors[2:]...), [2]string{"pgup/dn", "incidents"})
 	}
 	lines := []string{headerStyle.Render("MONITORS") + strings.Repeat(" ", 15) + headerStyle.Render("ALERTING")}
 	for i := range max(len(monitors), len(alerting)) {

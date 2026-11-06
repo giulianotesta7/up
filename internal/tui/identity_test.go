@@ -22,7 +22,7 @@ func TestIdentityViews(t *testing.T) {
 		help  string
 	}{
 		{"list", tea.KeyPressMsg{}, 9, "↑/↓ select · enter open · n new · e edit · d delete · m mute · ? more · q quit"},
-		{"detail", keyEnter, 32, "esc back · e edit · d delete · m mute · ? more · q quit"},
+		{"detail", keyEnter, 35, "esc back · e edit · d delete · m mute · ? more · q quit"},
 		{"form", keyN, 15, "tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"},
 		{"delete", keyD, 7, "y delete · n cancel"},
 	} {

@@ -151,6 +151,26 @@ type ServiceDTO struct {
 	KnownAlerting bool `json:"known_alerting"`
 	// Attempts are the monitor's latest delivery attempts, newest first.
 	Attempts []AttemptDTO `json:"attempts"`
+	// Incidents are the outages of the last 30 days, newest first and
+	// bounded, with the outcome of their alerts. PeriodUpMS,
+	// PeriodObservedMS and PeriodIncidents measure the same 30 days.
+	Incidents        []IncidentDTO `json:"incidents"`
+	PeriodUpMS       int64         `json:"period_up_ms"`
+	PeriodObservedMS int64         `json:"period_observed_ms"`
+	PeriodIncidents  int           `json:"period_incidents"`
+}
+
+// IncidentDTO is an outage with the worst outcome of its alerts (sent,
+// failed, held; empty when none was made), the channel with that outcome
+// when channels disagreed and its secret-free reason.
+type IncidentDTO struct {
+	Start   time.Time `json:"start"`
+	End     time.Time `json:"end"`
+	Ongoing bool      `json:"ongoing"`
+	Error   string    `json:"error"`
+	Alert   string    `json:"alert"`
+	Channel string    `json:"channel"`
+	Reason  string    `json:"reason"`
 }
 
 // AttemptDTO is one alert delivery attempt. Event is monitor.down,
@@ -282,6 +302,11 @@ func NewSnapshotDTO(s tui.Snapshot, now time.Time) SnapshotDTO {
 		x.InMaintenance, x.MaintenanceEnd = v.InMaintenance.Active, v.InMaintenance.End.UTC()
 		x.KnownAlerting = v.KnownAlerting
 		x.Attempts = attemptDTOs(v.Attempts)
+		x.Incidents = []IncidentDTO{}
+		for _, i := range v.Incidents {
+			x.Incidents = append(x.Incidents, IncidentDTO{i.Start.UTC(), i.End.UTC(), i.Ongoing, i.Error, string(i.Alert), i.Channel, i.Reason})
+		}
+		x.PeriodUpMS, x.PeriodObservedMS, x.PeriodIncidents = v.PeriodUp.Milliseconds(), v.PeriodObserved.Milliseconds(), v.PeriodIncidents
 		d.Services = append(d.Services, x)
 	}
 	for _, v := range s.SMTPServers {
@@ -336,6 +361,10 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 		}
 		x.KnownAlerting = v.KnownAlerting
 		x.Attempts = Attempts(v.Attempts)
+		for _, i := range v.Incidents {
+			x.Incidents = append(x.Incidents, tui.Incident{Outage: store.Outage{Start: i.Start, End: i.End, Ongoing: i.Ongoing, Error: i.Error}, Alert: store.Outcome(i.Alert), Channel: i.Channel, Reason: i.Reason})
+		}
+		x.PeriodUp, x.PeriodObserved, x.PeriodIncidents = time.Duration(v.PeriodUpMS)*time.Millisecond, time.Duration(v.PeriodObservedMS)*time.Millisecond, v.PeriodIncidents
 		s.Services = append(s.Services, x)
 	}
 	for _, v := range d.SMTPServers {

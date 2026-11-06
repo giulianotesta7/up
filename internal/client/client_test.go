@@ -230,6 +230,7 @@ func TestClockSkewIsRemovedFromEveryTime(t *testing.T) {
 				DownSince: serverNow.Add(-time.Hour),
 				Recent:    []check.Result{{CheckName: "api", At: serverNow.Add(-20 * time.Second), Status: check.StatusUp}},
 				Outages:   []store.Outage{{Start: serverNow.Add(-3 * time.Hour), End: serverNow.Add(-2 * time.Hour)}},
+				Incidents: []tui.Incident{{Outage: store.Outage{Start: serverNow.Add(-5 * time.Hour), End: serverNow.Add(-4 * time.Hour)}}},
 				HasMute:   true, Mute: config.Mute{Check: "api", Until: serverNow.Add(30 * time.Minute)},
 				HasCert: true, Cert: config.Cert{Check: "api", Host: "example.com", NotAfter: serverNow.Add(240 * time.Hour), Observed: serverNow.Add(-time.Minute)},
 			}, {Check: newCheck("idle")}},
@@ -254,6 +255,8 @@ func TestClockSkewIsRemovedFromEveryTime(t *testing.T) {
 		want("Recent", s.Recent[0].At, now.Add(-20*time.Second))
 		want("Outage.Start", s.Outages[0].Start, now.Add(-3*time.Hour))
 		want("Outage.End", s.Outages[0].End, now.Add(-2*time.Hour))
+		want("Incident.Start", s.Incidents[0].Start, now.Add(-5*time.Hour))
+		want("Incident.End", s.Incidents[0].End, now.Add(-4*time.Hour))
 		want("Mute.Until", s.Mute.Until, now.Add(30*time.Minute))
 		want("Cert.NotAfter", s.Cert.NotAfter, now.Add(240*time.Hour))
 		want("Cert.Observed", s.Cert.Observed, now.Add(-time.Minute))

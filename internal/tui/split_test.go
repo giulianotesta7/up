@@ -88,7 +88,7 @@ func TestSplitDetailSectionsByHeight(t *testing.T) {
 	snap.Services[0].Cert = config.Cert{NotAfter: now.Add(90 * day), Observed: now}
 	m := modelWith(snap)
 	wide := view(sized(m, 120, 50))
-	for _, section := range []string{"CONFIG", "CERTIFICATE", "RECENT OUTAGES"} {
+	for _, section := range []string{"CONFIG", "CERTIFICATE", "INCIDENTS"} {
 		if !strings.Contains(wide, section) {
 			t.Errorf("tall view missing %s", section)
 		}

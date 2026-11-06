@@ -198,3 +198,23 @@ func TestRecordAttemptLeavesChecksAndResultsAlone(t *testing.T) {
 		t.Fatalf("recording a result changed attempts: %+v", got)
 	}
 }
+
+// Since keeps attempts at or after it (inclusive); zero keeps all. It
+// combines with the monitor filter and the limit.
+func TestAttemptsSinceKeepsNewerAttempts(t *testing.T) {
+	s, _ := attemptStore(t)
+	a1 := attempt("api", "ops", 1, store.OutcomeSent)
+	a2 := attempt("api", "pager", 2, store.OutcomeFailed)
+	a3 := attempt("web", "ops", 3, store.OutcomeHeld)
+	a4 := attempt("api", "ops", 4, store.OutcomeSent)
+	mustRecord(t, s, a1, a2, a3, a4)
+	if got, err := s.Attempts(ctx, store.AttemptFilter{Since: a2.At}); err != nil || !reflect.DeepEqual(got, []store.Attempt{a4, a3, a2}) {
+		t.Fatalf("Attempts(since a2) = %+v, %v", got, err)
+	}
+	if got, err := s.Attempts(ctx, store.AttemptFilter{Monitor: "api", Since: a2.At, Limit: 1}); err != nil || !reflect.DeepEqual(got, []store.Attempt{a4}) {
+		t.Fatalf("Attempts(api since a2, limit 1) = %+v, %v", got, err)
+	}
+	if got, err := s.Attempts(ctx, store.AttemptFilter{Monitor: "api"}); err != nil || !reflect.DeepEqual(got, []store.Attempt{a4, a2, a1}) {
+		t.Fatalf("Attempts(api) = %+v, %v", got, err)
+	}
+}
