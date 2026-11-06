@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -48,6 +49,8 @@ type monitorForm struct {
 	saving       bool
 	editing      bool
 	returnDetail bool
+	// copyOf is the monitor a new form was started from ("duplicate").
+	copyOf string
 	// status is the expected status a new HTTP monitor starts with (the
 	// default); empty means 200. Switching the type back to HTTP restores it.
 	status string
@@ -78,6 +81,31 @@ func editMonitorForm(c config.Check, detail bool) *monitorForm {
 		adv:   newAdvanced(c),
 		focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail, base: c,
 	}
+}
+
+// copyName is the name a duplicate starts with: "<name> copy", then
+// "<name> copy 2", "<name> copy 3"… until it is free in the snapshot.
+func copyName(snap Snapshot, name string) string {
+	taken := make(map[string]bool, len(snap.Services))
+	for _, s := range snap.Services {
+		taken[s.Check.Name] = true
+	}
+	candidate := name + " copy"
+	for n := 2; taken[candidate]; n++ {
+		candidate = fmt.Sprintf("%s copy %d", name, n)
+	}
+	return candidate
+}
+
+// copyMonitorForm is the new monitor form prefilled from c. Protected values
+// show as set with keep, replace and clear, like the edit form; they are not
+// copied here but by the store when the form is saved.
+func copyMonitorForm(c config.Check, snap Snapshot) *monitorForm {
+	f := editMonitorForm(c, false)
+	f.editing, f.copyOf = false, c.Name
+	f.values[0] = copyName(snap, c.Name)
+	f.focus, f.cursor = 0, len([]rune(f.values[0]))
+	return f
 }
 
 // check converts text only; all semantic rules belong to config.ValidateCheck.
@@ -132,10 +160,15 @@ func (m Model) save(c config.Check) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 		defer cancel()
 		var err error
-		if m.form.editing {
+		switch copier, canCopy := m.store.(CheckCopier); {
+		case m.form.editing:
 			err = m.store.UpdateCheck(ctx, c)
-		} else {
+		case m.form.copyOf == "":
 			err = m.store.AddCheck(ctx, c)
+		case canCopy:
+			err = copier.AddCheckFrom(ctx, m.form.copyOf, c)
+		default:
+			err = errors.New("this server cannot copy monitors")
 		}
 		return saveMsg{generation: m.generation, name: c.Name, err: err}
 	}
@@ -291,6 +324,8 @@ func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error)
 	title := "New monitor"
 	if f.editing {
 		title = "Edit monitor"
+	} else if f.copyOf != "" {
+		title = "New monitor · copy of " + f.copyOf
 	}
 	b.WriteString(titleStyle.Render(title) + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))

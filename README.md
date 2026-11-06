@@ -118,7 +118,9 @@ The database is resolved in this order: `--db`, `$UP_DB`, `/var/lib/up/up.db` if
 
 ### Keys
 
-`j`/`k` move · `enter` details · `n` new · `e` edit · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` SMTP servers · `c` channels (`t` test) · `f` defaults · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
+`j`/`k` move · `enter` details · `n` new · `e` edit · `y` duplicate · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` SMTP servers · `c` channels (`t` test) · `f` defaults · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
+
+`y` opens the new monitor form filled from the selected monitor, named `<name> copy`. Headers and body stay sealed (`set`, with keep, replace or clear), and history, mute and maintenance windows are not copied. Nothing is saved until `enter`.
 
 In forms: `tab`/`shift+tab` switch fields · `←`/`→` choose · `enter` save · `esc` cancel.
 
@@ -249,7 +251,7 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 |---|---|
 | `GET /api/v1/ping` | validates the token and server identity |
 | `GET /api/v1/snapshot` | returns everything the TUI shows |
-| `POST /api/v1/checks`, `PUT`/`DELETE /api/v1/checks/{name}` | adds, edits or deletes a monitor (names cannot change) |
+| `POST /api/v1/checks`, `PUT`/`DELETE /api/v1/checks/{name}` | adds, edits or deletes a monitor (names cannot change). `POST` accepts an optional `copy_from` (a monitor name): header values and body the request keeps come from that monitor, sealed on the server; `404` if it does not exist |
 | `PUT`/`DELETE /api/v1/checks/{name}/mute` | mutes (`duration_ms`, 1 minute to 7 days) or unmutes |
 | `POST /api/v1/smtp-servers`, `PUT`/`DELETE /api/v1/smtp-servers/{name}` | manages SMTP servers |
 | `POST /api/v1/channels`, `PUT`/`DELETE /api/v1/channels/{name}` | manages channels |
