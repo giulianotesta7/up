@@ -392,3 +392,33 @@ func TestOpenV8FailingMidMigrationChangesNothing(t *testing.T) {
 		t.Fatal("checks.period_ns exists after a failed migration")
 	}
 }
+
+func TestPingStoredAfterAMissIsNewest(t *testing.T) {
+	s, key := keyedStore(t)
+	ctx := context.Background()
+	if err := s.AddCheck(ctx, beatCheck); err != nil {
+		t.Fatal(err)
+	}
+	tok := token(t, s, key, "backup")
+	ping(t, s, tok, false, t0)
+	deadline := t0.Add(beatCheck.Period + beatCheck.Grace)
+	missed := check.Overdue(beatCheck, t0, t0, deadline.Add(time.Second))
+	if stored, err := s.RecordMissed(ctx, beatCheck, t0, missed[0]); err != nil || !stored {
+		t.Fatal(stored, err)
+	}
+	// The request began before the deadline but is stored after the miss:
+	// it is stamped just after the newest result, so it is the newest.
+	if !ping(t, s, tok, false, deadline.Add(-time.Second)) {
+		t.Fatal("not found")
+	}
+	got := recent(t, s, "backup")
+	if len(got) != 3 || got[0].Status != check.StatusUp || got[0].At != missed[0].At.Add(time.Nanosecond) {
+		t.Fatalf("newest = %+v, want up at %v", got, missed[0].At.Add(time.Nanosecond))
+	}
+	// A ping after the newest result keeps its own time.
+	later := deadline.Add(time.Minute)
+	ping(t, s, tok, true, later)
+	if got := recent(t, s, "backup"); got[0] != check.Fail("backup", later) {
+		t.Fatalf("newest = %+v, want a failure at %v", got[0], later)
+	}
+}

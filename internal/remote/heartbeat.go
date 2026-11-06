@@ -25,25 +25,37 @@ const HeartbeatPrefix = "/api/v1/heartbeat/"
 // send `curl --data` output without being refused.
 const MaxPingBody = 1 << 10
 
-// PingStore records heartbeat pings. *store.Store implements it.
+// PingStore looks up and records heartbeat pings. *store.Store implements
+// it.
 type PingStore interface {
+	HeartbeatTokenKnown(ctx context.Context, token string) (bool, error)
 	PingHeartbeat(ctx context.Context, token string, failed bool, at time.Time) (bool, error)
 }
 
 // PingLimits are token buckets (rate per second, burst) for the ping
-// endpoint. The tight limit is per presented token, so many jobs behind one
-// proxy that fire at the same minute are not throttled together; the looser
-// per-client-address and global limits bound everything else, including
-// guessing. The client address is the connection's: forwarded headers are
-// not trusted.
+// endpoint. The token is looked up first, so traffic without a valid token
+// cannot block valid pings:
+//
+//   - Cap bounds every request that reaches the token lookup, protecting
+//     the database.
+//   - Token is per presented token, valid or not (a ping and its /fail
+//     share one), so many jobs behind one proxy that fire at the same
+//     minute are not throttled together.
+//   - IP (per client address) and Unknown (overall) apply only to tokens
+//     that match no heartbeat, bounding guessing; a valid token never
+//     spends or meets them.
+//
+// The client address is the connection's: forwarded headers are not
+// trusted.
 type PingLimits struct {
-	TokenRate, IPRate, GlobalRate    float64
-	TokenBurst, IPBurst, GlobalBurst int
+	TokenRate, IPRate, UnknownRate, CapRate     float64
+	TokenBurst, IPBurst, UnknownBurst, CapBurst int
 }
 
-// DefaultPingLimits: 1/s burst 5 per token, 20/s burst 100 per client
-// address and 50/s burst 200 overall.
-var DefaultPingLimits = PingLimits{TokenRate: 1, TokenBurst: 5, IPRate: 20, IPBurst: 100, GlobalRate: 50, GlobalBurst: 200}
+// DefaultPingLimits: 1/s burst 5 per token; for unknown tokens 20/s burst
+// 100 per client address and 50/s burst 200 overall; 500/s burst 1000 for
+// all lookups.
+var DefaultPingLimits = PingLimits{TokenRate: 1, TokenBurst: 5, IPRate: 20, IPBurst: 100, UnknownRate: 50, UnknownBurst: 200, CapRate: 500, CapBurst: 1000}
 
 // maxLimiterKeys bounds the per-token and per-address bucket maps.
 const maxLimiterKeys = 10000
@@ -64,32 +76,28 @@ type PingOptions struct {
 //     prefix, all byte-identical, so a caller cannot tell them apart.
 //   - 405 (Allow: POST) for other methods and 413 for a body over
 //     MaxPingBody, decided before the token is looked at.
-//   - 429 {"error":"too many requests"} (Retry-After: 1) over a limit.
+//   - 429 {"error":"too many requests"} (Retry-After: 1) over a limit (see
+//     PingLimits), identical for every limit.
 //   - 500 {"error":"internal error"} when the database fails.
 //
-// The token never appears in a response or a log.
+// Unknown, malformed and former tokens take the same path, so the limits
+// they meet do not tell them apart either; only a valid token, which already
+// answers 200, skips the unknown-token buckets. The token never appears in a
+// response or a log.
 func HeartbeatRoutes(s PingStore, o PingOptions) http.Handler {
 	now := o.Now
 	if now == nil {
 		now = time.Now
 	}
 	l := o.Limits
-	global := newLimiter(l.GlobalRate, l.GlobalBurst, 1)
+	limitCap := newLimiter(l.CapRate, l.CapBurst, 1)
+	unknown := newLimiter(l.UnknownRate, l.UnknownBurst, 1)
 	perIP := newLimiter(l.IPRate, l.IPBurst, maxLimiterKeys)
 	perToken := newLimiter(l.TokenRate, l.TokenBurst, maxLimiterKeys)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Cache-Control", "no-store")
 		h.Set("X-Content-Type-Options", "nosniff")
-		at := now()
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			ip = r.RemoteAddr
-		}
-		if !perIP.allow(ip, at) || !global.allow("", at) {
-			tooMany(w)
-			return
-		}
 		if r.Method != http.MethodPost {
 			h.Set("Allow", "POST")
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -103,9 +111,23 @@ func HeartbeatRoutes(s PingStore, o PingOptions) http.Handler {
 			writeBodyError(w, err)
 			return
 		}
+		// Stamped once the body is in, when the job is done sending.
+		at := now()
+		if !limitCap.allow("", at) {
+			tooMany(w)
+			return
+		}
 		token, failed, ok := pingPath(r.URL.EscapedPath())
-		// The bucket is keyed by what was presented (a ping and its /fail
-		// share one), so an unknown token is limited exactly like a real one.
+		known := false
+		if ok {
+			var err error
+			if known, err = s.HeartbeatTokenKnown(r.Context(), token); err != nil {
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+		}
+		// The bucket is keyed by what was presented, so an unknown token
+		// is limited exactly like a real one.
 		presented := token
 		if !ok {
 			presented = r.URL.EscapedPath()
@@ -115,7 +137,15 @@ func HeartbeatRoutes(s PingStore, o PingOptions) http.Handler {
 			tooMany(w)
 			return
 		}
-		if !ok {
+		if !known {
+			ip, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil {
+				ip = r.RemoteAddr
+			}
+			if !perIP.allow(ip, at) || !unknown.allow("", at) {
+				tooMany(w)
+				return
+			}
 			writeError(w, http.StatusNotFound, "not found")
 			return
 		}

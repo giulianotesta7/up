@@ -227,6 +227,27 @@ func TestHeartbeatStateMachine(t *testing.T) {
 	}
 }
 
+func TestHeartbeatPingStoredAfterAMissRecovers(t *testing.T) {
+	r := newBeatRig(t, 1, 1)
+	r.start()
+	r.ping(beatStart, false)
+	r.waitResults(1)
+	deadline := beatStart.Add(beatStep)
+	r.clock.setAt(deadline.Add(time.Second))
+	r.waitResults(2)
+	r.waitAlerts(down)
+	// A request that began before the deadline is stored after the miss.
+	found, err := r.s.PingHeartbeat(context.Background(), r.token, false, deadline.Add(-time.Second))
+	if err != nil || !found {
+		t.Fatalf("PingHeartbeat() = %v, %v", found, err)
+	}
+	got := r.waitResults(3)
+	if want := check.Ping("backup", deadline.Add(time.Nanosecond)); got[0] != want {
+		t.Fatalf("newest = %+v, want %+v", got[0], want)
+	}
+	r.waitAlerts(down, up)
+}
+
 func TestHeartbeatAlertAfterCountsMissedDeadlines(t *testing.T) {
 	r := newBeatRig(t, 2, 2)
 	r.start()

@@ -111,29 +111,68 @@ func (s *Store) RegenerateHeartbeatToken(ctx context.Context, name string) (stri
 	return token, nil
 }
 
-// PingHeartbeat records a ping (or, with failed, a reported failure) at at
-// for the heartbeat monitor whose token is token, and reports whether one
-// matched. The monitor is found by the token's hash, never by opening stored
-// tokens, and the hashes are compared in constant time. Any other text,
-// including a former token, matches nothing and records nothing.
-func (s *Store) PingHeartbeat(ctx context.Context, token string, failed bool, at time.Time) (bool, error) {
+// queryRower is a *sql.DB or a *sql.Tx.
+type queryRower interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// heartbeatByToken returns the name of the heartbeat monitor whose token is
+// token, or "" when none matches. The monitor is found by the token's hash,
+// never by opening stored tokens, and the hashes are compared in constant
+// time.
+func heartbeatByToken(ctx context.Context, q queryRower, token string) (string, error) {
 	hash := pingTokenHash(token)
+	var name string
+	var stored []byte
+	err := q.QueryRowContext(ctx, "SELECT name, ping_token_hash FROM checks WHERE ping_token_hash = ? AND kind = ?", hash, config.CheckHeartbeat).Scan(&name, &stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if subtle.ConstantTimeCompare(stored, hash) != 1 {
+		return "", nil
+	}
+	return name, nil
+}
+
+// HeartbeatTokenKnown reports whether token is the ping token of a heartbeat
+// monitor, without recording anything. A former token is not known.
+func (s *Store) HeartbeatTokenKnown(ctx context.Context, token string) (bool, error) {
+	name, err := heartbeatByToken(ctx, s.db, token)
+	if err != nil {
+		return false, fmt.Errorf("store: heartbeat token lookup: %w", err)
+	}
+	return name != "", nil
+}
+
+// PingHeartbeat records a ping (or, with failed, a reported failure) for the
+// heartbeat monitor whose token is token, and reports whether one matched.
+// Any other text, including a former token, matches nothing and records
+// nothing. The result is stamped at at, or just after the monitor's newest
+// result when that is not earlier: a request that began before a deadline
+// but is stored after the miss was recorded is still the newest result, so
+// the monitor observes it and recovers.
+func (s *Store) PingHeartbeat(ctx context.Context, token string, failed bool, at time.Time) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("store: heartbeat ping: %w", err)
 	}
 	defer tx.Rollback()
-	var name string
-	var stored []byte
-	err = tx.QueryRowContext(ctx, "SELECT name, ping_token_hash FROM checks WHERE ping_token_hash = ? AND kind = ?", hash, config.CheckHeartbeat).Scan(&name, &stored)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
+	name, err := heartbeatByToken(ctx, tx, token)
 	if err != nil {
 		return false, fmt.Errorf("store: heartbeat ping: %w", err)
 	}
-	if subtle.ConstantTimeCompare(stored, hash) != 1 {
+	if name == "" {
 		return false, nil
+	}
+	var newest sql.NullInt64
+	if err := tx.QueryRowContext(ctx, "SELECT MAX(at_ns) FROM results WHERE check_name = ?", name).Scan(&newest); err != nil {
+		return false, fmt.Errorf("store: heartbeat ping: %w", err)
+	}
+	if newest.Valid && at.UnixNano() <= newest.Int64 {
+		at = time.Unix(0, newest.Int64+1).In(at.Location())
 	}
 	r := check.Ping(name, at)
 	if failed {

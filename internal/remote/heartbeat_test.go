@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -106,7 +107,8 @@ func TestHeartbeatPingAndFail(t *testing.T) {
 	if rec := pingFrom(h, "POST", "/api/v1/heartbeat/"+token+"/fail", "192.0.2.1", "exit 3"); rec.Code != 200 || rec.Body.String() != "{\"ok\":true}\n" {
 		t.Fatalf("fail = %d %s", rec.Code, rec.Body)
 	}
-	want := []check.Result{check.Fail("backup", pingTime), check.Ping("backup", pingTime)}
+	// The clock stands still, so the failure is stamped just after the ping.
+	want := []check.Result{check.Fail("backup", pingTime.Add(time.Nanosecond)), check.Ping("backup", pingTime)}
 	if got := beatResults(t, s, "backup"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("results = %+v, want %+v", got, want)
 	}
@@ -216,20 +218,44 @@ func TestHeartbeatRateLimits(t *testing.T) {
 	}
 }
 
-func TestHeartbeatRateLimitsPerAddressAndGlobally(t *testing.T) {
-	s, _ := beatStore(t)
-	h := HeartbeatRoutes(s, PingOptions{Limits: PingLimits{TokenRate: 1, TokenBurst: 5, IPRate: 1, IPBurst: 3, GlobalRate: 1, GlobalBurst: 5}, Now: fixedPingClock})
+func TestHeartbeatUnknownTokensCannotBlockValidPings(t *testing.T) {
+	s, key := beatStore(t, "backup")
+	h := HeartbeatRoutes(s, PingOptions{Limits: DefaultPingLimits, Now: fixedPingClock})
+	token := beatToken(t, s, key, "backup")
+	// 4 addresses send 100 distinct unknown tokens each: every address
+	// spends its burst and together they drain the unknown-token bucket.
+	for a := range 4 {
+		for i := range 100 {
+			if code := pingFrom(h, "POST", fmt.Sprintf("/api/v1/heartbeat/uphb_%d_%d", a, i), fmt.Sprintf("10.0.0.%d", a+1), "").Code; code != 404 && code != 429 {
+				t.Fatalf("unknown %d from address %d = %d", i, a, code)
+			}
+		}
+	}
+	if code := pingFrom(h, "POST", "/api/v1/heartbeat/uphb_more", "10.0.9.1", "").Code; code != 429 {
+		t.Fatalf("unknown token from a fresh address after the flood = %d, want 429", code)
+	}
+	// A valid token is not limited by them, from a fresh or a flooding address.
+	for _, ip := range []string{"10.0.9.2", "10.0.0.1"} {
+		if code := pingFrom(h, "POST", "/api/v1/heartbeat/"+token, ip, "").Code; code != 200 {
+			t.Fatalf("valid token from %s after the flood = %d, want 200", ip, code)
+		}
+	}
+	if got := beatResults(t, s, "backup"); len(got) != 2 {
+		t.Fatalf("results = %d, want 2", len(got))
+	}
+}
+
+func TestHeartbeatRateLimitsUnknownTokensPerAddressAndGlobally(t *testing.T) {
+	s, key := beatStore(t, "backup")
+	h := HeartbeatRoutes(s, PingOptions{Limits: PingLimits{TokenRate: 1, TokenBurst: 5, IPRate: 1, IPBurst: 3, UnknownRate: 1, UnknownBurst: 5, CapRate: 100, CapBurst: 100}, Now: fixedPingClock})
+	token := beatToken(t, s, key, "backup")
 	for i := range 3 {
 		if code := pingFrom(h, "POST", fmt.Sprintf("/api/v1/heartbeat/t%d", i), "10.0.0.1", "").Code; code != 404 {
 			t.Fatalf("request %d = %d", i, code)
 		}
 	}
 	if code := pingFrom(h, "POST", "/api/v1/heartbeat/t9", "10.0.0.1", "").Code; code != 429 {
-		t.Fatalf("fourth request of one address = %d, want 429", code)
-	}
-	// Wrong methods count too.
-	if code := pingFrom(h, "GET", "/api/v1/heartbeat/t9", "10.0.0.1", "").Code; code != 429 {
-		t.Fatalf("GET over the address limit = %d, want 429", code)
+		t.Fatalf("fourth unknown token of one address = %d, want 429", code)
 	}
 	for i := range 2 {
 		if code := pingFrom(h, "POST", "/api/v1/heartbeat/u", fmt.Sprintf("10.0.1.%d", i), "").Code; code != 404 {
@@ -237,7 +263,64 @@ func TestHeartbeatRateLimitsPerAddressAndGlobally(t *testing.T) {
 		}
 	}
 	if code := pingFrom(h, "POST", "/api/v1/heartbeat/v", "10.0.2.1", "").Code; code != 429 {
-		t.Fatalf("request over the global limit = %d, want 429", code)
+		t.Fatalf("unknown token over the unknown-token limit = %d, want 429", code)
+	}
+	if code := pingFrom(h, "POST", "/api/v1/heartbeat/"+token, "10.0.0.1", "").Code; code != 200 {
+		t.Fatalf("valid token from the limited address = %d, want 200", code)
+	}
+}
+
+func TestHeartbeatSafetyCapLimitsEveryToken(t *testing.T) {
+	names := []string{"a", "b", "c"}
+	s, key := beatStore(t, names...)
+	h := HeartbeatRoutes(s, PingOptions{Limits: PingLimits{TokenRate: 1, TokenBurst: 5, IPRate: 20, IPBurst: 100, UnknownRate: 50, UnknownBurst: 200, CapRate: 1, CapBurst: 2}, Now: fixedPingClock})
+	var codes []int
+	for _, name := range names {
+		codes = append(codes, pingFrom(h, "POST", "/api/v1/heartbeat/"+beatToken(t, s, key, name), "10.0.0.1", "").Code)
+	}
+	if want := []int{200, 200, 429}; !reflect.DeepEqual(codes, want) {
+		t.Fatalf("codes = %v, want %v", codes, want)
+	}
+	// Methods and body sizes are refused before the cap and do not spend it.
+	if code := pingFrom(h, "GET", "/api/v1/heartbeat/x", "10.0.0.1", "").Code; code != 405 {
+		t.Fatalf("GET over the cap = %d, want 405", code)
+	}
+}
+
+// bodyClock is a clock that moves an hour once the request body was read.
+type bodyClock struct {
+	mu   sync.Mutex
+	read bool
+}
+
+func (c *bodyClock) Read(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.read = true
+	return 0, io.EOF
+}
+
+func (c *bodyClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.read {
+		return pingTime.Add(time.Hour)
+	}
+	return pingTime
+}
+
+func TestHeartbeatPingIsStampedAfterTheBodyIsRead(t *testing.T) {
+	s, key := beatStore(t, "backup")
+	clock := &bodyClock{}
+	h := HeartbeatRoutes(s, PingOptions{Limits: DefaultPingLimits, Now: clock.now})
+	req := httptest.NewRequest("POST", "/api/v1/heartbeat/"+beatToken(t, s, key, "backup"), clock)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("ping = %d", rec.Code)
+	}
+	if got := beatResults(t, s, "backup"); len(got) != 1 || got[0] != check.Ping("backup", pingTime.Add(time.Hour)) {
+		t.Fatalf("results = %+v, want a ping stamped after the body", got)
 	}
 }
 
@@ -263,6 +346,10 @@ type failingPings struct{}
 
 func (failingPings) PingHeartbeat(context.Context, string, bool, time.Time) (bool, error) {
 	return false, errors.New("database is locked: uphb_secret")
+}
+
+func (failingPings) HeartbeatTokenKnown(context.Context, string) (bool, error) {
+	return true, nil
 }
 
 func TestHeartbeatStoreErrorsHideTheToken(t *testing.T) {
