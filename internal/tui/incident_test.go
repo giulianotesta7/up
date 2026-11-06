@@ -348,3 +348,54 @@ func TestHelpListsIncidentScrollKeys(t *testing.T) {
 		t.Errorf("split popup:\n%s", popup)
 	}
 }
+
+// The period numbers are those of store.UptimeWindow, also with more
+// incidents than the list keeps and when the daemon stopped.
+func TestLoadPeriodNumbersMatchUptimeWindow(t *testing.T) {
+	var many []check.Result
+	for i := range IncidentLimit + 10 {
+		down := result(1, "00:00:00", check.StatusDown, "status 500")
+		down.At = down.At.Add(time.Duration(i) * 5 * time.Hour)
+		up := result(1, "00:00:00", check.StatusUp, "")
+		up.At = down.At.Add(time.Hour)
+		many = append(many, down, up)
+	}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name  string
+		extra []check.Result
+		clock time.Time
+		want  int
+	}{
+		{"few incidents", nil, now, 5},
+		{"more than the list keeps", many, now, 5 + IncidentLimit + 10},
+		{"stale", nil, now.Add(10 * StaleAfter), 5},
+		// The period ends at the last heartbeat, before it starts: nothing,
+		// not even the ongoing incident.
+		{"stopped before the period", nil, now.Add(IncidentPeriod + day), 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			results, attempts := alertingHistory()
+			s := incidentStore(t, append(results, tc.extra...), attempts)
+			snap, err := Load(ctx, s, tc.clock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			until := tc.clock
+			if snap.Stale(tc.clock) {
+				until = snap.LastBeat
+			}
+			up, observed, incidents, err := s.UptimeWindow(ctx, "api", tc.clock.Add(-IncidentPeriod), until)
+			if err != nil {
+				t.Fatal(err)
+			}
+			api := snap.Services[0]
+			if api.PeriodUp != up || api.PeriodObserved != observed || api.PeriodIncidents != incidents || incidents != tc.want {
+				t.Fatalf("period = %v, %v, %d; want %v, %v, %d (%d)", api.PeriodUp, api.PeriodObserved, api.PeriodIncidents, up, observed, incidents, tc.want)
+			}
+			if tc.want > 0 && len(api.Incidents) != min(tc.want, IncidentLimit) {
+				t.Fatalf("listed %d incidents, want %d", len(api.Incidents), min(tc.want, IncidentLimit))
+			}
+		})
+	}
+}

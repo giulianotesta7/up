@@ -333,12 +333,45 @@ type AttemptReader interface {
 
 var _ AttemptReader = (*store.Store)(nil)
 
+// UptimeReader lets Load measure uptime without counting incidents again:
+// they come from the outages it already read.
+type UptimeReader interface {
+	Uptime(ctx context.Context, name string, since, until time.Time) (time.Duration, time.Duration, error)
+}
+
+var _ UptimeReader = (*store.Store)(nil)
+
 // SnapshotLoader is an optional capability of a Store: it returns a whole
 // snapshot in one call. The TUI uses it instead of many per-resource reads,
 // so a remote store costs one request per refresh and never falls back to
 // partial reads.
 type SnapshotLoader interface {
 	LoadSnapshot(ctx context.Context, now time.Time) (Snapshot, error)
+}
+
+// uptimeWindow is s.UptimeWindow for the monitor name. When outages holds
+// every outage of the monitor (complete) and s is an UptimeReader, it counts
+// the incidents in outages, the way UptimeWindow does, instead of reading the
+// window's history again.
+func uptimeWindow(ctx context.Context, s Store, name string, outages []store.Outage, complete bool, since, until time.Time) (time.Duration, time.Duration, int, error) {
+	r, ok := s.(UptimeReader)
+	if !ok || !complete {
+		return s.UptimeWindow(ctx, name, since, until)
+	}
+	if !until.After(since) {
+		return 0, 0, 0, nil
+	}
+	up, observed, err := r.Uptime(ctx, name, since, until)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	incidents := 0
+	for _, o := range outages {
+		if !o.Start.After(until) && (o.Ongoing || o.End.After(since)) {
+			incidents++
+		}
+	}
+	return up, observed, incidents, nil
 }
 
 // Load reads a snapshot from the store.
@@ -464,7 +497,8 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 		}
 		svc.Incidents = matchAlerts(period, matched)
 		// Like today's uptime, the period's needs a heartbeat to end at.
-		periodUp, periodObserved, periodIncidents, err := s.UptimeWindow(ctx, c.Name, since, until)
+		complete := len(outages) < IncidentLimit
+		periodUp, periodObserved, periodIncidents, err := uptimeWindow(ctx, s, c.Name, outages, complete, since, until)
 		if err != nil {
 			return Snapshot{}, err
 		}
@@ -475,7 +509,7 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 		if len(svc.Outages) > 0 && svc.Outages[0].Ongoing {
 			svc.DownSince = svc.Outages[0].Start
 		}
-		up, observed, incidents, err := s.UptimeWindow(ctx, c.Name, start, until)
+		up, observed, incidents, err := uptimeWindow(ctx, s, c.Name, outages, complete, start, until)
 		if err != nil {
 			return Snapshot{}, err
 		}
