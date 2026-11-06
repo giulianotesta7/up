@@ -23,6 +23,33 @@ type WriteStore interface {
 	Unmute(context.Context, string, time.Time) error
 }
 
+// checkCopier is the part of a store that adds a monitor taking the protected
+// values it keeps from a stored one, without opening them.
+type checkCopier interface {
+	AddCheckFrom(ctx context.Context, source string, c config.Check) error
+}
+
+// createdCheck is the check as stored, so a copy's response reports which
+// protected values are set. It falls back to c when the store cannot read.
+func createdCheck(ctx context.Context, s any, c config.Check) config.Check {
+	reader, ok := s.(interface {
+		Checks(context.Context) ([]config.Check, error)
+	})
+	if !ok {
+		return c
+	}
+	checks, err := reader.Checks(ctx)
+	if err != nil {
+		return c
+	}
+	for _, stored := range checks {
+		if stored.Name == c.Name {
+			return stored
+		}
+	}
+	return c
+}
+
 func writeStoreError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	switch {
@@ -95,11 +122,16 @@ func WriteRoutes(s WriteStore) http.Handler {
 				w.WriteHeader(405)
 				return
 			}
-			var d CheckDTO
-			if !DecodeJSON(w, r, &d) {
+			// copy_from is optional: when set, the values this body keeps
+			// (absent or "keep") come from that stored monitor.
+			var raw struct {
+				CheckDTO
+				CopyFrom *string `json:"copy_from"`
+			}
+			if !DecodeJSON(w, r, &raw) {
 				return
 			}
-			c, msg, err := d.checkOrError(r.Context(), s)
+			c, msg, err := raw.CheckDTO.checkOrError(r.Context(), s)
 			if err != nil {
 				writeStoreError(w, err)
 				return
@@ -108,11 +140,24 @@ func WriteRoutes(s WriteStore) http.Handler {
 				writeError(w, http.StatusBadRequest, msg)
 				return
 			}
-			if err := s.AddCheck(r.Context(), c); err != nil {
-				writeStoreError(w, err)
-				return
+			switch copier, canCopy := s.(checkCopier); {
+			case raw.CopyFrom == nil:
+				if err := s.AddCheck(r.Context(), c); err != nil {
+					writeStoreError(w, err)
+					return
+				}
+				writeJSON(w, 201, checkDTO(c.Canonical()))
+			case *raw.CopyFrom == "":
+				writeError(w, http.StatusBadRequest, "copy_from must name a monitor")
+			case !canCopy:
+				writeError(w, http.StatusNotImplemented, "copying a monitor is not supported")
+			default:
+				if err := copier.AddCheckFrom(r.Context(), *raw.CopyFrom, c); err != nil {
+					writeStoreError(w, err)
+					return
+				}
+				writeJSON(w, 201, checkDTO(createdCheck(r.Context(), s, c).Canonical()))
 			}
-			writeJSON(w, 201, checkDTO(c.Canonical()))
 			return
 		}
 		rest, ok := strings.CutPrefix(path, "/api/v1/checks/")

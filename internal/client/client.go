@@ -243,6 +243,9 @@ type checkWrite struct {
 	ExpectText     string          `json:"expect_text,omitempty"`
 	Host           string          `json:"host,omitempty"`
 	Port           int             `json:"port,omitempty"`
+	// CopyFrom (create only) names the stored monitor whose protected values
+	// the server copies for every value this check keeps.
+	CopyFrom string `json:"copy_from,omitempty"`
 }
 
 type headerWrite struct {
@@ -275,6 +278,17 @@ func (c *Client) AddCheck(ctx context.Context, v config.Check) error {
 		return err
 	}
 	return c.write(ctx, "POST", "/api/v1/checks", checkDTO(v))
+}
+
+// AddCheckFrom creates v taking the header values and body it keeps from the
+// server's monitor named source. The sealed values stay on the server.
+func (c *Client) AddCheckFrom(ctx context.Context, source string, v config.Check) error {
+	if err := addressable(v.Name); err != nil {
+		return err
+	}
+	d := checkDTO(v)
+	d.CopyFrom = source
+	return c.write(ctx, "POST", "/api/v1/checks", d)
 }
 func (c *Client) UpdateCheck(ctx context.Context, v config.Check) error {
 	if err := addressable(v.Name); err != nil {
@@ -400,6 +414,7 @@ func (c *Client) DeleteChannel(ctx context.Context, n string) error {
 }
 
 var _ tui.MaintenanceStore = (*Client)(nil)
+var _ tui.CheckCopier = (*Client)(nil)
 var _ tui.ChannelTester = (*Client)(nil)
 var _ tui.DefaultsStore = (*Client)(nil)
 

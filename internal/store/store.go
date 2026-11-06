@@ -270,7 +270,7 @@ func (s *Store) SetChecks(ctx context.Context, checks []config.Check) error {
 		return fmt.Errorf("store: set checks: %w", err)
 	}
 	for i, c := range checks {
-		if err := insertCheck(ctx, tx, i, c); err != nil {
+		if err := insertCheck(ctx, tx, i, c, nil); err != nil {
 			return fmt.Errorf("store: set checks: %w", err)
 		}
 	}
@@ -283,6 +283,22 @@ func (s *Store) SetChecks(ctx context.Context, checks []config.Check) error {
 // AddCheck appends a validated definition. An existing name is rejected, even
 // if its definition is identical. History and heartbeat are untouched.
 func (s *Store) AddCheck(ctx context.Context, c config.Check) error {
+	return s.addCheck(ctx, "", c)
+}
+
+// AddCheckFrom adds c like AddCheck, taking the protected values it keeps
+// (EditKeep) from the stored monitor named source instead of from c: the
+// sealed values are copied inside the store and never decrypted. Replace and
+// clear still override them. A missing source stores nothing and fails with
+// ErrNotFound. A TCP check has no protected values and keeps nothing.
+func (s *Store) AddCheckFrom(ctx context.Context, source string, c config.Check) error {
+	if source == "" {
+		return classify(ErrValidation, errors.New("store: add check: source monitor is required"))
+	}
+	return s.addCheck(ctx, source, c)
+}
+
+func (s *Store) addCheck(ctx context.Context, source string, c config.Check) error {
 	if err := config.ValidateCheck(c); err != nil {
 		return classify(ErrValidation, fmt.Errorf("store: add check: %w", err))
 	}
@@ -298,11 +314,24 @@ func (s *Store) AddCheck(ctx context.Context, c config.Check) error {
 	if exists {
 		return classify(ErrExists, fmt.Errorf("store: add check: name %q already exists", c.Name))
 	}
+	var from *protectedValues
+	if source != "" {
+		values, found, err := storedProtected(ctx, tx, source)
+		if err != nil {
+			return fmt.Errorf("store: add check: %w", err)
+		}
+		if !found {
+			return classify(ErrNotFound, fmt.Errorf("store: add check: source monitor %q not found", source))
+		}
+		if c.Kind != config.CheckTCP {
+			from = &values
+		}
+	}
 	var next int
 	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(position), -1) + 1 FROM checks").Scan(&next); err != nil {
 		return fmt.Errorf("store: add check: %w", err)
 	}
-	if err := insertCheck(ctx, tx, next, c); err != nil {
+	if err := insertCheck(ctx, tx, next, c, from); err != nil {
 		return fmt.Errorf("store: add check: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -311,12 +340,13 @@ func (s *Store) AddCheck(ctx context.Context, c config.Check) error {
 	return nil
 }
 
-func insertCheck(ctx context.Context, tx *sql.Tx, position int, c config.Check) error {
+// insertCheck stores c; from, when set, supplies the values c keeps.
+func insertCheck(ctx context.Context, tx *sql.Tx, position int, c config.Check, from *protectedValues) error {
 	if err := requireChannel(ctx, tx, c.Channel); err != nil {
 		return err
 	}
 	c = c.Canonical()
-	f, err := checkFields(c, nil)
+	f, err := checkFields(c, from)
 	if err != nil {
 		return err
 	}

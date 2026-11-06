@@ -178,6 +178,16 @@ var _ Store = (*store.Store)(nil)
 // *store.Store implements the readers, because remote reads arrive in the
 // snapshot.
 
+// CheckCopier adds a monitor taking the header values and request body it
+// keeps (config.EditKeep) from the stored monitor named source, so a copy
+// carries sealed values without the TUI ever holding them in the clear. Both
+// the local *store.Store and the remote client implement it.
+type CheckCopier interface {
+	AddCheckFrom(ctx context.Context, source string, c config.Check) error
+}
+
+var _ CheckCopier = (*store.Store)(nil)
+
 // MaintenanceStore edits a monitor's recurring maintenance windows. IDs are
 // assigned by the store and returned in the added window.
 type MaintenanceStore interface {

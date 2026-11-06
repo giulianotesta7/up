@@ -27,18 +27,9 @@ func (s *Store) UpdateCheck(ctx context.Context, c config.Check) error {
 	}
 	c = c.Canonical()
 	// A missing name finds nothing to keep and fails below with ErrNotFound.
-	var stored protectedValues
-	var storedHeaders string
-	var body, bodyKey []byte
-	err = tx.QueryRowContext(ctx, "SELECT headers, body, body_key FROM checks WHERE name = ?", c.Name).Scan(&storedHeaders, &body, &bodyKey)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	stored, _, err := storedProtected(ctx, tx, c.Name)
+	if err != nil {
 		return fmt.Errorf("store: update check: %w", err)
-	}
-	if stored.headers, err = decodeHeaders(storedHeaders); err != nil {
-		return fmt.Errorf("store: update check: %w", err)
-	}
-	if len(body) > 0 {
-		stored.body = secret.Sealed{Key: bodyKey, Data: body}
 	}
 	f, err := checkFields(c, &stored)
 	if err != nil {
@@ -144,4 +135,26 @@ SELECT 1 FROM checks WHERE name = ? AND url = ? AND interval_ns = ? AND timeout_
 		return false, fmt.Errorf("store: record %s: %w", r.CheckName, err)
 	}
 	return n > 0, nil
+}
+
+// storedProtected reads the protected values of the check called name and
+// whether it exists.
+func storedProtected(ctx context.Context, tx *sql.Tx, name string) (protectedValues, bool, error) {
+	var stored protectedValues
+	var headers string
+	var body, bodyKey []byte
+	err := tx.QueryRowContext(ctx, "SELECT headers, body, body_key FROM checks WHERE name = ?", name).Scan(&headers, &body, &bodyKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return protectedValues{}, false, nil
+	}
+	if err != nil {
+		return protectedValues{}, false, err
+	}
+	if stored.headers, err = decodeHeaders(headers); err != nil {
+		return protectedValues{}, false, err
+	}
+	if len(body) > 0 {
+		stored.body = secret.Sealed{Key: bodyKey, Data: body}
+	}
+	return stored, true, nil
 }

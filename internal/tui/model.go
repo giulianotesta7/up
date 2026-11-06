@@ -472,6 +472,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "n":
 		m.form = newMonitorForm(m.snap)
+	case "y":
+		if m.selected < len(m.snap.Services) {
+			m.form = copyMonitorForm(m.snap.Services[m.selected].Check, m.snap)
+		}
 	case "f":
 		m.defaults = newDefaultsPopup(m.snap)
 	case "e", "d":
