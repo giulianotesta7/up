@@ -62,6 +62,9 @@ func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, t
 	if ds, ok := s.(remote.DefaultsStore); ok {
 		routes.Handle("/api/v1/defaults", remote.DefaultsRoutes(ds))
 	}
+	if dr, ok := s.(remote.DeliveryReader); ok {
+		routes.Handle("/api/v1/deliveries", remote.DeliveryRoutes(dr))
+	}
 	if ts, ok := s.(remote.ChannelTestStore); ok {
 		routes.Handle("/api/v1/channels/{name}/test", remote.ChannelTestRoutes(ts))
 	}

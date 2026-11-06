@@ -21,6 +21,14 @@ const (
 	outageLimit = 5
 )
 
+// Delivery attempts in a snapshot are bounded, newest first, so a snapshot
+// does not grow with retention: AttemptLimit across all monitors and
+// ServiceAttemptLimit for each monitor.
+const (
+	AttemptLimit        = 200
+	ServiceAttemptLimit = 5
+)
+
 // Service is one configured check with its stored history.
 type Service struct {
 	Check     config.Check
@@ -50,6 +58,9 @@ type Service struct {
 	// down: what the daemon recorded, or the streak when it recorded nothing
 	// yet. A mute taken now starts from it.
 	KnownAlerting bool
+	// Attempts are the monitor's latest alert delivery attempts, newest
+	// first, at most ServiceAttemptLimit.
+	Attempts []store.Attempt
 }
 
 // Muted reports whether the service's alerts are being held at now.
@@ -105,6 +116,11 @@ type Snapshot struct {
 	Channels    []config.Channel
 	// ChannelTests is each channel's newest test request, by channel name.
 	ChannelTests []config.ChannelTest
+	// Attempts are the latest alert delivery attempts of all monitors, newest
+	// first, at most AttemptLimit. LastAttempts is the newest attempt of each
+	// channel that has one, ordered by channel.
+	Attempts     []store.Attempt
+	LastAttempts []store.Attempt
 	PublicKey    []byte
 	HasKey       bool
 	LastBeat     time.Time
@@ -231,6 +247,14 @@ type ChannelTestReader interface {
 	LatestChannelTests(context.Context) ([]config.ChannelTest, error)
 }
 
+// AttemptReader lets Load fill the delivery attempts of the snapshot.
+type AttemptReader interface {
+	Attempts(context.Context, store.AttemptFilter) ([]store.Attempt, error)
+	LastAttempts(context.Context) ([]store.Attempt, error)
+}
+
+var _ AttemptReader = (*store.Store)(nil)
+
 // SnapshotLoader is an optional capability of a Store: it returns a whole
 // snapshot in one call. The TUI uses it instead of many per-resource reads,
 // so a remote store costs one request per refresh and never falls back to
@@ -289,6 +313,15 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 			return Snapshot{}, err
 		}
 	}
+	attempts, hasAttempts := s.(AttemptReader)
+	if hasAttempts {
+		if snap.Attempts, err = attempts.Attempts(ctx, store.AttemptFilter{Limit: AttemptLimit}); err != nil {
+			return Snapshot{}, err
+		}
+		if snap.LastAttempts, err = attempts.LastAttempts(ctx); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	if r, ok := s.(DefaultsReader); ok {
 		if snap.Defaults, err = r.Defaults(ctx); err != nil {
 			return Snapshot{}, err
@@ -327,6 +360,11 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 		svc.KnownAlerting = svc.Streak.Alerting && c.Channel != ""
 		if known, ok := states[c.Name]; ok {
 			svc.KnownAlerting = known
+		}
+		if hasAttempts {
+			if svc.Attempts, err = attempts.Attempts(ctx, store.AttemptFilter{Monitor: c.Name, Limit: ServiceAttemptLimit}); err != nil {
+				return Snapshot{}, err
+			}
 		}
 		if svc.Outages, err = s.Outages(ctx, c.Name, outageLimit); err != nil {
 			return Snapshot{}, err

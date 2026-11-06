@@ -48,7 +48,7 @@ func TestSMTPCreateEditAndMask(t *testing.T) {
 	}
 	m, cmd := press(t, m, keyEnter)
 	m = finishCommand(t, m, cmd)
-	requireText(t, m, "SMTP servers", "gmail", "smtp.example.com", "set")
+	requireText(t, m, "Mail servers", "gmail", "smtp.example.com", "set")
 	s := m.store
 	list, err := s.SMTPServers(context.Background())
 	if err != nil || len(list) != 1 {

@@ -118,7 +118,7 @@ The database is resolved in this order: `--db`, `$UP_DB`, `/var/lib/up/up.db` if
 
 ### Keys
 
-`j`/`k` move · `/` search (the footer becomes the prompt · `tab` status: all, down, failing, held · `enter` keep · `esc` clear) · `enter` details · `n` new · `e` edit · `y` duplicate · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` SMTP servers · `c` channels (`t` test) · `f` defaults · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
+`j`/`k` move · `/` search (the footer becomes the prompt · `tab` status: all, down, failing, held · `enter` keep · `esc` clear) · `enter` details · `n` new · `e` edit · `y` duplicate · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` mail servers · `c` channels · `f` defaults · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
 
 `y` opens the new monitor form filled from the selected monitor, named `<name> copy`. Headers and body stay sealed (`set`, with keep, replace or clear), and history, mute and maintenance windows are not copied. Nothing is saved until `enter`.
 
@@ -147,11 +147,15 @@ It only proves that something is listening: no TLS, certificate or application c
 
 ## Alerts
 
-1. `s`: add an SMTP server. For a relay without authentication, set **No login required** to **Yes**.
+1. `s`: add a mail server. For a relay without authentication, set **No login required** to **Yes**.
 2. `c`: add a channel: **email** (that server and one or more comma-separated recipients) or **webhook** (a URL).
 3. `e` on a monitor: pick the channel. Monitors without a channel never alert.
 
 `up serve` sends one alert when a monitor goes down and one when it recovers, never one per failed check. **Alert after** and **Recover after** (default 1) set how many consecutive failures or successes are needed; meanwhile the list shows `FAILING 2/3` or `RECOVERING 1/2`. Restarting the daemon preserves the streak and does not resend alerts. Recipients only know what was actually sent: if you pick a channel for a monitor that is already down, the down alert is sent right then (once a mute or maintenance window ends, if one holds it) and the recovery follows normally.
+
+### Notifications
+
+`s` and `c` open one full-screen view with three tabs: **Mail servers**, **Channels** and **Deliveries**. `s` lands on Mail servers and `c` on Channels; `tab`/`shift+tab` switch tabs and `esc` goes back. On the first two tabs `n` adds, `e` edits, `d` deletes and, for a channel, `t` tests; the forms open over the view. Channels shows each channel's last delivery (`✓ sent`, `✗ failed` with the reason, `◷ held` with why, or `—`). Deliveries is the delivery log, newest first, with `↑`/`↓` (`j`/`k`) to scroll and `/` to search monitor, channel, event, outcome and reason (`enter` keeps the search, `esc` clears it). `enter` on a channel opens Deliveries showing only that channel; `esc` clears it. It works the same with `--remote`.
 
 TLS modes: `starttls` (default, usually port 587), `tls` (usually 465) and `none` for relays without login. `none` cannot be combined with a username.
 
@@ -175,9 +179,13 @@ In `c`, set **Kind** to `webhook` (`←`/`→`), then enter the URL and, optiona
 
 `event` is `monitor.down`, `monitor.recovered`, `cert.expiring` (`result` carries `days_remaining`) or `test` (no `monitor` or `result`; it carries `channel` and `message`). A `2xx` response means delivered. Any other status, a network error or a timeout (10s) is a failure. Redirects are not followed and failures are not retried.
 
+### Delivery log
+
+Every alert delivery is recorded per channel with its time, monitor, event (`monitor.down`, `monitor.recovered` or `cert.expiring`), outcome (`sent`, `failed` or `held` by a mute or maintenance window) and a short reason that never includes passwords, header values or webhook paths. Channel tests are not recorded, and attempts are kept as long as check history. The Deliveries tab shows the latest 200; times omit seconds.
+
 ### Testing a channel
 
-In the channel list, `t` and then `enter` send a test to the selected channel and show success or the reason it failed. Success means the SMTP server accepted the message (not that it reached the inbox) or the webhook answered `2xx`. A test changes no monitor data, needs `up serve` running and runs one at a time per channel.
+On the Channels tab, `t` and then `enter` send a test to the selected channel and show success or the reason it failed. Success means the SMTP server accepted the message (not that it reached the inbox) or the webhook answered `2xx`. A test changes no monitor data, needs `up serve` running and runs one at a time per channel.
 
 ### Muting
 
@@ -257,6 +265,7 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 | `POST /api/v1/channels`, `PUT`/`DELETE /api/v1/channels/{name}` | manages channels |
 | `GET`/`POST /api/v1/checks/{name}/maintenance`, `PUT`/`DELETE .../maintenance/{id}` | lists, adds, edits or deletes a monitor's maintenance windows (`weekdays` 0=Sunday, `start_minute`, `duration_ms`, `zone`); active windows hold alerts and certificate warnings |
 | `GET`/`PUT /api/v1/defaults` | reads or replaces the defaults for new items (`zone`, `channel`, `interval_ms`, `timeout_ms`, `expected_status`, `alert_after`, `recover_after`); the snapshot carries them too |
+| `GET /api/v1/deliveries` | lists alert delivery attempts, newest first, as `{"server_time", "attempts": [{at, monitor, channel, event, outcome, reason}]}`; optional `monitor`, `channel` and `limit` (default 50, at most 500) query parameters; the snapshot carries the latest ones too |
 | `POST`/`GET /api/v1/channels/{name}/test` | requests a channel test (`202`, or `409` while one is active) and reads the newest one; the daemon sends it |
 
 Bodies are strict JSON, limited to 1 MiB. Errors: `400` invalid input, `404` not found, `409` duplicate or still in use. Rejected requests change nothing.

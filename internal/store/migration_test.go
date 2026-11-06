@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -106,7 +107,7 @@ func tables(t *testing.T, path string) []string {
 	return names
 }
 
-var v2Tables = []string{"alert_state", "certs", "channel_tests", "channels", "checks", "daemon", "defaults", "maintenance_windows", "mutes", "results", "secret_key", "smtp_servers", "sqlite_sequence"}
+var v2Tables = []string{"alert_state", "certs", "channel_tests", "channels", "checks", "daemon", "defaults", "delivery_attempts", "maintenance_windows", "mutes", "results", "secret_key", "smtp_servers", "sqlite_sequence"}
 
 func TestOpenMigratesV1AndKeepsData(t *testing.T) {
 	path := v1Database(t)
@@ -118,8 +119,8 @@ func TestOpenMigratesV1AndKeepsData(t *testing.T) {
 	}
 	defer s.Close()
 
-	if got := version(t, path); got != 7 {
-		t.Fatalf("user_version after Open = %d, want 7", got)
+	if got := version(t, path); got != 8 {
+		t.Fatalf("user_version after Open = %d, want 8", got)
 	}
 	if got := tables(t, path); !reflect.DeepEqual(got, v2Tables) {
 		t.Fatalf("tables after migration = %v, want %v", got, v2Tables)
@@ -158,8 +159,8 @@ func TestOpenCreatesV2AndReopenIsIdempotent(t *testing.T) {
 	s, path := openTemp(t)
 	record(t, s, result("api", 0, check.StatusUp))
 	s.Close()
-	if got := version(t, path); got != 7 {
-		t.Fatalf("user_version of a new database = %d, want 7", got)
+	if got := version(t, path); got != 8 {
+		t.Fatalf("user_version of a new database = %d, want 8", got)
 	}
 
 	again, err := Open(path)
@@ -179,7 +180,7 @@ func TestOpenReadOnlyRejectsV1WithUpgradeHint(t *testing.T) {
 	path := v1Database(t)
 
 	_, err := OpenReadOnly(path)
-	if err == nil || !strings.Contains(err.Error(), "database schema version 1 is older than this up (7); open it with `up serve` or `up tui` to upgrade it") {
+	if err == nil || !strings.Contains(err.Error(), "database schema version 1 is older than this up (8); open it with `up serve` or `up tui` to upgrade it") {
 		t.Fatalf("OpenReadOnly(v1) error = %v, want upgrade hint", err)
 	}
 	if got := version(t, path); got != 1 {
@@ -219,8 +220,8 @@ func TestOpenMigratesV5KeepingBehavior(t *testing.T) {
 		t.Fatalf("Open(v5) error = %v", err)
 	}
 	defer s.Close()
-	if got := version(t, path); got != 7 {
-		t.Fatalf("user_version = %d, want 7", got)
+	if got := version(t, path); got != 8 {
+		t.Fatalf("user_version = %d, want 8", got)
 	}
 	ctx := context.Background()
 	checks, err := s.Checks(ctx)
@@ -246,7 +247,7 @@ func TestOpenMigratesV5KeepingBehavior(t *testing.T) {
 
 func TestOpenReadOnlyRejectsV5AndOpenUpgradesIt(t *testing.T) {
 	path := v5Database(t)
-	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 5 is older than this up (7)") {
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 5 is older than this up (8)") {
 		t.Fatalf("OpenReadOnly(v5) error = %v", err)
 	}
 	s, err := Open(path)
@@ -285,7 +286,7 @@ INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_statu
 
 func TestOpenMigratesV6WithBuiltinDefaultsAndKeepsMonitors(t *testing.T) {
 	path := v6Database(t)
-	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 6 is older than this up (7)") {
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 6 is older than this up (8)") {
 		t.Fatalf("OpenReadOnly(v6) error = %v", err)
 	}
 	s, err := Open(path)
@@ -293,8 +294,8 @@ func TestOpenMigratesV6WithBuiltinDefaultsAndKeepsMonitors(t *testing.T) {
 		t.Fatalf("Open(v6) error = %v", err)
 	}
 	defer s.Close()
-	if got := version(t, path); got != 7 {
-		t.Fatalf("user_version = %d, want 7", got)
+	if got := version(t, path); got != 8 {
+		t.Fatalf("user_version = %d, want 8", got)
 	}
 	ctx := context.Background()
 	if d, err := s.Defaults(ctx); err != nil || d != config.BuiltinDefaults() {
@@ -303,5 +304,133 @@ func TestOpenMigratesV6WithBuiltinDefaultsAndKeepsMonitors(t *testing.T) {
 	checks, err := s.Checks(ctx)
 	if err != nil || len(checks) != 1 || checks[0].Interval != time.Minute || checks[0].ExpectedStatus != 204 {
 		t.Fatalf("Checks() = %+v, %v, want the untouched monitor", checks, err)
+	}
+}
+
+// v7Database writes a database as the previous release left it (migrations 0
+// to 6) with rows in every table that has user data.
+func v7Database(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "up.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, m := range migrations[:7] {
+		if _, err := db.Exec(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 7;
+INSERT INTO smtp_servers (name, host, port, tls, username, password, password_key, sender) VALUES ('smtp', 'mail.example.com', 587, 'starttls', 'u', x'0102', x'0304', 'up@example.com');
+INSERT INTO channels (name, kind, smtp_server, recipients) VALUES ('ops', 'email', 'smtp', 'a@example.com');
+INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, channel) VALUES (0, 'api', 'https://api.example.com', 60000000000, 10000000000, 204, 'ops');
+INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error) VALUES ('api', 1000, 'down', 5, 502, 'bad gateway');
+INSERT INTO mutes (check_name, until_ns, was_alerting) VALUES ('api', 5000, 1);
+INSERT INTO alert_state (check_name, known_alerting) VALUES ('api', 1);
+INSERT INTO defaults (id, zone, channel, interval_ns, timeout_ns, expected_status, alert_after, recover_after) VALUES (1, 'UTC', 'ops', 60000000000, 10000000000, 200, 2, 2);
+INSERT INTO daemon (id, last_beat_ns) VALUES (1, 42);`); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// dumpTables returns every row of the named tables as text, in a fixed order.
+func dumpTables(t *testing.T, path string, tables ...string) map[string][]string {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	out := map[string][]string{}
+	for _, table := range tables {
+		rows, err := db.Query("SELECT * FROM " + table + " ORDER BY 1, 2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cols, _ := rows.Columns()
+		for rows.Next() {
+			vals := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				t.Fatal(err)
+			}
+			out[table] = append(out[table], fmt.Sprintf("%#v", vals))
+		}
+		rows.Close()
+	}
+	return out
+}
+
+func TestOpenMigratesV7AddingOnlyTheAttemptLog(t *testing.T) {
+	path := v7Database(t)
+	tables := []string{"smtp_servers", "channels", "checks", "results", "mutes", "alert_state", "defaults", "daemon", "certs", "maintenance_windows", "channel_tests", "secret_key"}
+	before := dumpTables(t, path, tables...)
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 7 is older than this up (8)") {
+		t.Fatalf("OpenReadOnly(v7) error = %v", err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(v7) error = %v", err)
+	}
+	defer s.Close()
+	if got := version(t, path); got != 8 {
+		t.Fatalf("user_version = %d, want 8", got)
+	}
+	if after := dumpTables(t, path, tables...); !reflect.DeepEqual(before, after) {
+		t.Fatalf("migration changed existing rows:\nbefore %v\nafter  %v", before, after)
+	}
+	ctx := context.Background()
+	if got, err := s.Attempts(ctx, AttemptFilter{}); err != nil || len(got) != 0 {
+		t.Fatalf("Attempts() after migration = %+v, %v, want none", got, err)
+	}
+	if err := s.RecordAttempt(ctx, Attempt{At: t0, Monitor: "api", Channel: "ops", Event: EventDown, Outcome: OutcomeSent}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ro, err := OpenReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly after upgrade: %v", err)
+	}
+	ro.Close()
+}
+
+// A v8 migration that fails part way (its last index name is taken) rolls
+// back as a whole: the database stays v7 with its rows and no attempt log.
+func TestOpenV7FailingMidMigrationChangesNothing(t *testing.T) {
+	path := v7Database(t)
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE INDEX delivery_attempts_by_monitor ON results (at_ns)"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	userTables := []string{"smtp_servers", "channels", "checks", "results", "mutes", "alert_state", "defaults", "daemon", "certs", "maintenance_windows", "channel_tests", "secret_key"}
+	before := dumpTables(t, path, userTables...)
+	if s, err := Open(path); err == nil || !strings.Contains(err.Error(), "migrate schema 7 to 8") {
+		if s != nil {
+			s.Close()
+		}
+		t.Fatalf("Open(v7 with a clashing index) error = %v, want the 7 to 8 migration to fail", err)
+	}
+	if got := version(t, path); got != 7 {
+		t.Fatalf("user_version = %d, want 7", got)
+	}
+	for _, name := range tables(t, path) {
+		if name == "delivery_attempts" {
+			t.Fatal("delivery_attempts exists after a failed migration")
+		}
+	}
+	if after := dumpTables(t, path, userTables...); !reflect.DeepEqual(before, after) {
+		t.Fatalf("failed migration changed rows:\nbefore %v\nafter  %v", before, after)
 	}
 }

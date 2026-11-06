@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/store"
 )
@@ -171,10 +169,6 @@ func (m Model) handleChannelKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch msg.String() {
-	case "q":
-		return m, tea.Quit
-	case "esc":
-		m.channelScreen = false
 	case "up", "k":
 		if m.channelSelected > 0 {
 			m.channelSelected--
@@ -200,52 +194,6 @@ func (m Model) handleChannelKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
-}
-func renderChannelList(snap Snapshot, selected int, now time.Time, loadErr error) string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("Channels") + "\n" + renderBanners(snap, now, loadErr))
-	if len(snap.Channels) == 0 {
-		b.WriteString(helpStyle.Render("No channels configured.") + "\n")
-	} else {
-		widths := [4]int{4, 4, len("SMTP SERVER / ORIGIN"), len("RECIPIENTS / AUTH")}
-		rows := make([][4]string, len(snap.Channels))
-		counts := make([]int, len(rows))
-		countWidth := len("MONITORS")
-		for i, c := range snap.Channels {
-			target, detail := channelTarget(c)
-			rows[i] = [4]string{c.Name, c.Kind, target, detail}
-			for j, v := range rows[i] {
-				widths[j] = max(widths[j], ansi.StringWidth(v))
-			}
-			for _, s := range snap.Services {
-				if s.Check.Channel == c.Name {
-					counts[i]++
-				}
-			}
-			countWidth = max(countWidth, len(strconv.Itoa(counts[i])))
-		}
-		line := func(marker string, cols [4]string, last string) string {
-			var out strings.Builder
-			out.WriteString(marker + "   ")
-			for i, v := range cols {
-				out.WriteString(v)
-				out.WriteString(strings.Repeat(" ", widths[i]-ansi.StringWidth(v)+2))
-			}
-			out.WriteString(strings.Repeat(" ", countWidth-ansi.StringWidth(last)) + last)
-			return out.String()
-		}
-		b.WriteString(headerStyle.Render(line(" ", [4]string{"NAME", "KIND", "SMTP SERVER / ORIGIN", "RECIPIENTS / AUTH"}, "MONITORS")) + "\n")
-		for i, row := range rows {
-			marker := " "
-			if i == selected {
-				marker = accentStyle.Render("▌")
-				row[0] = selectedNameStyle.Render(row[0])
-			}
-			b.WriteString(line(marker, row, strconv.Itoa(counts[i])) + "\n")
-		}
-	}
-	b.WriteString("\n" + renderHelp("↑/↓ select · n new · e edit · d delete · t test · esc back · q quit"))
-	return b.String()
 }
 func renderChannelForm(f channelForm, snap Snapshot, now time.Time, loadErr error) string {
 	var b strings.Builder

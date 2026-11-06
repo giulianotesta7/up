@@ -33,6 +33,12 @@ type Options struct {
 	Hostname string
 	Logger   *slog.Logger
 	Location *time.Location
+	// Attempts, when set (or when Store can record attempts, as *store.Store
+	// does), records every monitor.down, monitor.recovered and
+	// cert.expiring delivery with its outcome; channel tests are not recorded.
+	Attempts AttemptRecorder
+	// Now stamps recorded attempts; nil is time.Now.
+	Now func() time.Time
 }
 type event struct {
 	check     config.Check
@@ -43,6 +49,8 @@ type event struct {
 	// check and result are zero and no monitor state is involved.
 	//lint:ignore U1000 set by the channel-test entry point (#59) and read by every transport
 	test bool
+	// trace is filled by the transport and read by the attempt record.
+	trace *trace
 }
 
 // Notifier sends alerts from a bounded queue, one at a time and in order.
@@ -58,6 +66,9 @@ func NewNotifier(opts Options) *Notifier {
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
+	}
+	if opts.Attempts == nil {
+		opts.Attempts, _ = opts.Store.(AttemptRecorder)
 	}
 	return &Notifier{opts: opts, queue: make(chan event, 64)}
 }
@@ -117,6 +128,13 @@ func (n *Notifier) send(ctx context.Context, e event) {
 // deliver looks up the event's channel and hands it to the transport for the
 // channel's kind. Every transport logs its own failures and returns them.
 func (n *Notifier) deliver(ctx context.Context, e event) error {
+	e.trace = &trace{}
+	err := n.transport(ctx, e)
+	n.recordAttempt(ctx, e, e.trace, err)
+	return err
+}
+
+func (n *Notifier) transport(ctx context.Context, e event) error {
 	c := e.check
 	ch, ok, err := n.opts.Store.Channel(ctx, c.Channel)
 	if err != nil {
@@ -127,6 +145,7 @@ func (n *Notifier) deliver(ctx context.Context, e event) error {
 		n.opts.Logger.Warn("alert channel not found", "check", c.Name, "channel", c.Channel)
 		return fmt.Errorf("alert channel %q not found", c.Channel)
 	}
+	e.trace.kind, e.trace.origin = ch.Kind, ch.WebhookOrigin
 	switch ch.Kind {
 	case config.KindEmail:
 		return n.deliverEmail(ctx, ch, e)

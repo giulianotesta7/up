@@ -133,6 +133,7 @@ func (n *Notifier) deliverWebhook(ctx context.Context, ch config.Channel, e even
 	case target == "":
 		return fail("webhook has no URL")
 	}
+	e.trace.know(target)
 	var auth string
 	if ch.WebhookAuthName != "" {
 		if auth, err = n.opts.Key.Open(ch.WebhookAuth); errors.Is(err, secret.ErrWrongKey) {
@@ -141,6 +142,7 @@ func (n *Notifier) deliverWebhook(ctx context.Context, ch config.Channel, e even
 			return fail("opening the webhook auth value failed")
 		}
 	}
+	e.trace.know(auth)
 	body, err := json.Marshal(webhookBody(e, time.Now()))
 	if err != nil {
 		return fail("encoding the webhook payload failed")

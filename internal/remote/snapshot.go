@@ -28,6 +28,10 @@ type SnapshotDTO struct {
 	Incidents   int             `json:"incidents"`
 	// ChannelTests is each channel's newest test request.
 	ChannelTests []ChannelTestDTO `json:"channel_tests"`
+	// Attempts are the latest delivery attempts of all monitors, newest first;
+	// LastAttempts is the newest of each channel. Both are bounded.
+	Attempts     []AttemptDTO `json:"attempts"`
+	LastAttempts []AttemptDTO `json:"last_attempts"`
 	// Defaults are what new monitors and maintenance windows start from.
 	Defaults DefaultsDTO `json:"defaults"`
 }
@@ -145,7 +149,39 @@ type ServiceDTO struct {
 	MaintenanceEnd time.Time        `json:"maintenance_end"`
 	// KnownAlerting is whether the recipients were last told it is down.
 	KnownAlerting bool `json:"known_alerting"`
+	// Attempts are the monitor's latest delivery attempts, newest first.
+	Attempts []AttemptDTO `json:"attempts"`
 }
+
+// AttemptDTO is one alert delivery attempt. Event is monitor.down,
+// monitor.recovered or cert.expiring; Outcome is sent, failed or held; Reason
+// is short and secret-free.
+type AttemptDTO struct {
+	At      time.Time `json:"at"`
+	Monitor string    `json:"monitor"`
+	Channel string    `json:"channel"`
+	Event   string    `json:"event"`
+	Outcome string    `json:"outcome"`
+	Reason  string    `json:"reason"`
+}
+
+func attemptDTOs(list []store.Attempt) []AttemptDTO {
+	out := []AttemptDTO{}
+	for _, a := range list {
+		out = append(out, AttemptDTO{a.At.UTC(), a.Monitor, a.Channel, string(a.Event), string(a.Outcome), a.Reason})
+	}
+	return out
+}
+
+// Attempts converts the wire form back; an empty list is nil.
+func Attempts(list []AttemptDTO) []store.Attempt {
+	var out []store.Attempt
+	for _, a := range list {
+		out = append(out, store.Attempt{At: a.At, Monitor: a.Monitor, Channel: a.Channel, Event: store.Event(a.Event), Outcome: store.Outcome(a.Outcome), Reason: a.Reason})
+	}
+	return out
+}
+
 type SMTPServerDTO struct {
 	Name          string         `json:"name"`
 	Host          string         `json:"host"`
@@ -245,6 +281,7 @@ func NewSnapshotDTO(s tui.Snapshot, now time.Time) SnapshotDTO {
 		}
 		x.InMaintenance, x.MaintenanceEnd = v.InMaintenance.Active, v.InMaintenance.End.UTC()
 		x.KnownAlerting = v.KnownAlerting
+		x.Attempts = attemptDTOs(v.Attempts)
 		d.Services = append(d.Services, x)
 	}
 	for _, v := range s.SMTPServers {
@@ -260,6 +297,7 @@ func NewSnapshotDTO(s tui.Snapshot, now time.Time) SnapshotDTO {
 	for _, v := range s.Channels {
 		d.Channels = append(d.Channels, channelDTO(v))
 	}
+	d.Attempts, d.LastAttempts = attemptDTOs(s.Attempts), attemptDTOs(s.LastAttempts)
 	d.Defaults = defaultsDTO(s.Defaults)
 	d.ChannelTests = []ChannelTestDTO{}
 	for _, t := range s.ChannelTests {
@@ -297,6 +335,7 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 			x.InMaintenance.End = time.Time{}
 		}
 		x.KnownAlerting = v.KnownAlerting
+		x.Attempts = Attempts(v.Attempts)
 		s.Services = append(s.Services, x)
 	}
 	for _, v := range d.SMTPServers {
@@ -322,6 +361,7 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 	for _, t := range d.ChannelTests {
 		s.ChannelTests = append(s.ChannelTests, t.ChannelTest())
 	}
+	s.Attempts, s.LastAttempts = Attempts(d.Attempts), Attempts(d.LastAttempts)
 	s.Defaults = d.Defaults.defaults()
 	return s
 }

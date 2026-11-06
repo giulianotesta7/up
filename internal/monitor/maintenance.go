@@ -6,6 +6,7 @@ import (
 
 	"github.com/giulianotesta7/up/internal/check"
 	"github.com/giulianotesta7/up/internal/config"
+	"github.com/giulianotesta7/up/internal/store"
 )
 
 // WindowStore is the optional API for a check's recurring maintenance windows.
@@ -28,6 +29,135 @@ type suppression struct {
 	found bool
 	// active is a manual mute or a maintenance window in force.
 	active bool
+	// muted is a manual mute in force; the rest of active is a window.
+	muted bool
+}
+
+// reason is why alerts are held, as the delivery log shows it.
+func (s suppression) reason() string {
+	if s.muted {
+		return "muted"
+	}
+	return "maintenance window"
+}
+
+// AttemptStore is the optional API that logs alerts held back by a mute or a
+// maintenance window. *store.Store implements it. Sent and failed deliveries
+// are logged by the notifier.
+type AttemptStore interface {
+	RecordAttempt(context.Context, store.Attempt) error
+}
+
+// recordHeld logs that the event is being held for the check's channel. A
+// failure to log is reported and never changes the alert.
+func recordHeld(ctx context.Context, opts Options, c config.Check, event store.Event, s suppression) {
+	attempts, ok := opts.Store.(AttemptStore)
+	if !ok {
+		return
+	}
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	err := attempts.RecordAttempt(wctx, store.Attempt{At: opts.now(), Monitor: c.Name, Channel: c.Channel, Event: event, Outcome: store.OutcomeHeld, Reason: s.reason()})
+	if err != nil {
+		opts.Logger.Error("recording held alert failed", "check", c.Name, "error", err)
+	}
+}
+
+// AttemptReader is the optional API that reads the delivery log back, so a
+// loop that starts again knows which owed alert it already logged as held.
+// *store.Store implements it.
+type AttemptReader interface {
+	LatestAttempt(context.Context, string, string, ...store.Event) (store.Attempt, bool, error)
+}
+
+// latestHeld is the newest logged attempt of the check's channel for events
+// when it is a hold. A read error is logged and counts as none.
+func latestHeld(ctx context.Context, opts Options, c config.Check, events ...store.Event) (store.Attempt, bool) {
+	reader, ok := opts.Store.(AttemptReader)
+	if !ok || c.Channel == "" {
+		return store.Attempt{}, false
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	a, found, err := reader.LatestAttempt(readCtx, c.Name, c.Channel, events...)
+	if err != nil {
+		opts.Logger.Error("reading delivery log failed", "check", c.Name, "error", err)
+		return store.Attempt{}, false
+	}
+	return a, found && a.Outcome == store.OutcomeHeld
+}
+
+// loggedHold is the alert owed when a loop starts that the delivery log
+// already shows as held, or "" when none is. Only the alert still owed
+// counts: a hold that ended without a delivery (the monitor recovered under
+// it) left history that clears the owed alert, so a later outage is a new one.
+func loggedHold(ctx context.Context, opts Options, c config.Check, alerting, notified bool) store.Event {
+	if alerting == notified {
+		return ""
+	}
+	owed := store.EventRecovered
+	if alerting {
+		owed = store.EventDown
+	}
+	a, held := latestHeld(ctx, opts, c, store.EventDown, store.EventRecovered)
+	if !held || a.Event != owed || clearedSince(ctx, opts, c, a.At, alerting, notified) {
+		return ""
+	}
+	return owed
+}
+
+// clearedSince reports whether the results after a hold logged at since
+// cleared the alert it held: replayed from the held state with the current
+// thresholds, the streak once matched what the recipients know. An edit to
+// the thresholds can make a later outage owed at once, which is a new hold.
+func clearedSince(ctx context.Context, opts Options, c config.Check, since time.Time, alerting, notified bool) bool {
+	reader, ok := opts.Store.(RecentReader)
+	if !ok {
+		return false
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	results, err := reader.Recent(readCtx, c.Name, replayLimit)
+	if err != nil {
+		opts.Logger.Error("reading recent results failed", "check", c.Name, "error", err)
+		return false
+	}
+	streak := check.Streak{Alerting: alerting}
+	for i := len(results) - 1; i >= 0; i-- {
+		if !results[i].At.After(since) {
+			continue
+		}
+		streak.Observe(results[i].Status, c.AlertAfter, c.RecoverAfter)
+		if streak.Alerting == notified {
+			return true
+		}
+	}
+	return false
+}
+
+// loggedCertHold is the certificate threshold the delivery log already shows
+// as held, or 0: the threshold that was due when the newest certificate
+// attempt was held, against the stored certificate.
+func loggedCertHold(ctx context.Context, opts Options, c config.Check) int {
+	certs, ok := opts.Store.(CertStore)
+	if !ok {
+		return 0
+	}
+	a, held := latestHeld(ctx, opts, c, store.EventCert)
+	if !held {
+		return 0
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	cert, found, err := certs.Cert(readCtx, c.Name)
+	if err != nil {
+		opts.Logger.Error("reading certificate failed", "check", c.Name, "error", err)
+		return 0
+	}
+	if !found {
+		return 0
+	}
+	return dueThreshold(cert.NotAfter.Sub(a.At), cert.Notified)
 }
 
 // windows reads the check's windows fresh, so edits and deletions apply on
