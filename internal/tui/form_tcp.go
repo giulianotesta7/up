@@ -15,37 +15,46 @@ import (
 // kindTCP is the form's type for a TCP monitor; the zero value is HTTP.
 const kindTCP = config.CheckTCP
 
-var kindChoices = []string{"HTTP", "TCP"}
+var kindChoices = []string{"HTTP", "TCP", "Heartbeat"}
 
 const tcpCopy = "Checks that the port accepts a connection."
 
 func (f monitorForm) isTCP() bool { return f.kind == kindTCP }
 
 func (f monitorForm) kindName() string {
-	if f.isTCP() {
+	switch {
+	case f.isTCP():
 		return "TCP"
+	case f.isHeartbeat():
+		return "Heartbeat"
 	}
 	return "HTTP"
 }
 
 // choiceFocus reports whether the focused row is chosen with ←/→ instead of typed.
 func (f monitorForm) choiceFocus() bool {
-	return f.focus >= focusChannel && f.focus < focusAdvanced && f.focus != focusPort
+	return f.focus >= focusChannel && f.focus < focusAdvanced && f.focus != focusPort && f.focus != focusPeriod && f.focus != focusGrace
 }
 
 // order is the tab order of the focusable rows, Type first. An existing
 // monitor's name is displayed, never focused.
 func (f monitorForm) order() []int {
 	var rows []int
-	if f.isTCP() {
+	switch {
+	case f.isTCP():
 		rows = []int{focusType, 0, 1, focusPort, 2, 3, focusChannel, focusAlertAfter, focusRecoverAfter}
-	} else {
+	case f.isHeartbeat():
+		rows = []int{focusType, 0, focusPeriod, focusGrace, focusChannel, focusAlertAfter, focusRecoverAfter}
+		if f.tokenRow() {
+			rows = append(rows, focusToken)
+		}
+	default:
 		rows = []int{focusType, 0, 1, 2, 3, 4, focusChannel, focusAlertAfter, focusRecoverAfter, focusTLS}
 	}
 	if f.editing {
 		rows = append(rows[:1:1], rows[2:]...)
 	}
-	if !f.isTCP() {
+	if f.kind == "" {
 		rows = append(rows, focusAdvanced)
 		for i := range f.adv.stops() {
 			rows = append(rows, focusCount+i)
@@ -61,18 +70,24 @@ func (f *monitorForm) text() *string {
 		return &f.values[f.focus]
 	case f.focus == focusPort:
 		return &f.port
+	case f.focus == focusPeriod:
+		return &f.period
+	case f.focus == focusGrace:
+		return &f.grace
 	}
 	return f.advText()
 }
 
 // setKind switches the monitor type. The other type's values are dropped, not
-// hidden: the target field, port, expected status, TLS choice and every field
-// carried over from an edited monitor start over, keeping only the name.
+// hidden: the target field, port, expected status, TLS choice, period, grace
+// and every field carried over from an edited monitor start over, keeping
+// only the name.
 func (f *monitorForm) setKind(kind string) {
 	if f.kind == kind {
 		return
 	}
-	f.kind = kind
+	f.kind, f.newToken = kind, false
+	f.period, f.grace = shortDuration(config.DefaultHeartbeatPeriod), shortDuration(config.DefaultHeartbeatGrace)
 	f.values[1], f.port, f.tlsExpiry = "", "", "on"
 	f.values[4] = ""
 	if !f.isTCP() {
@@ -143,12 +158,13 @@ func renderTCPFields(b *strings.Builder, f monitorForm) {
 	b.WriteString(helpStyle.Render(tcpCopy) + "\n")
 }
 
-// tcpTagWidth is the extra name-column width for the "tcp" tag: 0 when no
-// monitor is TCP or the terminal is too narrow to keep the existing columns.
-func tcpTagWidth(snap Snapshot, width, nameWidth, statusWidth, certWidth int) int {
+// kindTagWidth is the extra name-column width for the "tcp" and "hb" tags:
+// 0 when no monitor is TCP or a heartbeat, or the terminal is too narrow to
+// keep the existing columns.
+func kindTagWidth(snap Snapshot, width, nameWidth, statusWidth, certWidth int) int {
 	const tag = len(" tcp")
 	for _, s := range snap.Services {
-		if s.Check.Kind == kindTCP {
+		if s.Check.Kind == kindTCP || s.Check.Kind == kindHeartbeat {
 			if width <= 0 || width >= max(78, nameWidth+tag+55+statusWidth+certWidth) {
 				return tag
 			}
@@ -158,15 +174,18 @@ func tcpTagWidth(snap Snapshot, width, nameWidth, statusWidth, certWidth int) in
 	return 0
 }
 
-// tagTCP appends the dim "tcp" tag to a TCP monitor's name cell. The name
-// column is padded first so the tags line up.
-func tagTCP(name string, c config.Check, nameWidth, tag int) string {
+// tagKind appends the dim "tcp" or "hb" tag to a TCP or heartbeat monitor's
+// name cell. The name column is padded first so the tags line up.
+func tagKind(name string, c config.Check, nameWidth, tag int) string {
 	if tag == 0 {
 		return name
 	}
 	name += strings.Repeat(" ", max(0, nameWidth-tag-ansi.StringWidth(name)))
-	if c.Kind == kindTCP {
+	switch c.Kind {
+	case kindTCP:
 		return name + helpStyle.Render(" tcp")
+	case kindHeartbeat:
+		return name + helpStyle.Render(" hb ")
 	}
 	return name + strings.Repeat(" ", tag)
 }

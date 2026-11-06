@@ -95,16 +95,24 @@ type Model struct {
 	incidentName   string
 	incidentCursor int
 	incidentOffset int
+	// revealName is the heartbeat whose ping token v showed (revealToken)
+	// until the next other key; pingError is why it could not be shown.
+	revealName, revealToken string
+	pingError               *pingErrorBox
 }
 
-// incidentScroll places the incident window of the selected monitor.
-type incidentScroll struct{ cursor, offset int }
+// incidentScroll places the incident window of the selected monitor; ping
+// is its ping URL state.
+type incidentScroll struct {
+	cursor, offset int
+	ping           pingView
+}
 
 func (m Model) scroll() incidentScroll {
 	if !m.hasSelection() || m.snap.Services[m.selected].Check.Name != m.incidentName {
 		return incidentScroll{}
 	}
-	return incidentScroll{m.incidentCursor, m.incidentOffset}
+	return incidentScroll{cursor: m.incidentCursor, offset: m.incidentOffset}
 }
 
 // detailHeight is the number of lines the full-screen detail may use: the
@@ -126,10 +134,12 @@ func (m Model) incidentRows() int {
 	svc := m.snap.Services[m.selected]
 	if m.splitMode() {
 		shown, selected, filter := m.filtered()
-		_, opts := splitDetail(shown, selected, m.now(), m.err, m.width, m.height, incidentScroll{}, filter)
+		_, opts := splitDetail(shown, selected, m.now(), m.err, m.width, m.height, incidentScroll{ping: m.pingView()}, filter)
 		return opts.incidentRows
 	}
-	_, opts := fitDetail(m.snap, svc, m.now(), m.err, m.width, m.detailHeight(), fullDetail())
+	opts := fullDetail()
+	opts.ping = m.pingView()
+	_, opts = fitDetail(m.snap, svc, m.now(), m.err, m.width, m.detailHeight(), opts)
 	return opts.incidentRows
 }
 
@@ -317,7 +327,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form = &f
 		} else {
 			m.detail = m.form.editing && m.form.returnDetail
-			m.form = nil
+			m = m.handleSaved(msg)
 			if m.splitMode() {
 				m.detail = false
 			}
@@ -439,6 +449,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.load
 	case channelTestMsg:
 		return m.channelTestResult(msg)
+	case revealMsg:
+		return m.handleReveal(msg), nil
 	case tea.PasteMsg:
 		if m.notify && m.deliveries.open && m.smtpForm == nil && m.channelForm == nil {
 			return m.pasteDeliverySearch(msg.Content), nil
@@ -461,7 +473,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			f := *m.smtpForm
 			f.insert(msg.Content)
 			m.smtpForm = &f
-		} else if m.form != nil && !m.form.saving {
+		} else if m.form != nil && !m.form.saving && !m.form.confirm && m.form.pingToken == "" {
 			f := *m.form
 			f.insert(msg.Content)
 			m.form = &f
@@ -479,6 +491,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
+	// A shown ping token lasts until the next key.
+	if msg.String() != "v" {
+		m.revealName, m.revealToken = "", ""
+	}
+	if m.pingError != nil {
+		if key := msg.String(); key == "esc" || key == "enter" || key == "v" {
+			m.pingError = nil
+		}
+		return m, nil
 	}
 	if m.notify {
 		return m.handleNotifyKey(msg)
@@ -551,6 +573,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "w":
 		m = m.openMaintenance()
+	case "v":
+		return m.toggleReveal()
 	case "m", "u":
 		if m.hasSelection() {
 			svc := m.snap.Services[m.selected]
@@ -638,12 +662,13 @@ func (m Model) View() tea.View {
 	shown, shownSelected, filter := m.filtered()
 	content := renderList(shown, shownSelected, now, m.err, m.width, filter)
 	split := m.splitMode()
+	scroll := m.scroll()
+	scroll.ping = m.pingView()
 	if split {
-		content = renderSplit(shown, shownSelected, now, m.err, m.width, m.height, m.noticeLine(), m.scroll(), filter)
+		content = renderSplit(shown, shownSelected, now, m.err, m.width, m.height, m.noticeLine(), scroll, filter)
 	} else if m.detail && m.hasSelection() {
 		opts := fullDetail()
-		scroll := m.scroll()
-		opts.cursor, opts.offset = scroll.cursor, scroll.offset
+		opts.cursor, opts.offset, opts.ping = scroll.cursor, scroll.offset, scroll.ping
 		content, _ = fitDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width, m.detailHeight(), opts)
 	}
 	if m.help && !helpPopupFits(m.width, m.height) {
@@ -653,9 +678,13 @@ func (m Model) View() tea.View {
 		content, split = m.renderNotifications(now), false
 	}
 	modal := ""
-	if m.form != nil || m.deletion != nil || m.mute != nil || m.maint != nil || m.defaults != nil {
+	if m.form != nil || m.deletion != nil || m.mute != nil || m.maint != nil || m.defaults != nil || m.pingError != nil {
 		screen, minimum := "", 0
 		switch {
+		case m.pingError != nil:
+			screen = renderPingError(*m.pingError, m.width)
+		case m.form != nil && m.form.pingToken != "":
+			screen = renderPingURLScreen(*m.form, m.snap, hostOnly(m.hostname), m.width)
 		case m.defaults != nil:
 			screen = renderDefaults(*m.defaults, m.snap, now, m.err)
 			minimum = defaultsMinWidth(*m.defaults, m.snap, now, m.err)
@@ -669,17 +698,21 @@ func (m Model) View() tea.View {
 		case m.deletion != nil:
 			screen = renderDelete(*m.deletion, m.snap, now, m.err)
 		default:
-			var focusLine int
-			screen, focusLine = renderFormFocus(*m.form, m.snap, now, m.err)
-			screen = scrollForm(screen, focusLine, m.height)
-			f := *m.form
-			for focus := 0; focus < focusCount; focus++ {
-				if f.editing && focus == 0 {
-					continue
+			// The box keeps one size for every Type, focus and the token
+			// question, so none of them moves it.
+			var focusLine, height int
+			for _, f := range formVariants(*m.form) {
+				height = max(height, strings.Count(renderForm(f, m.snap, now, m.err), "\n")+1)
+				for focus := 0; focus < focusCount; focus++ {
+					if f.editing && focus == 0 {
+						continue
+					}
+					f.focus, f.cursor = focus, 0
+					minimum = max(minimum, modalContentWidth(renderForm(f, m.snap, now, m.err)))
 				}
-				f.focus, f.cursor = focus, 0
-				minimum = max(minimum, modalContentWidth(renderForm(f, m.snap, now, m.err)))
 			}
+			screen, focusLine = renderFormFocus(*m.form, m.snap, now, m.err)
+			screen = scrollForm(padFormHeight(screen, height), focusLine, m.height)
 		}
 		title, body := splitModalScreen(screen)
 		var fits bool

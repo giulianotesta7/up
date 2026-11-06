@@ -30,6 +30,9 @@ const (
 	focusTLS
 	focusType
 	focusPort
+	focusPeriod
+	focusGrace
+	focusToken
 	focusAdvanced // HTTP fold row; the fields inside follow (form_advanced.go)
 	focusCount
 )
@@ -40,8 +43,10 @@ type monitorForm struct {
 	alertAfter   string
 	recoverAfter string
 	tlsExpiry    string
-	kind         string       // "" is HTTP, kindTCP is TCP
+	kind         string       // "" is HTTP, kindTCP is TCP, kindHeartbeat is a heartbeat
 	port         string       // TCP only
+	period       string       // heartbeat only
+	grace        string       // heartbeat only
 	adv          advancedForm // HTTP only
 	focus        int
 	cursor       int // rune offset in the focused field
@@ -57,6 +62,14 @@ type monitorForm struct {
 	// base is the monitor being edited. The form shows only some fields, so
 	// the rest (request options, host, port) carry over unchanged.
 	base config.Check
+	// hadToken is set when editing a heartbeat, which offers Token ‹ keep /
+	// new ›; newToken is the choice and confirm the question asked after
+	// enter on new.
+	hadToken, newToken, confirm bool
+	// pingToken, once saved, turns the box into the ping URL (replaced: after
+	// a new token); the form is done and only closes.
+	pingToken string
+	replaced  bool
 }
 
 // newMonitorForm starts a new monitor from the snapshot's defaults. A default
@@ -68,12 +81,16 @@ func newMonitorForm(snap Snapshot) *monitorForm {
 		values:  [5]string{"", "", d.Interval.String(), d.Timeout.String(), status},
 		channel: snap.existingChannel(d.Channel), alertAfter: strconv.Itoa(d.AlertAfter), recoverAfter: strconv.Itoa(d.RecoverAfter),
 		tlsExpiry: "on", status: status,
+		period: shortDuration(config.DefaultHeartbeatPeriod), grace: shortDuration(config.DefaultHeartbeatGrace),
 	}
 }
 
 func editMonitorForm(c config.Check, detail bool) *monitorForm {
-	if c.Kind == kindTCP {
+	switch c.Kind {
+	case kindTCP:
 		return editTCPForm(c, detail)
+	case kindHeartbeat:
+		return editHeartbeatForm(c, detail)
 	}
 	return &monitorForm{
 		values:  [5]string{c.Name, c.URL, c.Interval.String(), c.Timeout.String(), strconv.Itoa(c.ExpectedStatus)},
@@ -102,7 +119,7 @@ func copyName(snap Snapshot, name string) string {
 // copied here but by the store when the form is saved.
 func copyMonitorForm(c config.Check, snap Snapshot) *monitorForm {
 	f := editMonitorForm(c, false)
-	f.editing, f.copyOf = false, c.Name
+	f.editing, f.copyOf, f.hadToken = false, c.Name, false
 	f.values[0] = copyName(snap, c.Name)
 	f.focus, f.cursor = 0, len([]rune(f.values[0]))
 	return f
@@ -116,6 +133,9 @@ func (f monitorForm) check() (config.Check, error) { return f.checkWith(nil) }
 func (f monitorForm) checkWith(key []byte) (config.Check, error) {
 	if f.isTCP() {
 		return f.tcpCheck()
+	}
+	if f.isHeartbeat() {
+		return f.heartbeatCheck()
 	}
 	c := f.base
 	c.Name, c.URL, c.Channel = f.values[0], f.values[1], f.channel
@@ -153,9 +173,19 @@ type saveMsg struct {
 	generation uint64
 	name       string
 	err        error
+	// pingToken is a heartbeat's new token, to show once; tokenErr says why
+	// it could not be made after the monitor was saved.
+	pingToken string
+	tokenErr  error
+	replaced  bool
 }
 
+// save writes c. A heartbeat that is new (or newly a heartbeat) or whose
+// token is replaced then gets a fresh token, which needs no private key, so
+// its URL can be shown once; the one made with the monitor was never shown.
 func (m Model) save(c config.Check) tea.Cmd {
+	f := *m.form
+	tokens := m.heartbeatTokens()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 		defer cancel()
@@ -170,7 +200,17 @@ func (m Model) save(c config.Check) tea.Cmd {
 		default:
 			err = errors.New("this server cannot copy monitors")
 		}
-		return saveMsg{generation: m.generation, name: c.Name, err: err}
+		msg := saveMsg{generation: m.generation, name: c.Name, err: err}
+		if err != nil || c.Kind != kindHeartbeat || (f.hadToken && !f.newToken) {
+			return msg
+		}
+		msg.replaced = f.hadToken
+		if tokens == nil {
+			msg.tokenErr = errors.New("this server cannot show ping URLs")
+		} else {
+			msg.pingToken, msg.tokenErr = tokens.RegenerateHeartbeatToken(ctx, c.Name)
+		}
+		return msg
 	}
 }
 
@@ -179,6 +219,21 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	f := *m.form
 	m.form = &f
 	if f.saving {
+		return m, nil
+	}
+	if f.pingToken != "" {
+		if key := msg.String(); key == "esc" || key == "enter" {
+			m.form = nil
+		}
+		return m, nil
+	}
+	if f.confirm {
+		switch msg.String() {
+		case "y":
+			return m.submitForm(&f)
+		case "n", "esc":
+			f.confirm, f.newToken = false, false
+		}
 		return m, nil
 	}
 	switch msg.String() {
@@ -200,15 +255,15 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		f.focus = order[(at+delta+len(order))%len(order)]
 		f.cursor = f.focusCursor()
 	case "enter":
-		c, err := f.checkWith(m.snap.PublicKey)
-		f.err = err
-		if err != nil {
+		if f.tokenRow() && f.newToken {
+			if _, err := f.checkWith(m.snap.PublicKey); err != nil {
+				f.err = err
+				return m, nil
+			}
+			f.err, f.confirm = nil, true
 			return m, nil
 		}
-		f.saving = true
-		// Invalidate the pre-save read/tick chain before any database write.
-		m.generation++
-		return m, m.save(c)
+		return m.submitForm(&f)
 	default:
 		if f.handleAdvancedKey(msg, m.snap.HasKey) {
 			return m, nil
@@ -224,7 +279,9 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			switch {
 			case delta == 0:
 			case f.focus == focusType:
-				f.setKind(map[string]string{"HTTP": "", "TCP": kindTCP}[cycleChoice(kindChoices, f.kindName(), delta)])
+				f.setKind(map[string]string{"HTTP": "", "TCP": kindTCP, "Heartbeat": kindHeartbeat}[cycleChoice(kindChoices, f.kindName(), delta)])
+			case f.focus == focusToken:
+				f.newToken = cycleChoice(tokenChoices, tokenChoice(f.newToken), delta) == "new"
 			case f.focus == focusChannel:
 				f.channel = cycleChoice(channelChoices(m.snap), f.channel, delta)
 			case f.focus == focusAlertAfter:
@@ -239,6 +296,26 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// submitForm validates f and starts saving it.
+func (m Model) submitForm(f *monitorForm) (tea.Model, tea.Cmd) {
+	c, err := f.checkWith(m.snap.PublicKey)
+	f.err, f.confirm = err, false
+	if err != nil {
+		return m, nil
+	}
+	f.saving = true
+	// Invalidate the pre-save read/tick chain before any database write.
+	m.generation++
+	return m, m.save(c)
+}
+
+func tokenChoice(fresh bool) string {
+	if fresh {
+		return "new"
+	}
+	return "keep"
 }
 
 func channelChoices(snap Snapshot) []string {
@@ -335,6 +412,10 @@ func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error)
 			renderTCPFields(&b, f)
 			break
 		}
+		if f.isHeartbeat() {
+			renderHeartbeatFields(&b, f)
+			break
+		}
 		marker := " "
 		value := f.values[i]
 		if i == f.focus {
@@ -363,13 +444,32 @@ func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error)
 		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, rendered)
 	}
 	choiceLine(focusChannel, "Channel", renderChoice(selected, choices, f.focus == focusChannel))
-	choiceLine(focusAlertAfter, "Alert after", renderChoiceUnit(f.alertAfter, "failures in a row", thresholdChoices, f.focus == focusAlertAfter))
-	choiceLine(focusRecoverAfter, "Recover after", renderChoiceUnit(f.recoverAfter, "successes in a row", thresholdChoices, f.focus == focusRecoverAfter))
-	if !f.isTCP() {
+	failures, successes := "failures in a row", "successes in a row"
+	if f.isHeartbeat() {
+		failures, successes = "missed pings in a row", "pings in a row"
+	}
+	choiceLine(focusAlertAfter, "Alert after", renderChoiceUnit(f.alertAfter, failures, thresholdChoices, f.focus == focusAlertAfter))
+	choiceLine(focusRecoverAfter, "Recover after", renderChoiceUnit(f.recoverAfter, successes, thresholdChoices, f.focus == focusRecoverAfter))
+	if f.tokenRow() {
+		choiceLine(focusToken, "Token", renderChoice(tokenChoice(f.newToken), tokenChoices, f.focus == focusToken))
+	}
+	if f.kind == "" {
 		choiceLine(focusTLS, "TLS expiry", renderChoiceUnit(f.tlsExpiry, "", tlsChoices, f.focus == focusTLS)+"   "+helpStyle.Render("HTTPS only"))
 		f.renderAdvanced(&b, snap.HasKey, &focusLine)
 	}
-	if hint := detectionHint(f); hint != "" {
+	if f.confirm {
+		renderTokenConfirm(&b)
+		return b.String(), focusLine
+	}
+	if f.isHeartbeat() {
+		b.WriteString("\n")
+		if hint := firstAlertHint(f); hint != "" {
+			b.WriteString(helpStyle.Render(hint) + "\n")
+		}
+		if !snap.API.Enabled() {
+			b.WriteString(warnStyle.Render(noListenerLine) + "\n")
+		}
+	} else if hint := detectionHint(f); hint != "" {
 		b.WriteString("\n" + helpStyle.Render(hint) + "\n")
 	}
 	if f.err != nil {

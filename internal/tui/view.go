@@ -47,8 +47,8 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		}
 		heldWidth, heldHeader := heldColumn(snap, now)
 		showTrend := width <= 0 || width >= max(78, nameWidth+55+statusWidth+certWidth)
-		// A tcp tag follows the name when the list has room for it.
-		tcpTag := tcpTagWidth(snap, width, nameWidth, statusWidth, certWidth)
+		// A tcp or hb tag follows the name when the list has room for it.
+		tcpTag := kindTagWidth(snap, width, nameWidth, statusWidth, certWidth)
 		nameWidth += tcpTag
 		row := func(marker, dot, name, status, latency, trend, cert, last, muted, reason string) string {
 			padding := strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name)))
@@ -59,7 +59,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			if anyCert {
 				middle += "  " + cert + strings.Repeat(" ", max(0, 7-ansi.StringWidth(cert)))
 			}
-			prefix := marker + " " + dot + " " + name + padding + "  " + status + fmt.Sprintf("  %8s", latency) + middle
+			prefix := marker + " " + dot + " " + name + padding + "  " + status + "  " + strings.Repeat(" ", max(0, 8-ansi.StringWidth(latency))) + latency + middle
 			last = fmt.Sprintf("%-10s  %s", last, muted+strings.Repeat(" ", max(0, heldWidth-ansi.StringWidth(muted))))
 			if showTrend {
 				return prefix + "  " + strings.TrimRight(fmt.Sprintf("%-10s  %s", last, reason), " ")
@@ -77,6 +77,11 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 				latency, last = formatLatency(s.Latest.Latency), ago(now, s.Latest.At)
 				reason = s.Latest.Error
 			}
+			trend := sparkline(s.Recent, 16)
+			if s.Check.Kind == kindHeartbeat {
+				latency, last, reason = helpStyle.Render("—"), heartbeatLast(s, now), heartbeatReason(s, snap, now)
+				trend = pingCells(s.Recent, 16, false)
+			}
 			name := s.Check.Name
 			if i == selected {
 				name = selectedNameStyle.Render(name)
@@ -88,9 +93,9 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 				}
 				name = highlightMatch(name, filter.query, base)
 			}
-			name = tagTCP(name, s.Check, nameWidth, tcpTag)
+			name = tagKind(name, s.Check, nameWidth, tcpTag)
 			cert := ""
-			if anyCert && s.Check.Kind != kindTCP {
+			if anyCert && s.Check.Kind != kindTCP && s.Check.Kind != kindHeartbeat {
 				cert = helpStyle.Render("—")
 			}
 			if s.HasCert {
@@ -98,7 +103,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 				cert = certStyle(remaining).Render(certLeft(remaining))
 			}
 			muted := heldCell(s, now)
-			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, statusWidth), latency, sparkline(s.Recent, 16), cert, last, muted, reason) + "\n")
+			b.WriteString(row(marker, statusStyle(s).Render("●"), name, styledLabel(s, statusWidth), latency, trend, cert, last, muted, reason) + "\n")
 		}
 		if noMatch {
 			b.WriteString("  " + noMatchLine + "\n")
@@ -121,6 +126,8 @@ type detailOptions struct {
 	// incidentWindow).
 	incidentRows, alertRows int
 	cursor, offset          int
+	// ping is the ping URL state of a heartbeat.
+	ping pingView
 }
 
 func fullDetail() detailOptions {
@@ -178,7 +185,11 @@ func fitDetail(snap Snapshot, s Service, now time.Time, loadErr error, width, he
 // more incidents than rows.
 func detailHelp(s Service, opts detailOptions) string {
 	help := "esc back · e edit · d delete · m mute · ? more · q quit"
-	if opts.incidents && len(s.Incidents) > opts.incidentRows {
+	scroll := opts.incidents && len(s.Incidents) > opts.incidentRows
+	if s.Check.Kind == kindHeartbeat {
+		return heartbeatHelp(help, scroll, opts.ping)
+	}
+	if scroll {
 		help = "↑/↓ scroll incidents · " + help
 	}
 	return help
@@ -186,7 +197,12 @@ func detailHelp(s Service, opts detailOptions) string {
 
 func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr error, width int, opts detailOptions) string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + s.Check.Target() + "\n")
+	heartbeat := s.Check.Kind == kindHeartbeat
+	target := s.Check.Target()
+	if heartbeat {
+		target = heartbeatTarget(s.Check)
+	}
+	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + target + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
 
 	// Sections are separated by one blank line; a header sits right above its rows.
@@ -202,11 +218,15 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 	}
 
 	section("STATUS")
-	status := styledLabel(s, 0)
-	if s.HasResult {
-		status += "   last check " + ago(now, s.Latest.At) + " (" + formatLatency(s.Latest.Latency) + ")"
+	if heartbeat {
+		heartbeatStatus(field, s, now)
+	} else {
+		status := styledLabel(s, 0)
+		if s.HasResult {
+			status += "   last check " + ago(now, s.Latest.At) + " (" + formatLatency(s.Latest.Latency) + ")"
+		}
+		field("Status", status)
 	}
-	field("Status", status)
 	if s.Muted(now) {
 		held := "nothing pending"
 		switch s.Pending() {
@@ -239,11 +259,17 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 
 	if opts.config {
 		section("CONFIG")
-		field("Interval", s.Check.Interval.String())
-		field("Timeout", s.Check.Timeout.String())
-		if s.Check.Kind == kindTCP {
+		switch s.Check.Kind {
+		case kindHeartbeat:
+			field("Period", shortDuration(s.Check.Period))
+			field("Grace", shortDuration(s.Check.Grace))
+		case kindTCP:
+			field("Interval", s.Check.Interval.String())
+			field("Timeout", s.Check.Timeout.String())
 			field("Type", "TCP connect")
-		} else {
+		default:
+			field("Interval", s.Check.Interval.String())
+			field("Timeout", s.Check.Timeout.String())
 			field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
 			renderRequestFields(field, s.Check)
 		}
@@ -261,15 +287,24 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		if n := len(s.Maintenance); n > 0 {
 			field("Maintenance", plural(n, "window")+helpStyle.Render(" (w to edit)"))
 		}
+		failure, success := "failure", "success"
+		if heartbeat {
+			failure, success = "missed ping", "ping"
+		}
 		if !s.thresholdsDefault() {
-			field("Alerting", fmt.Sprintf("after %s · recovers after %s", plural(s.Check.FailuresToAlert(), "failure"), plural(s.Check.SuccessesToRecover(), "success")))
+			field("Alerting", fmt.Sprintf("after %s · recovers after %s", plural(s.Check.FailuresToAlert(), failure), plural(s.Check.SuccessesToRecover(), success)))
 		}
 	}
 
-	section("LATENCY")
-	if len(s.Recent) == 0 {
+	switch {
+	case heartbeat:
+		renderPings(&b, s, width, opts, blank)
+		renderPingURL(&b, field, snap, width, opts.ping, blank)
+	case len(s.Recent) == 0:
+		section("LATENCY")
 		b.WriteString("  No checks yet.\n")
-	} else {
+	default:
+		section("LATENCY")
 		chartWidth := recentLimit
 		if width > 0 {
 			padding := 0
@@ -486,6 +521,7 @@ func renderKeys(remote ...bool) string {
 		row("d", "delete", "f", "defaults"),
 		row("/", "search", "", ""),
 		row("pgup/dn", "scroll incidents", "", ""),
+		row("v", "ping URL", "", ""),
 		"",
 		headerStyle.Render("NOTIFICATIONS (s, c)"),
 		"",

@@ -43,7 +43,7 @@ func renderModal(title string, body string, width, height int, minimum ...int) (
 }
 
 const popupWidth = 46
-const popupHeight = 15
+const popupHeight = 16
 
 func helpPopupFits(width, height int) bool {
 	return (width <= 0 || width >= popupWidth+2) && (height <= 0 || height >= popupHeight+2)
@@ -59,7 +59,7 @@ func renderHelpPopup(split bool, remote ...bool) string {
 		}
 		return left + strings.Repeat(" ", max(0, 14-ansi.StringWidth(description))) + accentStyle.Render(key2) + strings.Repeat(" ", max(0, 4-ansi.StringWidth(key2))) + helpStyle.Render(description2)
 	}
-	monitors := [][2]string{{"↑/↓ k/j", "select"}, {"enter", "details"}, {"n", "new monitor"}, {"e", "edit"}, {"y", "duplicate"}, {"d", "delete"}, {"/", "search"}}
+	monitors := [][2]string{{"↑/↓ k/j", "select"}, {"enter", "details"}, {"n", "new monitor"}, {"e", "edit"}, {"y", "duplicate"}, {"d", "delete"}, {"/", "search"}, {"v", "ping URL"}}
 	alerting := [][2]string{{"m", "mute selected"}, {"u", "unmute"}, {"s", "mail servers"}, {"c", "channels"}, {"w", "maintenance"}, {"f", "defaults"}}
 	if split {
 		// enter opens nothing in the split layout; the page keys scroll the

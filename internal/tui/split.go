@@ -93,7 +93,7 @@ func splitDetail(snap Snapshot, selected int, now time.Time, loadErr error, widt
 	_, rightWidth, topHeight := splitGeometry(snap, selected, now, width, height, filter)
 	svc := snap.Services[selected]
 	opts := fullDetail()
-	opts.compact, opts.cursor, opts.offset = true, scroll.cursor, scroll.offset
+	opts.compact, opts.cursor, opts.offset, opts.ping = true, scroll.cursor, scroll.offset, scroll.ping
 	// The pane leaves out the detail's key help.
 	for {
 		detail := renderDetailWithOptions(snap, svc, now, loadErr, rightWidth, opts)
@@ -143,6 +143,9 @@ func renderSplit(snap Snapshot, selected int, now time.Time, loadErr error, widt
 	help := "↑/↓ select · n new · e edit · d delete · m mute · ? more · q quit"
 	if selected >= 0 && selected < len(snap.Services) && opts.incidents && len(snap.Services[selected].Incidents) > opts.incidentRows {
 		help = "↑/↓ select · pgup/dn incidents · n new · e edit · d delete · m mute · ? more · q quit"
+	}
+	if selected >= 0 && selected < len(snap.Services) && snap.Services[selected].Check.Kind == kindHeartbeat {
+		help = strings.Replace(help, "↑/↓ select · ", "↑/↓ select · v URL · ", 1)
 	}
 	footer := renderHelp(help)
 	if filter.open {

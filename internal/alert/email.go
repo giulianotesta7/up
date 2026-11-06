@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/giulianotesta7/up/internal/check"
@@ -57,7 +58,11 @@ func (n *Notifier) deliverEmail(ctx context.Context, ch config.Channel, e event)
 			at = outages[0].Start.In(n.opts.Location).Format("Jan 02 15:04:05 (MST)")
 		}
 		msg.Subject = fmt.Sprintf("[up] %s is DOWN", c.Name)
-		msg.Body = fmt.Sprintf("%s is DOWN since %s.\nURL:    %s\nError:  %s\nHost:   %s\n", c.Name, at, c.Target(), r.Error, n.opts.Hostname)
+		target := "URL:    " + c.Target()
+		if c.Kind == config.CheckHeartbeat {
+			target = heartbeatSchedule(c)
+		}
+		msg.Body = fmt.Sprintf("%s is DOWN since %s.\n%s\nError:  %s\nHost:   %s\n", c.Name, at, target, r.Error, n.opts.Hostname)
 	} else {
 		msg.Subject = fmt.Sprintf("[up] %s is UP again", c.Name)
 		first := fmt.Sprintf("%s is UP again at %s", c.Name, at)
@@ -66,6 +71,9 @@ func (n *Notifier) deliverEmail(ctx context.Context, ch config.Channel, e event)
 			first += fmt.Sprintf(", after %s down", outages[0].End.Sub(outages[0].Start).Round(time.Second))
 		}
 		msg.Body = fmt.Sprintf("%s.\nURL:     %s\nLatency: %s\nHost:    %s\n", first, c.Target(), r.Latency.Round(time.Millisecond), n.opts.Hostname)
+		if c.Kind == config.CheckHeartbeat {
+			msg.Body = fmt.Sprintf("%s.\n%s\nHost:    %s\n", first, heartbeatSchedule(c), n.opts.Hostname)
+		}
 	}
 	if err = n.opts.Sender.Send(ctx, server, password, msg); err != nil {
 		n.opts.Logger.Error("sending alert failed", "check", c.Name, "channel", c.Channel, "error", err)
@@ -73,4 +81,23 @@ func (n *Notifier) deliverEmail(ctx context.Context, ch config.Channel, e event)
 	}
 	n.opts.Logger.Info("alert sent", "check", c.Name, "channel", c.Channel, "status", r.Status)
 	return nil
+}
+
+// heartbeatSchedule stands in for the URL a heartbeat does not have: its
+// period and grace ("Heartbeat: every 24h, grace 30m"). The ping token is
+// never part of an alert.
+func heartbeatSchedule(c config.Check) string {
+	return fmt.Sprintf("Heartbeat: every %s, grace %s", shortDuration(c.Period), shortDuration(c.Grace))
+}
+
+// shortDuration drops zero minutes and seconds: "24h", "1h30m", "45m".
+func shortDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }
