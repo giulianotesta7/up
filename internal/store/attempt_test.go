@@ -107,6 +107,19 @@ func TestLastAttemptsIsNewestPerChannel(t *testing.T) {
 	}
 }
 
+func TestLastAttemptsBreaksTimeTiesByRecordOrder(t *testing.T) {
+	s, _ := attemptStore(t)
+	first := attempt("api", "ops", 5, store.OutcomeSent)
+	second := attempt("web", "ops", 5, store.OutcomeFailed)
+	pager := attempt("api", "pager", 1, store.OutcomeHeld)
+	audit := attempt("web", "audit", 2, store.OutcomeSent)
+	mustRecord(t, s, pager, first, second, audit)
+	got, err := s.LastAttempts(ctx)
+	if err != nil || !reflect.DeepEqual(got, []store.Attempt{audit, second, pager}) {
+		t.Fatalf("LastAttempts() = %+v, %v, want the later of equal times, ordered by channel", got, err)
+	}
+}
+
 func TestRecordAttemptRejectsInvalidInputAndStoresNothing(t *testing.T) {
 	s, _ := attemptStore(t)
 	good := attempt("api", "ops", 1, store.OutcomeSent)

@@ -137,10 +137,19 @@ func (s *Store) Attempts(ctx context.Context, f AttemptFilter) ([]Attempt, error
 		limit = DefaultAttemptLimit
 	}
 	limit = min(limit, MaxAttemptLimit)
+	// Only the filters that are set go into the query, so SQLite can use the
+	// monitor or channel index instead of scanning every attempt by time.
+	where, args := []string{"1"}, []any{}
+	if f.Monitor != "" {
+		where, args = append(where, "monitor = ?"), append(args, f.Monitor)
+	}
+	if f.Channel != "" {
+		where, args = append(where, "channel = ?"), append(args, f.Channel)
+	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT `+attemptColumns+` FROM delivery_attempts
- WHERE (?1 = '' OR monitor = ?1) AND (?2 = '' OR channel = ?2)
- ORDER BY at_ns DESC, id DESC LIMIT ?3`, f.Monitor, f.Channel, limit)
+ WHERE `+strings.Join(where, " AND ")+`
+ ORDER BY at_ns DESC, id DESC LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("store: attempts: %w", err)
 	}
@@ -183,10 +192,16 @@ SELECT `+attemptColumns+` FROM delivery_attempts
 // LastAttempts returns the newest attempt of each channel that has one,
 // ordered by channel.
 func (s *Store) LastAttempts(ctx context.Context) ([]Attempt, error) {
+	// Walk the channel index one channel at a time and take each one's
+	// newest attempt from it, instead of numbering every attempt.
 	rows, err := s.db.QueryContext(ctx, `
-SELECT `+attemptColumns+` FROM (
-  SELECT *, ROW_NUMBER() OVER (PARTITION BY channel ORDER BY at_ns DESC, id DESC) AS rn FROM delivery_attempts)
- WHERE rn = 1 ORDER BY channel`)
+WITH RECURSIVE channels(name) AS (
+  SELECT MIN(channel) FROM delivery_attempts
+  UNION ALL
+  SELECT (SELECT MIN(channel) FROM delivery_attempts WHERE channel > name) FROM channels WHERE name IS NOT NULL)
+SELECT `+attemptColumns+` FROM channels JOIN delivery_attempts ON id = (
+  SELECT id FROM delivery_attempts WHERE channel = channels.name ORDER BY at_ns DESC, id DESC LIMIT 1)
+ ORDER BY channel`)
 	if err != nil {
 		return nil, fmt.Errorf("store: last attempts: %w", err)
 	}
