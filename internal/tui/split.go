@@ -77,12 +77,23 @@ func truncateLines(text string, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderSplit(snap Snapshot, selected int, now time.Time, loadErr error, width, height int, notice string) string {
-	leftWidth := splitListWidth(snap, selected, now)
+func renderSplit(snap Snapshot, selected int, now time.Time, loadErr error, width, height int, notice string, filters ...listFilter) string {
+	var filter listFilter
+	if len(filters) > 0 {
+		filter = filters[0]
+	}
+	leftWidth := max(splitListWidth(snap, selected, now), filter.listWidth)
 	rightWidth := width - leftWidth - 3
 	events := activity(snap, now)
 	topHeight := max(0, height-2-(2+len(events))-3)
-	list := strings.TrimSuffix(renderList(snap, selected, now, loadErr, 1), "\n"+renderHelp("↑/↓ select · enter open · n new · e edit · d delete · m mute · ? more · q quit"))
+	barRows := ""
+	if filter.active() {
+		// The bar spans both panes; the list inside them drops its own rows.
+		filter.split = true
+		barRows = filter.bar(width) + "\n\n"
+		topHeight = max(0, topHeight-2)
+	}
+	list := strings.TrimSuffix(renderList(snap, selected, now, loadErr, 1, filter), "\n"+renderHelp(listFooterFor(filter)))
 	list = strings.TrimSuffix(list, "\n")
 	if notice != "" {
 		list += "\n" + notice
@@ -115,6 +126,7 @@ func renderSplit(snap Snapshot, selected int, now time.Time, loadErr error, widt
 
 fitted:
 	var b strings.Builder
+	b.WriteString(barRows)
 	for i := 0; i < topHeight; i++ {
 		l, r := "", ""
 		if i < len(left) {
@@ -136,6 +148,10 @@ fitted:
 		}
 		b.WriteString(event.at.In(now.Location()).Format("15:04") + "  " + glyph + " " + event.monitor + " " + event.text + "\n")
 	}
-	b.WriteString("\n" + renderHelp("↑/↓ select · n new · e edit · d delete · m mute · ? more · q quit"))
+	footer := "↑/↓ select · n new · e edit · d delete · m mute · ? more · q quit"
+	if filter.open {
+		footer = searchFooter
+	}
+	b.WriteString("\n" + renderHelp(footer))
 	return b.String()
 }

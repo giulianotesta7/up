@@ -13,11 +13,21 @@ import (
 
 const timeLayout = "Jan 02 15:04:05"
 
-func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width int) string {
+func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width int, filters ...listFilter) string {
 	var b strings.Builder
 	b.WriteString(renderBanners(snap, now, loadErr))
+	var filter listFilter
+	if len(filters) > 0 {
+		filter = filters[0]
+	}
+	if filter.active() && !filter.split {
+		// The two rows stay while the bar closes, so the list does not jump.
+		b.WriteString(filter.bar(width) + "\n\n")
+	}
 
-	if len(snap.Services) == 0 {
+	if len(snap.Services) == 0 && filter.active() && filter.total > 0 {
+		b.WriteString("\n  " + noMatchLine + "\n")
+	} else if len(snap.Services) == 0 {
 		b.WriteString(helpStyle.Render("No checks configured.") + "\n")
 	} else {
 		nameWidth := ansi.StringWidth("MONITOR")
@@ -76,6 +86,13 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			if i == selected {
 				name = selectedNameStyle.Render(name)
 			}
+			if filter.query != "" {
+				base := lipgloss.NewStyle()
+				if i == selected {
+					base = selectedNameStyle
+				}
+				name = highlightMatch(name, filter.query, base)
+			}
 			name = tagTCP(name, s.Check, nameWidth, tcpTag)
 			cert := ""
 			if anyCert && s.Check.Kind != kindTCP {
@@ -90,7 +107,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		}
 	}
 
-	b.WriteString("\n" + renderHelp("↑/↓ select · enter open · n new · e edit · d delete · m mute · ? more · q quit"))
+	b.WriteString("\n" + renderHelp(listFooterFor(filter)))
 	return b.String()
 }
 
@@ -400,7 +417,7 @@ func renderKeys(remote ...bool) string {
 		row("n", "new monitor", "s", "SMTP servers"),
 		row("e", "edit", "c", "channels"),
 		row("d", "delete", "w", "maintenance"),
-		row("", "", "f", "defaults"),
+		row("/", "search", "f", "defaults"),
 		"",
 		headerStyle.Render("VIEW"),
 		"",
