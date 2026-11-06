@@ -164,7 +164,7 @@ func TestCheckRoutesRejectBadInputWithoutChangingAnything(t *testing.T) {
 		{"bad header name", "PUT", "/api/v1/checks/api", `{` + plainCheck + `,"headers":[{"name":"Bad Name"}]}`, `header name "Bad Name" is not valid`},
 		{"tcp without host", "PUT", "/api/v1/checks/api", `{"kind":"tcp","interval_ms":60000,"timeout_ms":1000,"port":80}`, "host is required"},
 		{"tcp port range", "PUT", "/api/v1/checks/api", `{"kind":"tcp","host":"h","port":70000,"interval_ms":60000,"timeout_ms":1000}`, "port 70000 must be between 1 and 65535"},
-		{"unknown kind", "PUT", "/api/v1/checks/api", `{` + plainCheck + `,"kind":"udp"}`, `kind "udp" must be http or tcp`},
+		{"unknown kind", "PUT", "/api/v1/checks/api", `{` + plainCheck + `,"kind":"udp"}`, `kind "udp" must be http, tcp or heartbeat`},
 		{"create invalid", "POST", "/api/v1/checks", `{"name":"new",` + plainCheck[len(`"name":"api",`):] + `,"method":"TRACE"}`, "method"},
 	} {
 		rec := send(h, tc.method, tc.path, tc.body)

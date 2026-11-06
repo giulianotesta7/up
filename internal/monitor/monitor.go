@@ -263,8 +263,6 @@ func heartbeat(ctx context.Context, opts Options) {
 }
 
 func loop(ctx context.Context, opts Options, c config.Check, last check.Status) check.Status {
-	ticker := time.NewTicker(c.Interval)
-	defer ticker.Stop()
 	var streak check.Streak
 	var notified bool
 	muteStore, hasMutes := opts.Store.(MuteStore)
@@ -351,6 +349,33 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 	if latest.CheckName != "" {
 		settle(latest, suppressed())
 	}
+	// observe applies one stored result: the alert streak, the certificate
+	// and the transition log.
+	observe := func(res check.Result) {
+		if opts.Alerter != nil {
+			streak.Observe(res.Status, c.AlertAfter, c.RecoverAfter)
+			sup := suppressed()
+			if res.Cert != nil {
+				observeCert(ctx, opts, c, res, sup, &certHeld)
+			}
+			latest = res
+			settle(res, sup)
+		}
+		if res.Status != last {
+			logTransition(opts.Logger, c, res)
+			last = res.Status
+		}
+	}
+	if c.Kind == config.CheckHeartbeat {
+		watchHeartbeat(ctx, opts, c, observe, func() {
+			if opts.Alerter != nil && latest.CheckName != "" {
+				settle(latest, suppressed())
+			}
+		})
+		return last
+	}
+	ticker := time.NewTicker(c.Interval)
+	defer ticker.Stop()
 	for {
 		res := opts.Runner.Run(ctx, c)
 		if res.Status == check.StatusCanceled || ctx.Err() != nil {
@@ -370,19 +395,7 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 		} else if !stored {
 			return last
 		}
-		if opts.Alerter != nil {
-			streak.Observe(res.Status, c.AlertAfter, c.RecoverAfter)
-			sup := suppressed()
-			if res.Cert != nil {
-				observeCert(ctx, opts, c, res, sup, &certHeld)
-			}
-			latest = res
-			settle(res, sup)
-		}
-		if res.Status != last {
-			logTransition(opts.Logger, c, res)
-			last = res.Status
-		}
+		observe(res)
 		for waiting := true; waiting; {
 			select {
 			case <-ctx.Done():
@@ -492,6 +505,14 @@ func lastResult(ctx context.Context, opts Options, c config.Check) check.Result 
 }
 
 func logTransition(logger *slog.Logger, c config.Check, res check.Result) {
+	if c.Kind == config.CheckHeartbeat {
+		if res.Status == check.StatusUp {
+			logger.Info("check up", "check", c.Name)
+		} else {
+			logger.Warn("check down", "check", c.Name, "error", res.Error)
+		}
+		return
+	}
 	if res.Status == check.StatusUp {
 		logger.Info("check up", "check", c.Name, "url", c.Target(), "latency", res.Latency)
 		return

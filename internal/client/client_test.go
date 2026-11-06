@@ -74,6 +74,7 @@ func realServer(t *testing.T) (*Client, *store.Store, *secret.Key) {
 	mux.Handle("/api/v1/channels/{name}/test", remote.ChannelTestRoutes(s))
 	mux.Handle("/api/v1/defaults", remote.DefaultsRoutes(s))
 	mux.Handle("/api/v1/deliveries", remote.DeliveryRoutes(s))
+	mux.Handle("/api/v1/checks/{name}/heartbeat-token", remote.HeartbeatTokenRoutes(s, key))
 	srv := httptest.NewServer(remote.NewHandler(remote.Options{Verifier: verifier, Version: "test", Routes: mux}))
 	t.Cleanup(srv.Close)
 	return New(srv.URL, testToken), s, key

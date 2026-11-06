@@ -147,6 +147,36 @@ Set `Type` to `TCP` (first field, `←`/`→`) and enter a host (name or IP; IPv
 
 It only proves that something is listening: no TLS, certificate or application check. TCP monitors have no URL, expected status or `TLS expiry`.
 
+### Heartbeat monitors
+
+A heartbeat watches a job that up cannot reach, such as a nightly backup: the job sends a request to up when it finishes, and up alerts when none arrives in time. Set `Type` to `Heartbeat` and enter a **period** (how often the job runs, 1m to 31 days) and a **grace** (how late it may be, 0 to 31 days). There is no URL, method, expected status, timeout or latency.
+
+Pings arrive on the API listener, so the daemon needs `--api-listen` (see [Remote access](#remote-access)); the port is the one given there and there is no other port. Without it there is nowhere to send pings and the TUI says so. Each heartbeat has its own URL:
+
+```
+POST /api/v1/heartbeat/<token>        the job succeeded
+POST /api/v1/heartbeat/<token>/fail   the job failed
+```
+
+A cron line that reports both outcomes:
+
+```
+0 2 * * * /opt/backup.sh && curl -fsS -m 10 -X POST https://up.example.com/api/v1/heartbeat/<token> || curl -fsS -m 10 -X POST https://up.example.com/api/v1/heartbeat/<token>/fail
+```
+
+States:
+
+- `WAITING` until the first ping: no deadline and no alerts.
+- `UP` after a ping. The next one is due within period + grace of the last request.
+- `DOWN` when that deadline passes with no ping (the history shows `no ping since 02:14 UTC`), and at once on `/fail` (`reported failure`).
+- `UP` again on the next ping.
+
+Each missed deadline counts as one failed check and each ping as one success, so **alert after** and **recover after** count missed periods and pings. Channels, muting, maintenance windows, history, incidents and the delivery log work as for any monitor. If the daemon was stopped across several deadlines, it records the first and the latest when it starts again.
+
+The token in the URL only records pings for that monitor: it grants no API or configuration access, and the API access token never goes in a crontab. The TUI shows the full URL once after saving and again with `v` in the detail; it builds it from `--api-listen` (scheme `https` with `--tls-cert`), so behind a reverse proxy replace the host with the public one. To replace a leaked token choose `Token: new` in Edit monitor: the old URL stops working at once. The token is stored encrypted with the server key, like webhook URLs, so a local `up tui` can only show it when it can read `<db>.key` (run it as the user that runs `up serve`, or use `--remote`).
+
+The endpoint answers `200 {"ok":true}` when the ping is recorded and the same `404 {"error":"not found"}` for any token that matches no heartbeat, `405` for methods other than `POST` and `413` for a body over 1 KiB (a small body is ignored). It is rate limited per token (1/s, burst 5), per client address (20/s, burst 100) and overall (50/s, burst 200), answering `429` with `Retry-After: 1`; jobs behind one proxy share only the address limit.
+
 ## Alerts
 
 1. `s`: add a mail server. For a relay without authentication, set **No login required** to **Yes**.
@@ -255,7 +285,7 @@ Credentials are saved in `$XDG_CONFIG_HOME/up/remote.json` (default `~/.config/u
 
 ### API reference
 
-Every route requires `Authorization: Bearer <token>`; tokens in URLs are not accepted. Unauthenticated requests return `401`.
+Every route requires `Authorization: Bearer <token>`; tokens in URLs are not accepted. Unauthenticated requests return `401`. The only exception is the heartbeat ping (`POST /api/v1/heartbeat/<token>` and `.../fail`, see [Heartbeat monitors](#heartbeat-monitors)), whose own token records pings and nothing else.
 
 | Request | Does |
 |---|---|
@@ -269,12 +299,16 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 | `GET`/`PUT /api/v1/defaults` | reads or replaces the defaults for new items (`zone`, `channel`, `interval_ms`, `timeout_ms`, `expected_status`, `alert_after`, `recover_after`); the snapshot carries them too |
 | `GET /api/v1/deliveries` | lists alert delivery attempts, newest first, as `{"server_time", "attempts": [{at, monitor, channel, event, outcome, reason}]}`; optional `monitor`, `channel` and `limit` (default 50, at most 500) query parameters; the snapshot carries the latest ones too |
 | `POST`/`GET /api/v1/channels/{name}/test` | requests a channel test (`202`, or `409` while one is active) and reads the newest one; the daemon sends it |
+| `GET`/`POST /api/v1/checks/{name}/heartbeat-token` | shows a heartbeat's ping token, or replaces it (the old one stops working), as `{"token", "path"}`; `404` for a monitor that is not a heartbeat |
+
+Heartbeat monitors use `"kind": "heartbeat"` with `period_ms` and `grace_ms`. The snapshot carries each heartbeat's `heartbeat` state (`waiting`, `last_ping`, `deadline`) and the daemon's `api` listener (`listen`, `tls`); never the ping token.
 
 Bodies are strict JSON, limited to 1 MiB. Errors: `400` invalid input, `404` not found, `409` duplicate or still in use. Rejected requests change nothing.
 
 ### Security
 
-- **One token, full access.** There are no roles or rate limiting. For an internet-facing API, a proxy with rate limiting is recommended.
+- **One token, full access.** There are no roles or rate limiting, except on heartbeat pings. For an internet-facing API, a proxy with rate limiting is recommended.
+- Heartbeat ping tokens (256 random bits) are stored sealed with the server key plus a SHA-256 hash; a ping is matched by the hash, compared in constant time. Unknown and former tokens get the same answer, and tokens are never logged or returned except by the authenticated token route.
 - SMTP passwords, header values, request bodies, webhook URLs and webhook auth values are sealed with the server's public key; the API rejects plaintext values and never returns them or their ciphertext. The private key stays on the server. Edit forms show saved values as `set`, with keep, replace or clear.
 - The server stores a SHA-256 token hash and compares it in constant time. Token and remote credential files readable by others are refused.
 - The client does not follow redirects or forward the token to another host. Server text is stripped of terminal escape sequences before display. There is no certificate pinning.

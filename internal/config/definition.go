@@ -11,7 +11,7 @@ import (
 	"github.com/giulianotesta7/up/internal/secret"
 )
 
-// Check kinds.
+// Check kinds; CheckHeartbeat is in heartbeat.go.
 const (
 	CheckHTTP = "http"
 	CheckTCP  = "tcp"
@@ -122,7 +122,7 @@ func (c Check) SameDefinition(o Check) bool {
 		a.Interval == b.Interval && a.Timeout == b.Timeout && a.ExpectedStatus == b.ExpectedStatus &&
 		a.Channel == b.Channel && a.AlertAfter == b.AlertAfter && a.RecoverAfter == b.RecoverAfter && a.TLSOff == b.TLSOff &&
 		a.Method == b.Method && sameSealed(a.Body, b.Body) && a.ExpectText == b.ExpectText &&
-		a.Host == b.Host && a.Port == b.Port &&
+		a.Host == b.Host && a.Port == b.Port && a.Period == b.Period && a.Grace == b.Grace &&
 		slices.EqualFunc(a.Headers, b.Headers, func(x, y Header) bool {
 			return x.Name == y.Name && sameSealed(x.Value, y.Value)
 		})

@@ -20,6 +20,12 @@ rebasing on this one; migrations are append-only.
 - `ValidateCheck`, `ValidateChannel`, `ValidateMaintenanceWindow` are the only validators. Bounds: methods `GET HEAD POST PUT PATCH DELETE OPTIONS`; 32 headers; header names are RFC tokens and unique case-insensitively; `HEAD` with `ExpectText` is rejected; sealed value limits `MaxSealedHeaderValue` (4096) and `MaxSealedBody` (64 KiB + 256); `MaxExpectText` 1024; TCP host without scheme/brackets/port (bare IPv6), port 1..65535, no HTTP-only fields, `expected_status` 0; window duration 1m..7d, weekdays distinct 0..6, zone loads and is not `Local` (tzdata is embedded).
 - `ChannelKinds` (what the TUI offers) lists email and webhook.
 
+### Heartbeats (schema v9)
+
+`Check.Kind` `"heartbeat"` (`config.CheckHeartbeat`) adds `Period` (1m..31d) and `Grace` (0..31d); `URL`, `Method`, `ExpectedStatus`, `Interval`, `Timeout`, headers, body, expected text, host, port and `TLSOff` must be zero, and `Period`/`Grace` must be zero for HTTP and TCP. Both are in `SameDefinition` and `RecordDefined`. The ping token is not a `Check` field. `config.APIListener{Address, TLS}` is the daemon's API (`Enabled`, `BaseURL(hostname)`; an unspecified host becomes `hostname`); `config.HeartbeatPath(token)` and `HeartbeatFailSuffix` build ping paths.
+
+Results (`internal/check/heartbeat.go`): `Ping` (up), `Fail` (down, `reported failure`, `Failed(r)`), missed deadlines (down, `no ping since 15:04 UTC` or `Jan 2 15:04 UTC`, `Missed(r)`). `NextDeadline(c, newest) = newest + Period + Grace` after any result; `Overdue(c, newest, lastContact, now)` returns the misses due (now strictly after the deadline), at most the first and the latest. The monitor runs no `Runner` for heartbeats: every discovery interval it observes new stored results and records misses with `RecordMissed`, through the same streak, mute, maintenance and alert path as HTTP/TCP.
+
 ### Protected values
 
 Header values, HTTP body, webhook URL and webhook auth value are `secret.Sealed` to the daemon public key (`secret.Seal`, same scheme as SMTP passwords). The daemon opens them with `*secret.Key.Open`; the store, snapshot and API never expose plain text or ciphertext, only `*_set` booleans (webhook: scheme+host in `webhook_origin`; build it with `config.WebhookOrigin(url)`).
@@ -37,6 +43,7 @@ Header values, HTTP body, webhook URL and webhook auth value are `secret.Sealed`
 - Windows (max `MaxMaintenanceWindows` = 20 per check): `AddMaintenanceWindow(ctx, w) (w with ID, error)`, `UpdateMaintenanceWindow(ctx, w)`, `DeleteMaintenanceWindow(ctx, check, id)`, `MaintenanceWindows(ctx, check)`, `AllMaintenanceWindows(ctx)`. `DeleteCheck` deletes its windows. Unknown check/window is `ErrNotFound`, invalid input `ErrValidation`.
 - Defaults (v7 `defaults`, one row with `id = 1`; no row reads as `BuiltinDefaults`): `Defaults(ctx)`, `SetDefaults(ctx, d)` (invalid input or a channel that does not exist is `ErrValidation`; nothing is stored). `DeleteChannel` sets a default channel of that name to none, so reads never name a deleted channel.
 - Alert state (v6 `alert_state`, a trigger deletes it with its check): `AlertState(ctx, check) (known, found, err)`, `SetAlertState(ctx, check, known)` (`ErrNotFound` unknown check), `AlertStates(ctx)`. It records whether recipients were last told the check is down; the monitor writes it when it sends or settles and reads it on loop start (a live mute's `was_alerting` first, no row falls back to the streak). Snapshot: `Service.KnownAlerting`, `services[].known_alerting`.
+- Heartbeats (v9 adds `checks.period_ns`, `grace_ns`, `ping_token`, `ping_token_key`, `ping_token_hash` with a unique partial index, and the one-row `daemon_api` table): adding or making a heartbeat creates a token (`uphb_` + 256 bits base64url) sealed to the stored public key (`ErrValidation` without one) plus its SHA-256; edits keep it, another kind clears it, delete removes it, copies get their own. `HeartbeatToken(ctx, name) (secret.Sealed, error)`, `RegenerateHeartbeatToken(ctx, name) (string, error)` (`ErrNotFound` unless a heartbeat), `PingHeartbeat(ctx, token, failed, at) (found, error)` (hash lookup, constant-time compare), `RecordMissed(ctx, c, newest, r) (stored, error)` (only while the definition is unchanged and no result is newer than `newest`), `SetAPIListener`/`APIListener` (written by every `up serve` start; zero = no API).
 - Channel tests (one active per channel, enforced by a unique index): `EnqueueChannelTest(ctx, channel, at)` (`ErrNotFound` unknown channel, `ErrExists` if pending/sending), `ClaimChannelTest(ctx, at)` (oldest pending to sending), `CompleteChannelTest(ctx, id, errText, at)` (empty text = ok; text is cleaned by `SafeTestError`; only a sending test completes), `FailSendingChannelTests(ctx, reason, at)` (call at daemon start), `LatestChannelTest(ctx, channel)`, `LatestChannelTests(ctx)`. History per channel is capped at 20.
 
 ## Delivery seam (`internal/alert`)
@@ -47,9 +54,11 @@ Header values, HTTP body, webhook URL and webhook auth value are `secret.Sealed`
 
 `Snapshot.ChannelTests`, `Service.Maintenance`, `Service.InMaintenance` are filled by `Load` when the store implements the optional readers (`MaintenanceReader`, `ChannelTestReader`; `*store.Store` does). Optional writers, implemented by `*store.Store` and `*client.Client`: `tui.MaintenanceStore` (add/update/delete window), `tui.ChannelTester` (`EnqueueChannelTest`) and `tui.DefaultsStore` (`SetDefaults`); `Load` fills `Snapshot.Defaults` through the optional `tui.DefaultsReader` (zero value means built-in, see `Snapshot.NewItemDefaults`). Type-assert them; `tui.Store` is unchanged.
 
+Heartbeats: `Service.Heartbeat` (`HeartbeatState{Waiting, LastPing, Deadline}`), `Service.Label()` `WAITING` before the first result, `Snapshot.API` (`config.APIListener`, via the optional `APIListenerReader`). `tui.HeartbeatTokens` (`RevealHeartbeatToken`, `RegenerateHeartbeatToken`) is implemented by `*client.Client` and, locally, by `NewLocalHeartbeatTokens(store, dbPath)`, which reads `<db>.key` on each reveal and never creates it; when it cannot open the token the error wraps `tui.ErrRevealUnavailable` and its text is the hint to show.
+
 ## API (`internal/remote`)
 
-All routes need the bearer token; bodies are strict JSON (unknown fields are 400); a rejected request changes nothing.
+All routes need the bearer token except heartbeat pings; bodies are strict JSON (unknown fields are 400); a rejected request changes nothing.
 
 | Route | Body / response |
 |---|---|
@@ -63,6 +72,8 @@ All routes need the bearer token; bodies are strict JSON (unknown fields are 400
 | `GET /api/v1/defaults` | 200 `DefaultsDTO` |
 | `PUT /api/v1/defaults` | `DefaultsDTO` (every field); 200 `DefaultsDTO`, 400 on invalid input or an unknown channel |
 | `GET /api/v1/deliveries?monitor=&channel=&limit=` | 200 `{"server_time","attempts":[{"at","monitor","channel","event","outcome","reason"}]}` newest first; `limit` defaults to 50, max 500; 400 on an invalid limit |
+| `GET`/`POST /api/v1/checks/{name}/heartbeat-token` | none; 200 `{"token","path"}` (GET opens the stored token with the daemon key, POST replaces it); 404 not a heartbeat, 409 sealed to another key |
+| `POST /api/v1/heartbeat/{token}`, `POST /api/v1/heartbeat/{token}/fail` | **no bearer token** (`remote.HeartbeatRoutes`, mounted before authentication on `remote.HeartbeatPrefix`); body ignored, at most 1 KiB (413); 200 `{"ok":true}`; any other token or path below the prefix 404 `{"error":"not found"}`, byte-identical; 405 `Allow: POST`; 429 `{"error":"too many requests"}` `Retry-After: 1` over `DefaultPingLimits` (per presented token 1/s burst 5, per connection address 20/s burst 100, global 50/s burst 200; forwarded headers are not trusted); 500 `{"error":"internal error"}` |
 
 JSON shapes:
 
@@ -77,6 +88,7 @@ window          {"id","weekdays":[0..6],"start_minute","duration_ms","zone"}   (
 defaults        {"zone","channel","interval_ms","timeout_ms","expected_status","alert_after","recover_after"}
 channel test    {"id","channel","status":"pending|sending|ok|error","error","requested","started","finished"}
 snapshot adds   services[].maintenance [window], services[].in_maintenance, services[].maintenance_end, channel_tests [channel test], defaults
+heartbeat       check adds "period_ms","grace_ms" (kind "heartbeat"; write omits them for other kinds); services[].heartbeat {"waiting","last_ping","deadline"} (heartbeats only); snapshot "api" {"listen","tls"}
 ```
 
 Sealed values must be sealed to the key in the snapshot's `public_key`; `sealed.key` must equal it (400 otherwise). `cmd/up/api.go` mounts the wildcard routes; `internal/client` implements the matching methods and `LoadSnapshot` shifts `in_maintenance`'s end and channel test times by clock skew.

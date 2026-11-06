@@ -87,6 +87,10 @@ func (d CheckDTO) checkOrError(ctx context.Context, s any) (c config.Check, msg 
 		return config.Check{}, "interval_ms is out of range", nil
 	case d.TimeoutMS > maxDurationMS || d.TimeoutMS < -maxDurationMS:
 		return config.Check{}, "timeout_ms is out of range", nil
+	case d.PeriodMS > maxDurationMS || d.PeriodMS < -maxDurationMS:
+		return config.Check{}, "period_ms is out of range", nil
+	case d.GraceMS > maxDurationMS || d.GraceMS < -maxDurationMS:
+		return config.Check{}, "grace_ms is out of range", nil
 	case d.Name == "." || d.Name == "..":
 		return config.Check{}, `name cannot be "." or ".." over the API`, nil
 	}
@@ -109,7 +113,8 @@ func (d CheckDTO) checkOrError(ctx context.Context, s any) (c config.Check, msg 
 // check converts the plain fields; protected values are filled by checkOrError.
 func (d CheckDTO) check() config.Check {
 	return config.Check{Name: d.Name, URL: d.URL, Interval: time.Duration(d.IntervalMS) * time.Millisecond, Timeout: time.Duration(d.TimeoutMS) * time.Millisecond, ExpectedStatus: d.ExpectedStatus, Channel: d.Channel, AlertAfter: d.AlertAfter, RecoverAfter: d.RecoverAfter, TLSOff: d.TLSOff,
-		Kind: d.Kind, Method: d.Method, ExpectText: d.ExpectText, Host: d.Host, Port: d.Port}
+		Kind: d.Kind, Method: d.Method, ExpectText: d.ExpectText, Host: d.Host, Port: d.Port,
+		Period: time.Duration(d.PeriodMS) * time.Millisecond, Grace: time.Duration(d.GraceMS) * time.Millisecond}
 }
 
 // WriteRoutes handles check and mute mutations after authentication.
