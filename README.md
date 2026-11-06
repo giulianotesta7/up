@@ -183,7 +183,7 @@ In the TUI:
 - **Detail.** Status with the last ping, `Next due` (`before 02:30 (in 21h 12m)`), a `PINGS` row in place of the latency chart (`░` missed, `█` failed), and `PING URL` with the token masked: `v` shows it in place and any other key hides it. Incidents and recent alerts work as for any monitor.
 - **New token.** In Edit monitor, `Token: ‹ new ›` and `enter` ask first (`y` replace, `n` keep); after `y` the old URL stops working at once and the box shows the new one.
 
-The endpoint answers `200 {"ok":true}` when the ping is recorded and the same `404 {"error":"not found"}` for any token that matches no heartbeat, `405` for methods other than `POST` and `413` for a body over 1 KiB (a small body is ignored). It is rate limited per token (1/s, burst 5), per client address (20/s, burst 100) and overall (50/s, burst 200), answering `429` with `Retry-After: 1`; jobs behind one proxy share only the address limit.
+The endpoint answers `200 {"ok":true}` when the ping is recorded and the same `404 {"error":"not found"}` for any token that matches no heartbeat, `405` for methods other than `POST` and `413` for a body over 1 KiB (a small body is ignored). It is rate limited per token (1/s, burst 5); tokens that match no heartbeat are also limited per client address (20/s, burst 100) and overall (50/s, burst 200), and all requests share a 500/s (burst 1000) safety cap, answering `429` with `Retry-After: 1`. Unknown tokens never slow down valid ones, so jobs behind one proxy are not blocked by guessing.
 
 ## Alerts
 
