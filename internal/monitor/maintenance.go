@@ -6,6 +6,7 @@ import (
 
 	"github.com/giulianotesta7/up/internal/check"
 	"github.com/giulianotesta7/up/internal/config"
+	"github.com/giulianotesta7/up/internal/store"
 )
 
 // WindowStore is the optional API for a check's recurring maintenance windows.
@@ -28,6 +29,38 @@ type suppression struct {
 	found bool
 	// active is a manual mute or a maintenance window in force.
 	active bool
+	// muted is a manual mute in force; the rest of active is a window.
+	muted bool
+}
+
+// reason is why alerts are held, as the delivery log shows it.
+func (s suppression) reason() string {
+	if s.muted {
+		return "muted"
+	}
+	return "maintenance window"
+}
+
+// AttemptStore is the optional API that logs alerts held back by a mute or a
+// maintenance window. *store.Store implements it. Sent and failed deliveries
+// are logged by the notifier.
+type AttemptStore interface {
+	RecordAttempt(context.Context, store.Attempt) error
+}
+
+// recordHeld logs that the event is being held for the check's channel. A
+// failure to log is reported and never changes the alert.
+func recordHeld(ctx context.Context, opts Options, c config.Check, event store.Event, s suppression) {
+	attempts, ok := opts.Store.(AttemptStore)
+	if !ok {
+		return
+	}
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	err := attempts.RecordAttempt(wctx, store.Attempt{At: opts.now(), Monitor: c.Name, Channel: c.Channel, Event: event, Outcome: store.OutcomeHeld, Reason: s.reason()})
+	if err != nil {
+		opts.Logger.Error("recording held alert failed", "check", c.Name, "error", err)
+	}
 }
 
 // windows reads the check's windows fresh, so edits and deletions apply on

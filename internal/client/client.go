@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -186,6 +187,12 @@ func (c *Client) LoadSnapshot(ctx context.Context, now time.Time) (tui.Snapshot,
 		return shifted
 	}
 	s.LastBeat = shift(s.LastBeat)
+	for i := range s.Attempts {
+		s.Attempts[i].At = shift(s.Attempts[i].At)
+	}
+	for i := range s.LastAttempts {
+		s.LastAttempts[i].At = shift(s.LastAttempts[i].At)
+	}
 	for i := range s.ChannelTests {
 		t := &s.ChannelTests[i]
 		t.Requested, t.Started, t.Finished = shift(t.Requested), shift(t.Started), shift(t.Finished)
@@ -198,6 +205,9 @@ func (c *Client) LoadSnapshot(ctx context.Context, now time.Time) (tui.Snapshot,
 		v.Mute.Until = boundary(v.Mute.Until)
 		v.Cert.NotAfter = boundary(v.Cert.NotAfter)
 		v.Cert.Observed = shift(v.Cert.Observed)
+		for j := range v.Attempts {
+			v.Attempts[j].At = shift(v.Attempts[j].At)
+		}
 		for j := range v.Recent {
 			v.Recent[j].At = shift(v.Recent[j].At)
 		}
@@ -208,6 +218,46 @@ func (c *Client) LoadSnapshot(ctx context.Context, now time.Time) (tui.Snapshot,
 	}
 	return s, nil
 }
+
+// Deliveries reads alert delivery attempts, newest first, with the monitor,
+// channel and limit of f (see remote.DeliveryRoutes). Times are shifted to
+// this machine's clock like the snapshot's.
+func (c *Client) Deliveries(ctx context.Context, f store.AttemptFilter) ([]store.Attempt, error) {
+	now := time.Now()
+	q := url.Values{}
+	if f.Monitor != "" {
+		q.Set("monitor", f.Monitor)
+	}
+	if f.Channel != "" {
+		q.Set("channel", f.Channel)
+	}
+	if f.Limit > 0 {
+		q.Set("limit", strconv.Itoa(f.Limit))
+	}
+	path := "/api/v1/deliveries"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	status, b, err := c.request(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, c.responseError(status, b)
+	}
+	var d remote.DeliveryResponse
+	if json.Unmarshal(b, &d) != nil {
+		return nil, errors.New("client: invalid deliveries")
+	}
+	out := remote.Attempts(d.Attempts)
+	sanitize(reflect.ValueOf(&out).Elem())
+	skew := now.Sub(d.ServerTime)
+	for i := range out {
+		out[i].At = out[i].At.Add(skew)
+	}
+	return out, nil
+}
+
 func (c *Client) Checks(context.Context) ([]config.Check, error)               { return nil, errReads }
 func (c *Client) Recent(context.Context, string, int) ([]check.Result, error)  { return nil, errReads }
 func (c *Client) Outages(context.Context, string, int) ([]store.Outage, error) { return nil, errReads }

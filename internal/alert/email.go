@@ -40,6 +40,7 @@ func (n *Notifier) deliverEmail(ctx context.Context, ch config.Channel, e event)
 			return fmt.Errorf("opening SMTP server %q password failed", ch.SMTPServer)
 		}
 	}
+	e.trace.know(password)
 	at := r.At.In(n.opts.Location).Format("Jan 02 15:04:05 (MST)")
 	msg := Message{From: server.Sender, To: ch.Recipients, Date: r.At}
 	if e.test {

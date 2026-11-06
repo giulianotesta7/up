@@ -9,6 +9,7 @@ import (
 
 	"github.com/giulianotesta7/up/internal/check"
 	"github.com/giulianotesta7/up/internal/config"
+	"github.com/giulianotesta7/up/internal/store"
 )
 
 // DefaultHeartbeatInterval is how often the daemon records that it is alive.
@@ -290,8 +291,13 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 		m, found := readMute()
 		now := opts.now()
 		active := found && m.Until.After(now)
-		return suppression{mute: m, found: found, active: active || config.EvaluateMaintenance(windows(ctx, opts, c.Name), now).Active}
+		return suppression{mute: m, found: found, muted: active, active: active || config.EvaluateMaintenance(windows(ctx, opts, c.Name), now).Active}
 	}
+	// heldEvent is the alert already logged as held, so the repeated settling
+	// of one owed alert logs it once; certHeld is the same for the certificate
+	// warning threshold.
+	var heldEvent store.Event
+	var certHeld int
 	// settle sends what the recipients do not know once nothing holds alerts
 	// back, and forgets a mute that has ended with no window still running.
 	settle := func(res check.Result, s suppression) {
@@ -304,8 +310,20 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 			}
 		} else if !s.active && streak.Alerting != notified {
 			notified = streak.Alerting
+			heldEvent = ""
 			opts.Alerter.Notify(c, res)
 			saveNotified(ctx, opts, c, notified)
+		} else if s.active && streak.Alerting != notified {
+			event := store.EventRecovered
+			if streak.Alerting {
+				event = store.EventDown
+			}
+			if event != heldEvent {
+				heldEvent = event
+				recordHeld(ctx, opts, c, event, s)
+			}
+		} else {
+			heldEvent = ""
 		}
 		if s.found && !s.active {
 			clearCtx, clearCancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
@@ -353,7 +371,7 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 			streak.Observe(res.Status, c.AlertAfter, c.RecoverAfter)
 			sup := suppressed()
 			if res.Cert != nil {
-				observeCert(ctx, opts, c, res, sup.active)
+				observeCert(ctx, opts, c, res, sup, &certHeld)
 			}
 			latest = res
 			settle(res, sup)
@@ -377,20 +395,22 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 	}
 }
 
-func observeCert(ctx context.Context, opts Options, c config.Check, res check.Result, muted bool) {
-	store, ok := opts.Store.(CertStore)
+// observeCert saves the certificate and warns when a threshold is due. A
+// warning held by suppression is logged once per threshold (certHeld).
+func observeCert(ctx context.Context, opts Options, c config.Check, res check.Result, sup suppression, certHeld *int) {
+	certs, ok := opts.Store.(CertStore)
 	if !ok {
 		return
 	}
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 	defer cancel()
 	if c.TLSOff {
-		if err := store.DeleteCert(wctx, c.Name); err != nil {
+		if err := certs.DeleteCert(wctx, c.Name); err != nil {
 			opts.Logger.Error("forgetting certificate failed", "check", c.Name, "error", err)
 		}
 		return
 	}
-	old, found, err := store.Cert(wctx, c.Name)
+	old, found, err := certs.Cert(wctx, c.Name)
 	if err != nil {
 		opts.Logger.Error("reading certificate failed", "check", c.Name, "error", err)
 		return
@@ -406,11 +426,17 @@ func observeCert(ctx context.Context, opts Options, c config.Check, res check.Re
 			due = threshold
 		}
 	}
-	if alerter, ok := opts.Alerter.(CertAlerter); ok && due != 0 && c.Channel != "" && !muted {
-		cert.Notified = due
-		alerter.NotifyCert(c, cert, remaining)
+	if alerter, ok := opts.Alerter.(CertAlerter); ok && due != 0 && c.Channel != "" {
+		if !sup.active {
+			cert.Notified = due
+			*certHeld = 0
+			alerter.NotifyCert(c, cert, remaining)
+		} else if *certHeld != due {
+			*certHeld = due
+			recordHeld(ctx, opts, c, store.EventCert, sup)
+		}
 	}
-	if err := store.SaveCert(wctx, cert); err != nil {
+	if err := certs.SaveCert(wctx, cert); err != nil {
 		opts.Logger.Error("saving certificate failed", "check", c.Name, "error", err)
 	}
 }
