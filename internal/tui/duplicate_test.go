@@ -163,3 +163,22 @@ func TestHelpListsDuplicateButTheFooterDoesNot(t *testing.T) {
 		}
 	}
 }
+
+func TestDuplicateOnAFilteredListCopiesTheSelectedVisibleMonitor(t *testing.T) {
+	s, m := duplicateStore(t)
+	m, _ = press(t, m, keySlash)
+	m = typeKeys(t, m, "db")
+	m, _ = press(t, m, keyEnter, keyY)
+	requireText(t, m, "New monitor · copy of db", "Name: db copy│")
+	m, cmd := press(t, m, keyEnter)
+	finishCommand(t, m, cmd)
+	got, ok := storedByName(t, s, "db copy")
+	want, _ := storedByName(t, s, "db")
+	want.Name = "db copy"
+	if !ok || !got.SameDefinition(want) {
+		t.Fatalf("copy = %+v, want %+v", got, want)
+	}
+	if _, ok := storedByName(t, s, "api copy"); ok {
+		t.Fatal("copied the hidden monitor")
+	}
+}
