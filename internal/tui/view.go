@@ -105,7 +105,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		}
 	}
 
-	b.WriteString("\n" + renderHelp(listFooterFor(filter)))
+	b.WriteString("\n" + footerFor(filter, width))
 	return b.String()
 }
 

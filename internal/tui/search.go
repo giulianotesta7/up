@@ -11,9 +11,7 @@ import (
 )
 
 const (
-	searchFooter  = "type to search · tab status · enter keep · esc clear"
-	noMatchLine   = "No monitors match. esc clears."
-	searchPadding = 26
+	noMatchLine = "No monitors match. esc clears."
 )
 
 // filterTabs are the status filters, in the order tab cycles them.
@@ -52,13 +50,11 @@ func (f listFilter) summary() string {
 	return strings.Join(parts, " · ")
 }
 
-// bar is the search row under the header; empty while the bar is closed.
-func (f listFilter) bar(width int) string {
-	if !f.open {
-		return ""
-	}
-	query := accentStyle.Render("/") + " " + f.query + accentStyle.Render("█")
-	line := query + strings.Repeat(" ", max(1, searchPadding-ansi.StringWidth(query)))
+// prompt is the footer line while the bar is open: the query, the tabs and
+// the counter with the key hints. A narrow line drops the hints first, then
+// shortens the counter to N/M, then the head of the query; it never exceeds
+// width. Width 0 or 1 (the split pane measure) means no limit.
+func (f listFilter) prompt(width int) string {
 	tabs := make([]string, len(filterTabs))
 	for i, tab := range filterTabs {
 		if i == f.tab {
@@ -67,11 +63,18 @@ func (f listFilter) bar(width int) string {
 			tabs[i] = helpStyle.Render(" " + tab + " ")
 		}
 	}
-	line += strings.Join(tabs, " ") + "   " + helpStyle.Render(f.counter())
-	if width > 1 {
-		line = ansi.Truncate(line, width, "")
+	build := func(query, counter string) string {
+		return accentStyle.Render("/") + " " + query + accentStyle.Render("█") + "   " + strings.Join(tabs, " ") + "   " + helpStyle.Render(counter)
 	}
-	return line
+	long := fmt.Sprintf("%d of %d", f.shown, f.total)
+	for _, counter := range []string{long + " · enter keep · esc clear", long, fmt.Sprintf("%d/%d", f.shown, f.total)} {
+		if line := build(f.query, counter); width <= 1 || ansi.StringWidth(line) <= width {
+			return line
+		}
+	}
+	counter := fmt.Sprintf("%d/%d", f.shown, f.total)
+	room := max(0, width-ansi.StringWidth(build("", counter))-1)
+	return build("…"+ansi.TruncateLeft(f.query, ansi.StringWidth(f.query)-room, ""), counter)
 }
 
 // matches reports whether s passes the status tab and the query.
@@ -221,10 +224,10 @@ func (m Model) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 const normalFooter = "↑/↓ select · enter open · n new · e edit · d delete · m mute · ? more · q quit"
 
-// listFooterFor is the footer of the list: the search keys while the bar is open.
-func listFooterFor(f listFilter) string {
+// footerFor is the footer of the list: the search prompt while the bar is open.
+func footerFor(f listFilter, width int) string {
 	if f.open {
-		return searchFooter
+		return f.prompt(width)
 	}
-	return normalFooter
+	return renderHelp(normalFooter)
 }

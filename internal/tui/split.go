@@ -86,7 +86,7 @@ func renderSplit(snap Snapshot, selected int, now time.Time, loadErr error, widt
 	rightWidth := width - leftWidth - 3
 	events := activity(snap, now)
 	topHeight := max(0, height-2-(2+len(events))-3)
-	list := strings.TrimSuffix(renderList(snap, selected, now, loadErr, 1, filter), "\n"+renderHelp(listFooterFor(filter)))
+	list := strings.TrimSuffix(renderList(snap, selected, now, loadErr, 1, filter), "\n"+footerFor(filter, 1))
 	list = strings.TrimSuffix(list, "\n")
 	if notice != "" {
 		list += "\n" + notice
@@ -140,10 +140,10 @@ fitted:
 		}
 		b.WriteString(event.at.In(now.Location()).Format("15:04") + "  " + glyph + " " + event.monitor + " " + event.text + "\n")
 	}
-	footer := "↑/↓ select · n new · e edit · d delete · m mute · ? more · q quit"
+	footer := renderHelp("↑/↓ select · n new · e edit · d delete · m mute · ? more · q quit")
 	if filter.open {
-		footer = searchFooter
+		footer = filter.prompt(width)
 	}
-	b.WriteString("\n" + renderHelp(footer))
+	b.WriteString("\n" + footer)
 	return b.String()
 }

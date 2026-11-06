@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	wantSearchFooter = "type to search · tab status · enter keep · esc clear"
-	wantNoMatch      = "No monitors match. esc clears."
+	wantHints   = "enter keep · esc clear"
+	wantNoMatch = "No monitors match. esc clears."
 )
 
 var (
@@ -96,12 +96,12 @@ func selectedRow(m Model) string {
 
 func TestSlashOpensBarAndFiltersLive(t *testing.T) {
 	m, _ := press(t, searchModel(100, 30), keySlash)
-	requireText(t, m, "/ █", "all", "down", "failing", "held", "6 of 6 monitors", wantSearchFooter)
+	requireText(t, m, "/ █", "all", "down", "failing", "held", "6 of 6 · "+wantHints)
 	if strings.Contains(view(m), listFooter) {
 		t.Errorf("list footer shown while the bar is open:\n%s", view(m))
 	}
 	m = typeKeys(t, m, "PAY")
-	requireText(t, m, "/ PAY█", "1 of 6 monitors")
+	requireText(t, m, "/ PAY█", "1 of 6 · "+wantHints)
 	if got := rows(m); strings.Join(got, ",") != "payments" {
 		t.Errorf("rows = %v, want only payments (case-insensitive)", got)
 	}
@@ -143,12 +143,12 @@ func TestTabCyclesStatusFilter(t *testing.T) {
 		want string
 		rows string
 	}{
-		{keyTab, "1 of 6 monitors", "payments"},
-		{keyTab, "1 of 6 monitors", "checkout"},
-		{keyTab, "2 of 6 monitors", "billing,status-page"},
-		{keyTab, "6 of 6 monitors", "api,payments,checkout,billing,status-page,postgres"},
-		{keyShiftTab, "2 of 6 monitors", "billing,status-page"},
-		{keyShiftTab, "1 of 6 monitors", "checkout"},
+		{keyTab, "1 of 6 · " + wantHints, "payments"},
+		{keyTab, "1 of 6 · " + wantHints, "checkout"},
+		{keyTab, "2 of 6 · " + wantHints, "billing,status-page"},
+		{keyTab, "6 of 6 · " + wantHints, "api,payments,checkout,billing,status-page,postgres"},
+		{keyShiftTab, "2 of 6 · " + wantHints, "billing,status-page"},
+		{keyShiftTab, "1 of 6 · " + wantHints, "checkout"},
 	} {
 		m, _ = press(t, m, step.key)
 		requireText(t, m, step.want)
@@ -162,9 +162,9 @@ func TestTabCombinesWithQuery(t *testing.T) {
 	m, _ := press(t, searchModel(100, 30), keySlash)
 	m = typeKeys(t, m, "pay")
 	m, _ = press(t, m, keyTab, keyTab)
-	requireText(t, m, "0 of 6 monitors", wantNoMatch)
+	requireText(t, m, "0 of 6 · "+wantHints, wantNoMatch)
 	m, _ = press(t, m, keyShiftTab)
-	requireText(t, m, "1 of 6 monitors")
+	requireText(t, m, "1 of 6 · "+wantHints)
 }
 
 func TestEnterKeepsFilterAndShowsHeader(t *testing.T) {
@@ -176,7 +176,7 @@ func TestEnterKeepsFilterAndShowsHeader(t *testing.T) {
 		t.Errorf("header = %q, want the kept filter after the uptime", lines[0])
 	}
 	out := view(m)
-	if strings.Contains(out, "/ pay█") || strings.Contains(out, wantSearchFooter) || !strings.Contains(out, listFooter) {
+	if strings.Contains(out, "/ pay█") || strings.Contains(out, wantHints) || !strings.Contains(out, listFooter) {
 		t.Errorf("bar not closed or footer not restored:\n%s", out)
 	}
 	if got := rows(m); strings.Join(got, ",") != "payments" {
@@ -184,7 +184,7 @@ func TestEnterKeepsFilterAndShowsHeader(t *testing.T) {
 	}
 	// Reopening shows the current query and tab.
 	m, _ = press(t, m, keySlash)
-	requireText(t, m, "/ pay█", "1 of 6 monitors", wantSearchFooter)
+	requireText(t, m, "/ pay█", "1 of 6 · "+wantHints)
 }
 
 func TestKeptTabShowsInHeader(t *testing.T) {
@@ -232,7 +232,7 @@ func TestEscInDetailGoesBackBeforeClearing(t *testing.T) {
 func TestNoMatchEmptyState(t *testing.T) {
 	m, _ := press(t, searchModel(100, 30), keySlash)
 	m = typeKeys(t, m, "pagos")
-	requireText(t, m, "/ pagos█", "0 of 6 monitors", wantNoMatch)
+	requireText(t, m, "/ pagos█", "0 of 6 · "+wantHints, wantNoMatch)
 	if out := view(m); strings.Contains(out, "No checks configured.") || headerLine(m) != 2 || strings.Index(out, wantNoMatch) < strings.Index(out, "MONITOR") {
 		t.Errorf("want the table header in place and the message under it:\n%s", out)
 	}
@@ -430,7 +430,7 @@ func TestSearchInRemoteSplitAndNarrowLayouts(t *testing.T) {
 			}
 			m, _ = press(t, m, keySlash)
 			m = typeKeys(t, m, "pay")
-			requireText(t, m, "/ pay█", "1 of 6 monitors", wantSearchFooter, "payments")
+			requireText(t, m, "/ pay█", "1 of 6 · "+wantHints, "payments")
 			out := view(m)
 			if strings.Contains(out, "billing") || strings.Contains(out, "checkout") {
 				t.Errorf("hidden monitors shown:\n%s", out)
@@ -561,6 +561,10 @@ func TestFilteringNeverMovesTheList(t *testing.T) {
 			next, _ := m.Update(snapshotMsg{snap: searchSnapshot()})
 			m = sized(next.(Model), tc.w, tc.h)
 			header := headerLine(m)
+			rule := strings.Split(view(m), "\n")[1]
+			title := strings.Split(view(m), "\n")[0]
+			plain := strings.Split(view(m), "\n")
+			plainFooter := plain[len(plain)-2]
 			if header < 0 || selectedLine(m) != header+1 {
 				t.Fatalf("header %d selected %d in:\n%s", header, selectedLine(m), view(m))
 			}
@@ -588,6 +592,16 @@ func TestFilteringNeverMovesTheList(t *testing.T) {
 				if got := headerLine(m); got != header {
 					t.Errorf("%s: table header on line %d, want %d:\n%s", step.name, got, header, view(m))
 				}
+				lines := strings.Split(view(m), "\n")
+				if lines[1] != rule || (!m.filter.active() || m.filter.open) && lines[0] != title {
+					t.Errorf("%s: header or rule row changed:\n%s", step.name, view(m))
+				}
+				// The key help line, just above the database or remote line, is
+				// the prompt while the bar is open and the normal help otherwise.
+				footer := lines[len(lines)-2]
+				if m.filter.open != strings.HasPrefix(footer, "/ ") || (!m.filter.open && footer != plainFooter) {
+					t.Errorf("%s: footer line %q, bar open = %v", step.name, footer, m.filter.open)
+				}
 				if !step.allRows {
 					continue
 				}
@@ -605,16 +619,57 @@ func TestFilteringNeverMovesTheList(t *testing.T) {
 	}
 }
 
-func TestBarReplacesTheRuleRow(t *testing.T) {
+func TestPromptReplacesFooterOnly(t *testing.T) {
 	m := searchModel(100, 30)
 	closed := strings.Split(view(m), "\n")
 	m, _ = press(t, m, keySlash)
 	open := strings.Split(view(m), "\n")
-	if !strings.HasPrefix(closed[1], "└") || !strings.HasPrefix(open[1], "/ █") || len(open) != len(closed) {
-		t.Errorf("bar not in the rule row:\n%s", view(m))
+	last := len(open) - 1
+	if len(open) != len(closed) || open[last] != closed[last] || open[1] != closed[1] || open[0] != closed[0] {
+		t.Errorf("more than the footer changed:\n%s", view(m))
+	}
+	if !strings.HasPrefix(open[last-1], "/ █") || closed[last-1] != normalFooter {
+		t.Errorf("prompt %q, closed footer %q", open[last-1], closed[last-1])
 	}
 	m, _ = press(t, m, keyEnter)
-	if got := strings.Split(view(m), "\n"); !strings.HasPrefix(got[1], "└") {
-		t.Errorf("rule not restored after enter: %q", got[1])
+	if got := strings.Split(view(m), "\n"); got[len(got)-2] != normalFooter || !strings.HasPrefix(got[1], "└") {
+		t.Errorf("footer or rule not as before after enter:\n%s", view(m))
+	}
+}
+
+func TestPromptFitsEightyColumns(t *testing.T) {
+	for _, tc := range []struct {
+		query         string
+		hints, counts string
+	}{
+		{"", "yes", "6 of 6"},
+		{strings.Repeat("a", 11), "yes", "0 of 6"},
+		{strings.Repeat("a", 12), "no", "0 of 6"},
+		{strings.Repeat("a", 36), "no", "0 of 6"},
+		{strings.Repeat("a", 37), "no", "0/6"},
+		{strings.Repeat("a", 39), "no", "0/6"},
+		{strings.Repeat("a", 80), "no", "0/6"},
+	} {
+		for _, destination := range []string{"", "https://up.acme.com"} {
+			m := New(nil, func() time.Time { return now }, Options{Destination: destination})
+			next, _ := m.Update(snapshotMsg{snap: searchSnapshot()})
+			m = sized(next.(Model), 80, 24)
+			m, _ = press(t, m, keySlash)
+			m = typeKeys(t, m, tc.query)
+			lines := strings.Split(view(m), "\n")
+			prompt := lines[len(lines)-2]
+			if w := ansi.StringWidth(prompt); w > 80 || !strings.Contains(prompt, "█") || !strings.Contains(prompt, "failing") {
+				t.Errorf("query %d runes: prompt is %d wide or lost the cursor/tabs: %q", len(tc.query), w, prompt)
+			}
+			if got := strings.Contains(prompt, wantHints); got != (tc.hints == "yes") {
+				t.Errorf("query %d runes: hints shown = %v in %q", len(tc.query), got, prompt)
+			}
+			if tc.counts == "0/6" && !strings.Contains(prompt, "0/6") {
+				t.Errorf("query %d runes: want the short counter in %q", len(tc.query), prompt)
+			}
+			if tc.counts == "0 of 6" && strings.Contains(prompt, "0/6") {
+				t.Errorf("query %d runes: short counter too early in %q", len(tc.query), prompt)
+			}
+		}
 	}
 }

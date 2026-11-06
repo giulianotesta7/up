@@ -118,7 +118,7 @@ The database is resolved in this order: `--db`, `$UP_DB`, `/var/lib/up/up.db` if
 
 ### Keys
 
-`j`/`k` move · `/` search (`tab` status: all, down, failing, held · `enter` keep · `esc` clear) · `enter` details · `n` new · `e` edit · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` SMTP servers · `c` channels (`t` test) · `f` defaults · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
+`j`/`k` move · `/` search (the footer becomes the prompt · `tab` status: all, down, failing, held · `enter` keep · `esc` clear) · `enter` details · `n` new · `e` edit · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` SMTP servers · `c` channels (`t` test) · `f` defaults · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
 
 In forms: `tab`/`shift+tab` switch fields · `←`/`→` choose · `enter` save · `esc` cancel.
 
