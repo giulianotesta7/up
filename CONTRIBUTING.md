@@ -4,7 +4,7 @@ Every change starts with a GitHub issue, including bugs, features, documentation
 
 ## Quick path
 
-1. Find or create an [issue](https://github.com/giulianotesta7/up/issues) describing the motivation and acceptance criteria.
+1. Find or create an [issue](https://github.com/giulianotesta7/up/issues/new/choose) describing the motivation and acceptance criteria. Use the bug report or feature request form; documentation, chores, CI and tooling use a blank issue.
 2. Create a branch from `main` named `type/slug`, for example `fix/check-timeout` or `ci/issue-first`. Supported prefixes are `feat`, `fix`, `docs`, `chore`, `ci`, `refactor` and `test`.
 3. Implement the scoped change with tests and relevant documentation.
 4. Run the applicable checks below and open a PR using the [PR template](.github/PULL_REQUEST_TEMPLATE.md).
@@ -25,7 +25,7 @@ The **PR issue** workflow validates the current PR body when a PR is opened, edi
 - Labels and assignees are not approval gates. An existing closed issue also passes; use the issue that actually governs your work.
 - The check validates linkage, not when implementation began. Opening the issue first remains a contributor responsibility.
 
-For classification, use the existing default `bug`, `enhancement` or `documentation` label where applicable. CI, chores and tooling can remain unlabeled. Labels never delay starting work once the issue exists.
+For classification, the bug report and feature request forms apply the `bug` and `enhancement` labels. For a documentation-only blank issue, add the `documentation` label. CI, chores and tooling can remain unlabeled. Labels never delay starting work once the issue exists.
 
 The workflow uses read-only permissions and runs validator code from the trusted PR base commit, never the PR head. Validator changes therefore take effect after landing on the base branch. The initial PR introducing these files cannot validate itself from a base that does not contain them.
 
