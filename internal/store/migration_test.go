@@ -401,3 +401,36 @@ func TestOpenMigratesV7AddingOnlyTheAttemptLog(t *testing.T) {
 	}
 	ro.Close()
 }
+
+// A v8 migration that fails part way (its last index name is taken) rolls
+// back as a whole: the database stays v7 with its rows and no attempt log.
+func TestOpenV7FailingMidMigrationChangesNothing(t *testing.T) {
+	path := v7Database(t)
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE INDEX delivery_attempts_by_monitor ON results (at_ns)"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	userTables := []string{"smtp_servers", "channels", "checks", "results", "mutes", "alert_state", "defaults", "daemon", "certs", "maintenance_windows", "channel_tests", "secret_key"}
+	before := dumpTables(t, path, userTables...)
+	if s, err := Open(path); err == nil || !strings.Contains(err.Error(), "migrate schema 7 to 8") {
+		if s != nil {
+			s.Close()
+		}
+		t.Fatalf("Open(v7 with a clashing index) error = %v, want the 7 to 8 migration to fail", err)
+	}
+	if got := version(t, path); got != 7 {
+		t.Fatalf("user_version = %d, want 7", got)
+	}
+	for _, name := range tables(t, path) {
+		if name == "delivery_attempts" {
+			t.Fatal("delivery_attempts exists after a failed migration")
+		}
+	}
+	if after := dumpTables(t, path, userTables...); !reflect.DeepEqual(before, after) {
+		t.Fatalf("failed migration changed rows:\nbefore %v\nafter  %v", before, after)
+	}
+}

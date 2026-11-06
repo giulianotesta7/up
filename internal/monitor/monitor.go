@@ -281,10 +281,18 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 		}
 		return m, found
 	}
+	// heldEvent is the alert already logged as held, so the repeated settling
+	// of one owed alert logs it once; certHeld is the same for the certificate
+	// warning threshold. Both start from the delivery log, so a restart or an
+	// edit does not log the same hold again.
+	var heldEvent store.Event
+	var certHeld int
 	if opts.Alerter != nil {
 		streak = initialStreak(ctx, opts, c)
 		m, found := readMute()
 		notified = loadNotified(ctx, opts, c, streak, m, found)
+		heldEvent = loggedHold(ctx, opts, c, streak.Alerting, notified)
+		certHeld = loggedCertHold(ctx, opts, c)
 	}
 	// suppressed is a manual mute or an active maintenance window.
 	suppressed := func() suppression {
@@ -293,11 +301,6 @@ func loop(ctx context.Context, opts Options, c config.Check, last check.Status) 
 		active := found && m.Until.After(now)
 		return suppression{mute: m, found: found, muted: active, active: active || config.EvaluateMaintenance(windows(ctx, opts, c.Name), now).Active}
 	}
-	// heldEvent is the alert already logged as held, so the repeated settling
-	// of one owed alert logs it once; certHeld is the same for the certificate
-	// warning threshold.
-	var heldEvent store.Event
-	var certHeld int
 	// settle sends what the recipients do not know once nothing holds alerts
 	// back, and forgets a mute that has ended with no window still running.
 	settle := func(res check.Result, s suppression) {
@@ -420,12 +423,7 @@ func observeCert(ctx context.Context, opts Options, c config.Check, res check.Re
 		cert.Notified = old.Notified
 	}
 	remaining := cert.NotAfter.Sub(res.At)
-	due := 0
-	for _, threshold := range config.CertWarnDays {
-		if remaining <= time.Duration(threshold)*24*time.Hour && (cert.Notified == 0 || threshold < cert.Notified) && (due == 0 || threshold < due) {
-			due = threshold
-		}
-	}
+	due := dueThreshold(remaining, cert.Notified)
 	if alerter, ok := opts.Alerter.(CertAlerter); ok && due != 0 && c.Channel != "" {
 		if !sup.active {
 			cert.Notified = due
@@ -439,6 +437,18 @@ func observeCert(ctx context.Context, opts Options, c config.Check, res check.Re
 	if err := certs.SaveCert(wctx, cert); err != nil {
 		opts.Logger.Error("saving certificate failed", "check", c.Name, "error", err)
 	}
+}
+
+// dueThreshold is the warning threshold (days) due with remaining time left
+// when the last one sent was notified (0 for none), or 0 when none is due.
+func dueThreshold(remaining time.Duration, notified int) int {
+	due := 0
+	for _, threshold := range config.CertWarnDays {
+		if remaining <= time.Duration(threshold)*24*time.Hour && (notified == 0 || threshold < notified) && (due == 0 || threshold < due) {
+			due = threshold
+		}
+	}
+	return due
 }
 
 // initialStreak rebuilds the alert state from stored results so a restart

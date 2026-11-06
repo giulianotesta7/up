@@ -2,14 +2,18 @@ package alert
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
 	"net/textproto"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/giulianotesta7/up/internal/check"
 	"github.com/giulianotesta7/up/internal/config"
@@ -40,6 +44,58 @@ func (t *trace) know(values ...string) {
 		}
 	}
 }
+
+// hidden is every form of the protected values a reason must not carry:
+// each as it would be stored and base64 encoded with and without padding (an
+// SMTP server may echo an AUTH response), longest first so no form is left
+// half replaced.
+func (t *trace) hidden() []string {
+	var forms []string
+	for _, v := range t.secrets {
+		for _, f := range []string{store.FoldSpace(v), base64.StdEncoding.EncodeToString([]byte(v)), base64.RawStdEncoding.EncodeToString([]byte(v))} {
+			if f != "" && !slices.Contains(forms, f) {
+				forms = append(forms, f)
+			}
+		}
+	}
+	slices.SortStableFunc(forms, func(a, b string) int { return len(b) - len(a) })
+	return forms
+}
+
+// minHiddenAnywhere is the length (in runes) from which a protected value is
+// hidden wherever it appears. A shorter one is hidden only where it stands
+// alone, not touching a letter or digit: hidden inside ordinary words it
+// would garble the reason and, by where the marks fall, give itself away.
+const minHiddenAnywhere = 8
+
+// hide replaces secret in text with a mark.
+func hide(text, secret string) string {
+	if utf8.RuneCountInString(secret) >= minHiddenAnywhere {
+		return strings.ReplaceAll(text, secret, "[hidden]")
+	}
+	var b strings.Builder
+	for {
+		i := strings.Index(text, secret)
+		if i < 0 {
+			break
+		}
+		before, _ := utf8.DecodeLastRuneInString(text[:i])
+		after, _ := utf8.DecodeRuneInString(text[i+len(secret):])
+		if i > 0 && isWordRune(before) || i+len(secret) < len(text) && isWordRune(after) {
+			_, size := utf8.DecodeRuneInString(text[i:])
+			b.WriteString(text[:i+size])
+			text = text[i+size:]
+			continue
+		}
+		b.WriteString(text[:i])
+		b.WriteString("[hidden]")
+		text = text[i+len(secret):]
+	}
+	b.WriteString(text)
+	return b.String()
+}
+
+func isWordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
 
 // name is the event's name in the delivery log.
 func (e event) name() store.Event {
@@ -92,9 +148,12 @@ func failureReason(err error, t *trace) string {
 	default:
 		text = err.Error()
 	}
+	// Scrub the text as it will be stored, so a value echoed across lines
+	// cannot slip past.
+	text = store.FoldSpace(text)
 	if t != nil {
-		for _, s := range t.secrets {
-			text = strings.ReplaceAll(text, s, "[hidden]")
+		for _, s := range t.hidden() {
+			text = hide(text, s)
 		}
 	}
 	text = urlText.ReplaceAllString(text, "[url]")
