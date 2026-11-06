@@ -19,7 +19,7 @@ func TestSMTPDetailNavigationAndEmptyList(t *testing.T) {
 	m, _ = press(t, m, keyEnter, keyS)
 	requireText(t, m, "Mail servers", "No mail servers configured.", mailFooter)
 	m, _ = press(t, m, keyEsc)
-	requireText(t, m, "Status       PENDING", "RECENT OUTAGES")
+	requireText(t, m, "Status       PENDING", "INCIDENTS")
 }
 func TestSMTPPasswordPasteAndSelectorPaste(t *testing.T) {
 	_, m := smtpSetup(t)

@@ -90,6 +90,67 @@ type Model struct {
 	sweeping          bool
 	sweepPosition     int
 	sweepGeneration   uint64
+	// incidentName is the monitor whose incident list incidentCursor and
+	// incidentOffset scroll; another monitor starts at the top.
+	incidentName   string
+	incidentCursor int
+	incidentOffset int
+}
+
+// incidentScroll places the incident window of the selected monitor.
+type incidentScroll struct{ cursor, offset int }
+
+func (m Model) scroll() incidentScroll {
+	if !m.hasSelection() || m.snap.Services[m.selected].Check.Name != m.incidentName {
+		return incidentScroll{}
+	}
+	return incidentScroll{m.incidentCursor, m.incidentOffset}
+}
+
+// detailHeight is the number of lines the full-screen detail may use: the
+// screen without the title, the rule, the footer and a notice.
+func (m Model) detailHeight() int {
+	if m.height <= 0 {
+		return 0
+	}
+	height := m.height - 3
+	if m.notice != "" {
+		height--
+	}
+	return max(1, height)
+}
+
+// incidentRows is how many incidents the selected monitor's detail shows in
+// the current layout.
+func (m Model) incidentRows() int {
+	svc := m.snap.Services[m.selected]
+	if m.splitMode() {
+		shown, selected, filter := m.filtered()
+		_, opts := splitDetail(shown, selected, m.now(), m.err, m.width, m.height, incidentScroll{}, filter)
+		return opts.incidentRows
+	}
+	_, opts := fitDetail(m.snap, svc, m.now(), m.err, m.width, m.detailHeight(), fullDetail())
+	return opts.incidentRows
+}
+
+// scrollIncidents moves the incident cursor by delta rows, or by delta pages.
+func (m Model) scrollIncidents(delta int, page bool) Model {
+	if !m.hasSelection() {
+		return m
+	}
+	svc := m.snap.Services[m.selected]
+	n := len(svc.Incidents)
+	if n == 0 {
+		return m
+	}
+	scroll := m.scroll()
+	rows := max(1, min(n, m.incidentRows()))
+	if page {
+		delta *= rows
+	}
+	m.incidentName = svc.Check.Name
+	m.incidentCursor, m.incidentOffset = incidentWindow(n, rows, scroll.cursor+delta, scroll.offset)
+	return m
 }
 
 // Options supplies display metadata for the open store.
@@ -501,16 +562,31 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "up", "k":
-		if !m.detail {
+		if m.detail {
+			m = m.scrollIncidents(-1, false)
+		} else {
 			m = m.move(-1)
+			m.incidentName = ""
 		}
 	case "down", "j":
-		if !m.detail {
+		if m.detail {
+			m = m.scrollIncidents(1, false)
+		} else {
 			m = m.move(1)
+			m.incidentName = ""
+		}
+	case "pgup", "pgdown":
+		if m.detail || m.splitMode() {
+			delta := 1
+			if msg.String() == "pgup" {
+				delta = -1
+			}
+			m = m.scrollIncidents(delta, true)
 		}
 	case "enter":
 		if m.hasSelection() && !m.splitMode() {
 			m.detail = true
+			m.incidentName = ""
 		}
 	case "esc", "backspace":
 		if msg.String() == "esc" && !m.detail {
@@ -563,9 +639,12 @@ func (m Model) View() tea.View {
 	content := renderList(shown, shownSelected, now, m.err, m.width, filter)
 	split := m.splitMode()
 	if split {
-		content = renderSplit(shown, shownSelected, now, m.err, m.width, m.height, m.noticeLine(), filter)
+		content = renderSplit(shown, shownSelected, now, m.err, m.width, m.height, m.noticeLine(), m.scroll(), filter)
 	} else if m.detail && m.hasSelection() {
-		content = renderDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width)
+		opts := fullDetail()
+		scroll := m.scroll()
+		opts.cursor, opts.offset = scroll.cursor, scroll.offset
+		content, _ = fitDetail(m.snap, m.snap.Services[m.selected], now, m.err, m.width, m.detailHeight(), opts)
 	}
 	if m.help && !helpPopupFits(m.width, m.height) {
 		content = renderKeys(m.destination != "")

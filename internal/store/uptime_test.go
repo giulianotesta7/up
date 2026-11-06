@@ -162,3 +162,68 @@ func TestUptimeWindowManyRows(t *testing.T) {
 		t.Fatalf("%v %v %d %v", up, observed, incidents, err)
 	}
 }
+
+// uptimeReference adds the spans of newest-first results the slow way: each
+// result holds until its successor (or until), counted from since.
+func uptimeReference(results []check.Result, since, until time.Time) (up, observed time.Duration) {
+	if !until.After(since) {
+		return 0, 0
+	}
+	end := until
+	for _, r := range results {
+		if r.At.After(until) {
+			continue
+		}
+		if !r.At.Before(since) {
+			d := end.Sub(r.At)
+			observed += d
+			if r.Status == check.StatusUp {
+				up += d
+			}
+			end = r.At
+			continue
+		}
+		// The seed: the newest result before since.
+		d := end.Sub(since)
+		observed += d
+		if r.Status == check.StatusUp {
+			up += d
+		}
+		break
+	}
+	return up, observed
+}
+
+func TestUptimeMatchesReference(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	// Equal timestamps straddle both boundaries; exercise every status order.
+	times := []int{1, 1, 5, 10, 10, 15, 20, 21}
+	since, until := t0.Add(10*time.Minute), t0.Add(20*time.Minute)
+	for mask := 0; mask < 1<<len(times); mask++ {
+		name := fmt.Sprintf("sequence-%d", mask)
+		for i, minute := range times {
+			status := check.StatusUp
+			if mask&(1<<i) != 0 {
+				status = check.StatusDown
+			}
+			if err := s.Record(ctx, result(name, minute, status)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, w := range [][2]time.Time{{since, until}, {t0, until}, {since, t0.Add(30 * time.Minute)}, {until, since}} {
+			history, err := s.Recent(ctx, name, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantUp, wantObserved := uptimeReference(history, w[0], w[1])
+			up, observed, err := s.Uptime(ctx, name, w[0], w[1])
+			if err != nil || up != wantUp || observed != wantObserved {
+				t.Fatalf("mask %08b, %v: got %v, %v, %v; want %v, %v", mask, w, up, observed, err, wantUp, wantObserved)
+			}
+		}
+	}
+	if up, observed, err := s.Uptime(ctx, "missing", since, until); err != nil || up != 0 || observed != 0 {
+		t.Fatalf("missing monitor: got %v, %v, %v", up, observed, err)
+	}
+}

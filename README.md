@@ -122,6 +122,8 @@ The database is resolved in this order: `--db`, `$UP_DB`, `/var/lib/up/up.db` if
 
 `y` opens the new monitor form filled from the selected monitor, named `<name> copy`. Headers and body stay sealed (`set`, with keep, replace or clear), and history, mute and maintenance windows are not copied. Nothing is saved until `enter`.
 
+The detail view lists the monitor's incidents of the last 30 days, newest first: start, duration (or `ongoing`), the reason of the first failed check and what became of its alerts (`✓ sent`, `✗ failed`, `◷ held`, `— none`; when channels disagree, the worst outcome and that channel). Its header shows the incident count, total downtime and uptime for those 30 days. Below, Recent alerts shows the monitor's latest deliveries. The incident list scrolls in place: `↑`/`↓` in the detail, `pgup`/`pgdn` there and in the split layout (where `↑`/`↓` select monitors). On short terminals the chart shrinks and the config and certificate sections are left out so the list stays visible.
+
 In forms: `tab`/`shift+tab` switch fields · `←`/`→` choose · `enter` save · `esc` cancel.
 
 ### Monitor fields

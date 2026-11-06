@@ -77,47 +77,47 @@ func truncateLines(text string, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderSplit(snap Snapshot, selected int, now time.Time, loadErr error, width, height int, notice string, filters ...listFilter) string {
+// splitGeometry is the split layout's list width, detail pane width and the
+// height of the list and detail above the activity feed.
+func splitGeometry(snap Snapshot, selected int, now time.Time, width, height int, filter listFilter) (leftWidth, rightWidth, topHeight int) {
+	leftWidth = max(splitListWidth(snap, selected, now), filter.listWidth)
+	return leftWidth, width - leftWidth - 3, max(0, height-2-(2+len(activity(snap, now)))-3)
+}
+
+// splitDetail is the detail pane of the selected service, fitted to the pane,
+// without its key help, and the options used.
+func splitDetail(snap Snapshot, selected int, now time.Time, loadErr error, width, height int, scroll incidentScroll, filter listFilter) ([]string, detailOptions) {
+	if selected < 0 || selected >= len(snap.Services) {
+		return nil, detailOptions{}
+	}
+	_, rightWidth, topHeight := splitGeometry(snap, selected, now, width, height, filter)
+	svc := snap.Services[selected]
+	opts := fullDetail()
+	opts.compact, opts.cursor, opts.offset = true, scroll.cursor, scroll.offset
+	// The pane leaves out the detail's key help.
+	for {
+		detail := renderDetailWithOptions(snap, svc, now, loadErr, rightWidth, opts)
+		lines := strings.Split(strings.TrimRight(strings.TrimSuffix(detail, renderHelp(detailHelp(svc, opts))), "\n"), "\n")
+		if len(lines) <= topHeight || !opts.shrink() {
+			return lines, opts
+		}
+	}
+}
+
+func renderSplit(snap Snapshot, selected int, now time.Time, loadErr error, width, height int, notice string, scroll incidentScroll, filters ...listFilter) string {
 	var filter listFilter
 	if len(filters) > 0 {
 		filter = filters[0]
 	}
-	leftWidth := max(splitListWidth(snap, selected, now), filter.listWidth)
-	rightWidth := width - leftWidth - 3
+	leftWidth, rightWidth, topHeight := splitGeometry(snap, selected, now, width, height, filter)
 	events := activity(snap, now)
-	topHeight := max(0, height-2-(2+len(events))-3)
 	list := strings.TrimSuffix(renderList(snap, selected, now, loadErr, 1, filter), "\n"+footerFor(filter, 1))
 	list = strings.TrimSuffix(list, "\n")
 	if notice != "" {
 		list += "\n" + notice
 	}
 	left := strings.Split(list, "\n")
-	var right []string
-	if selected >= 0 && selected < len(snap.Services) {
-		opts := detailOptions{compact: true, config: true, cert: true, outages: true, chartRows: 5}
-		for {
-			detail := renderDetailWithOptions(snap, snap.Services[selected], now, loadErr, rightWidth, opts)
-			detail = strings.TrimSuffix(detail, "\n"+renderHelp("esc back · e edit · d delete · m mute · ? more · q quit"))
-			right = strings.Split(strings.TrimSuffix(detail, "\n"), "\n")
-			if len(right) <= topHeight {
-				break
-			}
-			switch {
-			case opts.config:
-				opts.config = false
-			case opts.cert:
-				opts.cert = false
-			case opts.outages:
-				opts.outages = false
-			case opts.chartRows > 2:
-				opts.chartRows--
-			default:
-				goto fitted
-			}
-		}
-	}
-
-fitted:
+	right, opts := splitDetail(snap, selected, now, loadErr, width, height, scroll, filter)
 	var b strings.Builder
 	for i := 0; i < topHeight; i++ {
 		l, r := "", ""
@@ -140,7 +140,11 @@ fitted:
 		}
 		b.WriteString(event.at.In(now.Location()).Format("15:04") + "  " + glyph + " " + event.monitor + " " + event.text + "\n")
 	}
-	footer := renderHelp("↑/↓ select · n new · e edit · d delete · m mute · ? more · q quit")
+	help := "↑/↓ select · n new · e edit · d delete · m mute · ? more · q quit"
+	if selected >= 0 && selected < len(snap.Services) && opts.incidents && len(snap.Services[selected].Incidents) > opts.incidentRows {
+		help = "↑/↓ select · pgup/dn incidents · n new · e edit · d delete · m mute · ? more · q quit"
+	}
+	footer := renderHelp(help)
 	if filter.open {
 		footer = filter.prompt(width)
 	}

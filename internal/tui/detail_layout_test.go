@@ -15,7 +15,8 @@ func TestDetailSectionsAreSpacedAndIndented(t *testing.T) {
 		"  Down since   Oct 25 03:44:00 (1m ago)",
 		"\n\nCONFIG\n  Interval     1m0s\n  Timeout      10s\n  Expected     204\n  Channel      none\n",
 		"\n\nLATENCY\n",
-		"\n\nRECENT OUTAGES\n  Oct 25 03:44:00 → ongoing",
+		"\n\nINCIDENTS  30d · 2 incidents · 29m down · 17.1% uptime\n",
+		"\n▌ Oct 25 03:44  ongoing 1m",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("detail missing %q:\n%s", want, out)
