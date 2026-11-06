@@ -129,9 +129,9 @@ func hostOnly(host string) string {
 	return host
 }
 
-// pingBase is the ping URL without its token: the daemon's listener, or only
-// the path when it has none.
-func pingBase(snap Snapshot, host string) string {
+// listenerPingBase is the ping URL without its token from the daemon's
+// listener, or only the path when it has none.
+func listenerPingBase(snap Snapshot, host string) string {
 	return snap.API.BaseURL(host) + config.HeartbeatPath("")
 }
 
@@ -139,7 +139,7 @@ func pingBase(snap Snapshot, host string) string {
 // ping URL, plain on its own line so a mouse selection copies only it. When
 // the terminal is too narrow for the line, the base and the token get a line
 // each, neither of them broken.
-func renderPingURLScreen(f monitorForm, snap Snapshot, host string, width int) string {
+func renderPingURLScreen(f monitorForm, snap Snapshot, base string, width int) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Ping URL · "+f.values[0]) + "\n")
 	if f.replaced {
@@ -147,7 +147,6 @@ func renderPingURLScreen(f monitorForm, snap Snapshot, host string, width int) s
 	} else {
 		b.WriteString("Saved. The job sends a POST to this URL when it ends:\n\n")
 	}
-	base := pingBase(snap, host)
 	if full := "URL    " + base + f.pingToken; width <= 0 || len(full)+6 <= width {
 		b.WriteString(full + "\n")
 	} else {

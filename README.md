@@ -173,7 +173,7 @@ States:
 
 Each missed deadline counts as one failed check and each ping as one success, so **alert after** and **recover after** count missed periods and pings. Channels, muting, maintenance windows, history, incidents and the delivery log work as for any monitor. If the daemon was stopped across several deadlines, it records the first and the latest when it starts again.
 
-The token in the URL only records pings for that monitor: it grants no API or configuration access, and the API access token never goes in a crontab. The TUI builds the URL from `--api-listen` (scheme `https` with `--tls-cert`; an address without a host uses this machine's name, or the server's with `--remote`), so behind a reverse proxy replace the host with the public one. The token is stored encrypted with the server key, like webhook URLs, so a local `up tui` can only show it when it can read `<db>.key` (run it as the user that runs `up serve`, or use `--remote`); otherwise `v` explains this in a box.
+The token in the URL only records pings for that monitor: it grants no API or configuration access, and the API access token never goes in a crontab. A local `up tui` builds the URL from `--api-listen` (scheme `https` with `--tls-cert`; an address without a host uses this machine's name), so behind a reverse proxy replace the host with the public one; with `--remote` it uses the server URL given to `up login`, path included, since this machine already reaches the API there. The token is stored encrypted with the server key, like webhook URLs, so a local `up tui` can only show it when it can read `<db>.key` (run it as the user that runs `up serve`, or use `--remote`); otherwise `v` explains this in a box.
 
 In the TUI:
 

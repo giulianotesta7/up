@@ -684,7 +684,7 @@ func (m Model) View() tea.View {
 		case m.pingError != nil:
 			screen = renderPingError(*m.pingError, m.width)
 		case m.form != nil && m.form.pingToken != "":
-			screen = renderPingURLScreen(*m.form, m.snap, hostOnly(m.hostname), m.width)
+			screen = renderPingURLScreen(*m.form, m.snap, m.pingBase(), m.width)
 		case m.defaults != nil:
 			screen = renderDefaults(*m.defaults, m.snap, now, m.err)
 			minimum = defaultsMinWidth(*m.defaults, m.snap, now, m.err)

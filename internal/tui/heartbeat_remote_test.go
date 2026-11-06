@@ -84,14 +84,23 @@ func serverToken(t *testing.T, s *store.Store, path, name string) string {
 	return token
 }
 
+// TestRemoteHeartbeatURLRevealAndNewToken logs in through a proxy URL while
+// the daemon listens on :8080: every ping URL is built from the login URL,
+// with its path prefix, never the daemon's port.
 func TestRemoteHeartbeatURLRevealAndNewToken(t *testing.T) {
+	for _, login := range []string{"https://up.example.com", "https://example.com/up"} {
+		t.Run(login, func(t *testing.T) { remoteHeartbeatFlow(t, login) })
+	}
+}
+
+func remoteHeartbeatFlow(t *testing.T, login string) {
 	s, path, address := heartbeatServer(t)
-	u, _ := url.Parse(address)
+	u, _ := url.Parse(login)
 	clock := time.Date(2026, 10, 25, 3, 45, 0, 0, time.UTC)
-	m := tui.New(client.New(address, remoteToken), func() time.Time { return clock }, tui.Options{Destination: address, Hostname: u.Host})
-	m, _ = remoteUpdate(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m := tui.New(client.New(address, remoteToken), func() time.Time { return clock }, tui.Options{Destination: login, Hostname: u.Host})
+	m, _ = remoteUpdate(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	m, _ = remoteUpdate(t, m, m.Init()())
-	base := "http://" + u.Hostname() + ":8080/api/v1/heartbeat/"
+	base := login + "/api/v1/heartbeat/"
 
 	right, tab := tea.KeyPressMsg{Code: tea.KeyRight}, tea.KeyPressMsg{Code: tea.KeyTab}
 	m, _ = remotePress(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"}, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, right, right, tab,
@@ -128,10 +137,20 @@ func TestRemoteHeartbeatURLRevealAndNewToken(t *testing.T) {
 	m, cmd = remotePress(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
 	m = settle(t, m, cmd)
 	fresh := serverToken(t, s, path, "nightly")
-	if fresh == token || !strings.Contains(remoteScreen(m), "Saved. The old URL no longer works.") || !strings.Contains(remoteScreen(m), fresh) {
+	if fresh == token || !strings.Contains(remoteScreen(m), "Saved. The old URL no longer works.") || !strings.Contains(remoteScreen(m), "URL    "+base+fresh) {
 		t.Fatalf("new token %q (old %q):\n%s", fresh, token, remoteScreen(m))
 	}
 	if found, _ := s.PingHeartbeat(context.Background(), token, false, clock); found {
 		t.Fatal("the old token still works")
+	}
+
+	small := tui.New(client.New(address, remoteToken), func() time.Time { return clock }, tui.Options{Destination: login, Hostname: u.Host})
+	small, _ = remoteUpdate(t, small, tea.WindowSizeMsg{Width: 80, Height: 24})
+	small, _ = remoteUpdate(t, small, small.Init()())
+	small, _ = remotePress(t, small, tea.KeyPressMsg{Code: tea.KeyEnter})
+	small, cmd = remotePress(t, small, tea.KeyPressMsg{Code: 'v', Text: "v"})
+	small = settle(t, small, cmd)
+	if !strings.Contains(remoteScreen(small), "URL          "+base+"\n") || !strings.Contains(remoteScreen(small), "Token        "+fresh) || strings.Contains(remoteScreen(small), ":8080") {
+		t.Fatalf("80x24 reveal:\n%s", remoteScreen(small))
 	}
 }

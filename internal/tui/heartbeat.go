@@ -28,15 +28,25 @@ func (m Model) heartbeatTokens() HeartbeatTokens {
 	return nil
 }
 
-// pingView is what the detail needs to show a heartbeat's ping URL: the host
-// that stands in for an unspecified listener address and, after v, the token.
+// pingView is what the detail needs to show a heartbeat's ping URL: its base
+// without the token and, after v, the token.
 type pingView struct {
-	host, token string
+	base, token string
+}
+
+// pingBase is the ping URL without its token. Remotely it is the login URL,
+// which this machine already reaches the API at (behind a proxy too);
+// locally it is the daemon's listener.
+func (m Model) pingBase() string {
+	if m.destination != "" {
+		return strings.TrimRight(m.destination, "/") + config.HeartbeatPath("")
+	}
+	return listenerPingBase(m.snap, hostOnly(m.hostname))
 }
 
 // pingView is the ping URL state of the selected monitor.
 func (m Model) pingView() pingView {
-	p := pingView{host: hostOnly(m.hostname)}
+	p := pingView{base: m.pingBase()}
 	if m.hasSelection() && m.snap.Services[m.selected].Check.Name == m.revealName {
 		p.token = m.revealToken
 	}
@@ -247,7 +257,7 @@ func renderPingURL(b *strings.Builder, field func(label, value string), snap Sna
 		hint = warnStyle.Render("needs --api-listen")
 	}
 	b.WriteString(blank + headerStyle.Render("PING URL") + "  " + hint + "\n")
-	base, token := pingBase(snap, p.host), pingMask
+	base, token := p.base, pingMask
 	if p.token != "" {
 		token = p.token
 	}
