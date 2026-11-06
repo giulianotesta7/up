@@ -41,6 +41,10 @@ func (n *Notifier) deliverEmail(ctx context.Context, ch config.Channel, e event)
 		}
 	}
 	e.trace.know(password)
+	if password != "" {
+		// The AUTH PLAIN response, which a server may echo encoded.
+		e.trace.know("\x00" + server.Username + "\x00" + password)
+	}
 	at := r.At.In(n.opts.Location).Format("Jan 02 15:04:05 (MST)")
 	msg := Message{From: server.Sender, To: ch.Recipients, Date: r.At}
 	if e.test {

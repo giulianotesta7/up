@@ -63,6 +63,73 @@ func recordHeld(ctx context.Context, opts Options, c config.Check, event store.E
 	}
 }
 
+// AttemptReader is the optional API that reads the delivery log back, so a
+// loop that starts again knows which owed alert it already logged as held.
+// *store.Store implements it.
+type AttemptReader interface {
+	LatestAttempt(context.Context, string, string, ...store.Event) (store.Attempt, bool, error)
+}
+
+// latestHeld is the newest logged attempt of the check's channel for events
+// when it is a hold. A read error is logged and counts as none.
+func latestHeld(ctx context.Context, opts Options, c config.Check, events ...store.Event) (store.Attempt, bool) {
+	reader, ok := opts.Store.(AttemptReader)
+	if !ok || c.Channel == "" {
+		return store.Attempt{}, false
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	a, found, err := reader.LatestAttempt(readCtx, c.Name, c.Channel, events...)
+	if err != nil {
+		opts.Logger.Error("reading delivery log failed", "check", c.Name, "error", err)
+		return store.Attempt{}, false
+	}
+	return a, found && a.Outcome == store.OutcomeHeld
+}
+
+// loggedHold is the alert owed when a loop starts that the delivery log
+// already shows as held, or "" when none is. Only the alert still owed
+// counts: a hold that ended without a delivery (the monitor recovered under
+// it) left history that clears the owed alert, so a later outage is a new one.
+func loggedHold(ctx context.Context, opts Options, c config.Check, alerting, notified bool) store.Event {
+	if alerting == notified {
+		return ""
+	}
+	owed := store.EventRecovered
+	if alerting {
+		owed = store.EventDown
+	}
+	if a, held := latestHeld(ctx, opts, c, store.EventDown, store.EventRecovered); held && a.Event == owed {
+		return owed
+	}
+	return ""
+}
+
+// loggedCertHold is the certificate threshold the delivery log already shows
+// as held, or 0: the threshold that was due when the newest certificate
+// attempt was held, against the stored certificate.
+func loggedCertHold(ctx context.Context, opts Options, c config.Check) int {
+	certs, ok := opts.Store.(CertStore)
+	if !ok {
+		return 0
+	}
+	a, held := latestHeld(ctx, opts, c, store.EventCert)
+	if !held {
+		return 0
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	cert, found, err := certs.Cert(readCtx, c.Name)
+	if err != nil {
+		opts.Logger.Error("reading certificate failed", "check", c.Name, "error", err)
+		return 0
+	}
+	if !found {
+		return 0
+	}
+	return dueThreshold(cert.NotAfter.Sub(a.At), cert.Notified)
+}
+
 // windows reads the check's windows fresh, so edits and deletions apply on
 // the next evaluation. A read error is logged and counts as no windows.
 func windows(ctx context.Context, opts Options, name string) []config.MaintenanceWindow {

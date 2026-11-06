@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -60,13 +62,20 @@ type AttemptFilter struct {
 	Limit   int
 }
 
-func cleanReason(text string) string {
-	text = strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+// FoldSpace turns control characters into spaces and folds every run of
+// white space into one space, trimmed, the way a stored reason is written.
+// Whoever scrubs a reason of secrets scrubs its folded form.
+func FoldSpace(text string) string {
+	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			return ' '
 		}
 		return r
 	}, text)), " ")
+}
+
+func cleanReason(text string) string {
+	text = FoldSpace(text)
 	if r := []rune(text); len(r) > MaxAttemptReason {
 		text = string(r[:MaxAttemptReason])
 	}
@@ -154,6 +163,27 @@ SELECT `+attemptColumns+` FROM delivery_attempts
 		return nil, fmt.Errorf("store: attempts: %w", err)
 	}
 	return out, nil
+}
+
+// LatestAttempt returns the newest attempt of monitor through channel for any
+// of events, and false when there is none.
+func (s *Store) LatestAttempt(ctx context.Context, monitor, channel string, events ...Event) (Attempt, bool, error) {
+	args := []any{monitor, channel}
+	marks := make([]string, len(events))
+	for i, e := range events {
+		marks[i], args = "?", append(args, string(e))
+	}
+	a, err := scanAttempt(s.db.QueryRowContext(ctx, `
+SELECT `+attemptColumns+` FROM delivery_attempts
+ WHERE monitor = ? AND channel = ? AND event IN (`+strings.Join(marks, ", ")+`)
+ ORDER BY at_ns DESC, id DESC LIMIT 1`, args...))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Attempt{}, false, nil
+	}
+	if err != nil {
+		return Attempt{}, false, fmt.Errorf("store: latest attempt: %w", err)
+	}
+	return a, true, nil
 }
 
 // LastAttempts returns the newest attempt of each channel that has one,

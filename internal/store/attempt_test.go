@@ -82,6 +82,11 @@ func TestAttemptsLimitDefaultsAndCaps(t *testing.T) {
 	if got, _ := s.Attempts(ctx, store.AttemptFilter{}); len(got) != store.DefaultAttemptLimit {
 		t.Fatalf("default limit returned %d, want %d", len(got), store.DefaultAttemptLimit)
 	}
+	for limit, want := range map[int]int{0: 50, -1: 50, 501: 500, 500: 500} {
+		if got, err := s.Attempts(ctx, store.AttemptFilter{Limit: limit}); err != nil || len(got) != want {
+			t.Fatalf("limit %d returned %d, %v, want %d", limit, len(got), err, want)
+		}
+	}
 	if got, _ := s.Attempts(ctx, store.AttemptFilter{Limit: 100000}); len(got) != store.MaxAttemptLimit {
 		t.Fatalf("huge limit returned %d, want %d", len(got), store.MaxAttemptLimit)
 	}
@@ -216,5 +221,27 @@ func TestAttemptsSinceKeepsNewerAttempts(t *testing.T) {
 	}
 	if got, err := s.Attempts(ctx, store.AttemptFilter{Monitor: "api"}); err != nil || !reflect.DeepEqual(got, []store.Attempt{a4, a2, a1}) {
 		t.Fatalf("Attempts(api) = %+v, %v", got, err)
+	}
+}
+
+func TestLatestAttemptIsNewestOfMonitorChannelAndEvents(t *testing.T) {
+	s, _ := attemptStore(t)
+	if _, found, err := s.LatestAttempt(ctx, "api", "ops", store.EventDown); err != nil || found {
+		t.Fatalf("LatestAttempt() empty = %v, %v", found, err)
+	}
+	held := attempt("api", "ops", 1, store.OutcomeHeld)
+	cert := attempt("api", "ops", 2, store.OutcomeHeld)
+	cert.Event = store.EventCert
+	mustRecord(t, s, held, cert, attempt("web", "ops", 3, store.OutcomeSent), attempt("api", "pager", 4, store.OutcomeSent))
+	if got, found, err := s.LatestAttempt(ctx, "api", "ops", store.EventDown, store.EventRecovered); err != nil || !found || !reflect.DeepEqual(got, held) {
+		t.Fatalf("LatestAttempt(down, recovered) = %+v, %v, %v, want %+v", got, found, err, held)
+	}
+	if got, found, err := s.LatestAttempt(ctx, "api", "ops", store.EventCert); err != nil || !found || !reflect.DeepEqual(got, cert) {
+		t.Fatalf("LatestAttempt(cert) = %+v, %v, %v, want %+v", got, found, err, cert)
+	}
+	sent := attempt("api", "ops", 5, store.OutcomeSent)
+	mustRecord(t, s, sent)
+	if got, _, _ := s.LatestAttempt(ctx, "api", "ops", store.EventDown); !reflect.DeepEqual(got, sent) {
+		t.Fatalf("LatestAttempt(down) = %+v, want the newer sent attempt", got)
 	}
 }

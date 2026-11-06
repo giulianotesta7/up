@@ -143,3 +143,131 @@ func TestCertWarningWithoutChannelOrSuppressionRecordsNothingHere(t *testing.T) 
 	// Sent attempts are the notifier's to record, not the monitor's.
 	wantBriefs(t, r.s)
 }
+
+// restart stops the daemon and starts it again on the same database.
+func (r *maintenanceRig) restart() {
+	r.t.Helper()
+	r.stop()
+	r.start()
+}
+
+// editDefinition changes the check's timeout, which restarts its loop.
+func (r *maintenanceRig) editDefinition() {
+	r.t.Helper()
+	c, err := r.s.Checks(context.Background())
+	if err != nil || len(c) != 1 {
+		r.t.Fatalf("checks = %v, %v", c, err)
+	}
+	c[0].Timeout += time.Millisecond
+	before := r.runner.entered.Load()
+	if err := r.s.UpdateCheck(context.Background(), c[0]); err != nil {
+		r.t.Fatal(err)
+	}
+	waitFor(r.t, "the restarted loop", func() bool { return r.runner.entered.Load() > before })
+}
+
+// sent records a sent attempt as the notifier does after a delivery.
+func (r *maintenanceRig) sent(event store.Event) {
+	r.t.Helper()
+	if err := r.s.RecordAttempt(context.Background(), store.Attempt{At: r.clock.Now(), Monitor: "api", Channel: "mail", Event: event, Outcome: store.OutcomeSent}); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
+func TestMuteHoldIsRecordedOnceAcrossDaemonRestarts(t *testing.T) {
+	s := openStore(t)
+	alertingCheck(t, s, 1, 1)
+	a := &recordingAlerter{}
+	D := check.StatusDown
+	if err := s.SetMute(context.Background(), "api", time.Now().Add(time.Hour), false); err != nil {
+		t.Fatal(err)
+	}
+	feed(t, s, a, 0, D)
+	feed(t, s, a, 1, D)
+	feed(t, s, a, 2, D)
+	if got := a.snapshot(); len(got) != 0 {
+		t.Fatalf("muted alerts: %v", got)
+	}
+	wantBriefs(t, s, brief{store.EventDown, store.OutcomeHeld, "muted"})
+}
+
+func TestHeldDownIsRecordedOnceAcrossRestartAndEdit(t *testing.T) {
+	r := newRig(t)
+	r.addWindow(10, 2)
+	r.start()
+	r.feed(10, 30, down)
+	r.restart()
+	r.feed(10, 40, down)
+	r.editDefinition()
+	r.feed(10, 50, down)
+	r.want()
+	held := brief{store.EventDown, store.OutcomeHeld, "maintenance window"}
+	wantBriefs(t, r.s, held)
+
+	// The window ends: the down alert goes out and the notifier logs it.
+	r.feed(12, 30, down)
+	r.want(down)
+	r.sent(store.EventDown)
+	r.feed(12, 40, up)
+	r.want(down, up)
+	r.sent(store.EventRecovered)
+	sentDown, sentUp := brief{store.EventDown, store.OutcomeSent, ""}, brief{store.EventRecovered, store.OutcomeSent, ""}
+
+	// A new outage in the next day's window is a new owed alert, even after a
+	// restart, and is still logged once.
+	r.restart()
+	r.feedAt(time.Date(2030, 1, 8, 10, 30, 0, 0, time.UTC), down)
+	r.restart()
+	r.feedAt(time.Date(2030, 1, 8, 10, 40, 0, 0, time.UTC), down)
+	wantBriefs(t, r.s, held, sentDown, sentUp, held)
+}
+
+// A hold that ended without a delivery (the monitor recovered during the
+// window) does not hide the next outage's hold after a restart.
+func TestHoldEndedByRecoveryDoesNotHideTheNextHoldAfterRestart(t *testing.T) {
+	r := newRig(t)
+	r.addWindow(10, 2)
+	r.start()
+	r.feed(10, 30, down)
+	r.feed(10, 40, up)
+	r.restart()
+	r.feed(10, 50, down)
+	r.want()
+	held := brief{store.EventDown, store.OutcomeHeld, "maintenance window"}
+	wantBriefs(t, r.s, held, held)
+}
+
+func TestHeldCertWarningIsRecordedOncePerThresholdAcrossRestartAndEdit(t *testing.T) {
+	r := newRig(t)
+	r.addWindow(10, 2)
+	first := time.Date(2030, 1, 7, 10, 30, 0, 0, time.UTC)
+	r.runner.cert = &check.CertInfo{Host: "host", Issuer: "ca", Serial: "a", NotAfter: first.Add(10 * 24 * time.Hour)}
+	r.start()
+	r.feed(10, 30, up)
+	r.restart()
+	r.feed(10, 40, up)
+	r.editDefinition()
+	r.feed(10, 50, up)
+	if got := r.alert.got(); len(got) != 0 {
+		t.Fatalf("cert warnings during the window: %v", got)
+	}
+	held := brief{store.EventCert, store.OutcomeHeld, "maintenance window"}
+	wantBriefs(t, r.s, held)
+
+	// The window ends: the 14-day warning goes out and the notifier logs it.
+	r.feed(12, 30, up)
+	if got := r.alert.got(); !reflect.DeepEqual(got, []int{14}) {
+		t.Fatalf("cert warnings after the window: %v", got)
+	}
+	r.sent(store.EventCert)
+
+	// The 7-day threshold falls due in a later window: a new hold, logged once.
+	r.restart()
+	r.feedAt(first.Add(4*24*time.Hour), up)
+	r.restart()
+	r.feedAt(first.Add(4*24*time.Hour+10*time.Minute), up)
+	wantBriefs(t, r.s, held, brief{store.EventCert, store.OutcomeSent, ""}, held)
+	if got := r.alert.got(); !reflect.DeepEqual(got, []int{14}) {
+		t.Fatalf("cert warnings: %v", got)
+	}
+}
