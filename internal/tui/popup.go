@@ -60,7 +60,7 @@ func renderHelpPopup(split bool, remote ...bool) string {
 		return left + strings.Repeat(" ", max(0, 14-ansi.StringWidth(description))) + accentStyle.Render(key2) + strings.Repeat(" ", max(0, 4-ansi.StringWidth(key2))) + helpStyle.Render(description2)
 	}
 	monitors := [][2]string{{"↑/↓ k/j", "select"}, {"enter", "details"}, {"n", "new monitor"}, {"e", "edit"}, {"y", "duplicate"}, {"d", "delete"}, {"/", "search"}}
-	alerting := [][2]string{{"m", "mute selected"}, {"u", "unmute"}, {"s", "SMTP servers"}, {"c", "channels"}, {"w", "maintenance"}, {"f", "defaults"}}
+	alerting := [][2]string{{"m", "mute selected"}, {"u", "unmute"}, {"s", "mail servers"}, {"c", "channels"}, {"w", "maintenance"}, {"f", "defaults"}}
 	if split {
 		// enter opens nothing in the split layout; the page keys scroll the
 		// selected monitor's incidents instead.

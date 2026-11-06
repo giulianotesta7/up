@@ -68,12 +68,15 @@ type Model struct {
 	defaults          *defaultsPopup
 	notice            string
 	noticeOK          bool // notice is a confirmation, not a warning
-	smtpScreen        bool
+	notify            bool // the notifications view is open, on notifyTab
+	notifyTab         int
+	deliveries        deliveryFilter
+	deliverySelected  int
+	deliveryTop       int
 	smtpSelected      int
 	smtpSelectName    string
 	smtpForm          *smtpForm
 	smtpDelete        *deletePrompt
-	channelScreen     bool
 	channelSelected   int
 	channelSelectName string
 	channelForm       *channelForm
@@ -437,7 +440,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case channelTestMsg:
 		return m.channelTestResult(msg)
 	case tea.PasteMsg:
-		if m.filter.open && m.form == nil && m.deletion == nil && m.mute == nil && !m.help && !m.channelScreen && !m.smtpScreen {
+		if m.notify && m.deliveries.open && m.smtpForm == nil && m.channelForm == nil {
+			return m.pasteDeliverySearch(msg.Content), nil
+		}
+		if m.filter.open && m.form == nil && m.deletion == nil && m.mute == nil && !m.help && !m.notify {
 			m.filter.query += strings.NewReplacer("\r", "", "\n", " ").Replace(msg.Content)
 			return m.reselect(), nil
 		}
@@ -474,11 +480,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
-	if m.channelScreen {
-		return m.handleChannelKey(msg)
-	}
-	if m.smtpScreen {
-		return m.handleSMTPKey(msg)
+	if m.notify {
+		return m.handleNotifyKey(msg)
 	}
 	if m.form != nil {
 		return m.handleFormKey(msg)
@@ -520,11 +523,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		return m, tea.Quit
 	case "c":
-		m.channelScreen = true
-		m.channelSelected = 0
+		m = m.openNotifications(tabChannels)
 	case "s":
-		m.smtpScreen = true
-		m.smtpSelected = 0
+		m = m.openNotifications(tabMail)
 	case "a":
 		m.animationOff = !m.animationOff
 		if m.animationOff {
@@ -596,6 +597,41 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// notifyChild is the popup open over the notifications view, if any, and the
+// width it keeps whatever field has the focus.
+func (m Model) notifyChild(now time.Time) (string, int) {
+	minimum := 0
+	switch {
+	case m.smtpForm != nil:
+		f := *m.smtpForm
+		for focus := range f.values {
+			if (f.editing && focus == 0) || (focus == 5 && !m.snap.HasKey) {
+				continue
+			}
+			f.focus, f.cursor = focus, 0
+			minimum = max(minimum, modalContentWidth(renderSMTPForm(f, m.snap, now, m.err)))
+		}
+		return renderSMTPForm(*m.smtpForm, m.snap, now, m.err), minimum
+	case m.smtpDelete != nil:
+		return renderSMTPDelete(*m.smtpDelete, m.snap, now, m.err), 0
+	case m.channelForm != nil:
+		f := *m.channelForm
+		for focus := 0; focus < f.fieldCount(); focus++ {
+			if f.editing && focus == 0 {
+				continue
+			}
+			f.focus, f.cursor = focus, 0
+			minimum = max(minimum, modalContentWidth(renderChannelForm(f, m.snap, now, m.err)))
+		}
+		return renderChannelForm(*m.channelForm, m.snap, now, m.err), minimum
+	case m.channelDelete != nil:
+		return renderChannelDelete(*m.channelDelete, m.snap, now, m.err), 0
+	case m.channelTest != nil:
+		return renderChannelTest(*m.channelTest, m.snap, now, m.err), 0
+	}
+	return "", 0
+}
+
 // View renders the list, or the detail of the selected service.
 func (m Model) View() tea.View {
 	now := m.now()
@@ -612,6 +648,9 @@ func (m Model) View() tea.View {
 	}
 	if m.help && !helpPopupFits(m.width, m.height) {
 		content = renderKeys(m.destination != "")
+	}
+	if m.notify {
+		content, split = m.renderNotifications(now), false
 	}
 	modal := ""
 	if m.form != nil || m.deletion != nil || m.mute != nil || m.maint != nil || m.defaults != nil {
@@ -650,86 +689,17 @@ func (m Model) View() tea.View {
 			split = false
 		}
 	}
-	if m.notice != "" && !split {
+	if m.notify {
+		if child, minimum := m.notifyChild(now); child != "" {
+			title, body := splitModalScreen(child)
+			var fits bool
+			if modal, fits = renderModal(title, body, m.width, m.height, minimum); !fits {
+				content = child
+			}
+		}
+	}
+	if m.notice != "" && !split && !m.notify {
 		content += "\n" + m.noticeLine()
-	}
-	stackParent, stackChild := "", ""
-	if m.smtpScreen {
-		parent := renderSMTPList(m.snap, m.smtpSelected, now, m.err)
-		child := ""
-		if m.smtpForm != nil {
-			child = renderSMTPForm(*m.smtpForm, m.snap, now, m.err)
-		}
-		if m.smtpDelete != nil {
-			child = renderSMTPDelete(*m.smtpDelete, m.snap, now, m.err)
-		}
-		minimum := 0
-		if m.smtpForm != nil {
-			f := *m.smtpForm
-			for focus := range f.values {
-				if (f.editing && focus == 0) || (focus == 5 && !m.snap.HasKey) {
-					continue
-				}
-				f.focus, f.cursor = focus, 0
-				minimum = max(minimum, modalContentWidth(renderSMTPForm(f, m.snap, now, m.err)))
-			}
-		}
-		title, body := splitModalScreen(parent)
-		var fits bool
-		stackParent, fits = renderModal(title, body, m.width, m.height)
-		if !fits {
-			content = parent
-			split = false
-		}
-		if child != "" {
-			title, body = splitModalScreen(child)
-			stackChild, fits = renderModal(title, body, m.width, m.height, minimum)
-			if !fits {
-				stackParent = ""
-				content = child
-				split = false
-			}
-		}
-	}
-	if m.channelScreen {
-		parent := renderChannelList(m.snap, m.channelSelected, now, m.err)
-		child := ""
-		if m.channelForm != nil {
-			child = renderChannelForm(*m.channelForm, m.snap, now, m.err)
-		}
-		if m.channelDelete != nil {
-			child = renderChannelDelete(*m.channelDelete, m.snap, now, m.err)
-		}
-		if m.channelTest != nil {
-			child = renderChannelTest(*m.channelTest, m.snap, now, m.err)
-		}
-		minimum := 0
-		if m.channelForm != nil {
-			f := *m.channelForm
-			for focus := 0; focus < f.fieldCount(); focus++ {
-				if f.editing && focus == 0 {
-					continue
-				}
-				f.focus, f.cursor = focus, 0
-				minimum = max(minimum, modalContentWidth(renderChannelForm(f, m.snap, now, m.err)))
-			}
-		}
-		title, body := splitModalScreen(parent)
-		var fits bool
-		stackParent, fits = renderModal(title, body, m.width, m.height)
-		if !fits {
-			content = parent
-			split = false
-		}
-		if child != "" {
-			title, body = splitModalScreen(child)
-			stackChild, fits = renderModal(title, body, m.width, m.height, minimum)
-			if !fits {
-				stackParent = ""
-				content = child
-				split = false
-			}
-		}
 	}
 	position := -1
 	if m.sweeping && sweepEnabled(m.snap, now, os.Getenv("NO_COLOR"), os.Getenv("TERM")) {
@@ -744,8 +714,8 @@ func (m Model) View() tea.View {
 		header = ansi.Truncate(header+"  "+helpStyle.Render(filter.summary()), max(m.width, ansi.StringWidth(header)), "")
 	}
 	content = header + "\n" + rule + "\n" + content
-	if modal != "" || stackParent != "" || stackChild != "" || (m.help && helpPopupFits(m.width, m.height)) {
-		content = padForPopup(content, m.popupPadHeight(modal, stackParent, stackChild))
+	if modal != "" || (m.help && helpPopupFits(m.width, m.height)) {
+		content = padForPopup(content, m.popupPadHeight(modal))
 	}
 	if m.destination != "" {
 		footer := helpStyle.Render("remote · " + displayText(m.destination))
@@ -775,28 +745,6 @@ func (m Model) View() tea.View {
 			content = truncateLines(content, m.width)
 		}
 		content = overlayPopup(content, modal, m.width, m.height)
-	}
-	if stackParent != "" || stackChild != "" {
-		if m.width > 0 {
-			content = truncateLines(content, m.width)
-		}
-		if stackParent != "" {
-			content = overlayPopup(content, stackParent, m.width, m.height)
-		}
-		if stackChild != "" && stackParent == "" {
-			content = overlayPopup(content, stackChild, m.width, m.height)
-		} else if stackChild != "" {
-			height := m.height
-			if height <= 0 {
-				height = strings.Count(content, "\n") + 1
-			}
-			parentHeight := strings.Count(stackParent, "\n") + 1
-			childHeight := strings.Count(stackChild, "\n") + 1
-			parentTop := max(0, (height-parentHeight)/2)
-			childTop := max((height-childHeight)/2, parentTop+1)
-			childTop = min(childTop, max(0, height-childHeight-1))
-			content = overlayPopup(content, stackChild, m.width, childHeight+2*childTop)
-		}
 	}
 	// Lipgloss v2 emits truecolor styles; colorprofile only recognizes boolean
 	// NO_COLOR values. Honor every nonempty value, including in direct renders.

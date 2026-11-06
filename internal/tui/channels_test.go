@@ -63,7 +63,7 @@ func TestChannelsNavigationAndMissingServer(t *testing.T) {
 	next, _ := m.Update(m.Init()())
 	m = next.(Model)
 	m, _ = press(t, m, keyEnter, keyC)
-	requireText(t, m, "Channels", "No channels configured.", "↑/↓ select · n new · e edit · d delete · t test · esc back · q quit")
+	requireText(t, m, "Channels", "No channels configured.", channelsFooter)
 	m, _ = press(t, m, keyN)
 	requireText(t, m, "(none — press esc twice, then s to add one)")
 	m = typeText(t, m, "ops")

@@ -17,7 +17,7 @@ func TestSMTPDetailNavigationAndEmptyList(t *testing.T) {
 	next, _ := m.Update(m.Init()())
 	m = next.(Model)
 	m, _ = press(t, m, keyEnter, keyS)
-	requireText(t, m, "SMTP servers", "No SMTP servers configured.", "↑/↓ select (k/j) · n new · e edit · d delete · esc back · q quit · ctrl+c quit")
+	requireText(t, m, "Mail servers", "No mail servers configured.", mailFooter)
 	m, _ = press(t, m, keyEsc)
 	requireText(t, m, "Status       PENDING", "INCIDENTS")
 }
@@ -94,7 +94,7 @@ func TestSMTPStaleSaveAndDeleteResults(t *testing.T) {
 	m = next.(Model)
 	next, _ = m.Update(refresh())
 	m = next.(Model)
-	requireText(t, m, "No SMTP servers configured.")
+	requireText(t, m, "No mail servers configured.")
 	next, ignored = m.Update(result)
 	if ignored != nil || view(next.(Model)) != view(m) {
 		t.Fatal("stale deletion changed view")
