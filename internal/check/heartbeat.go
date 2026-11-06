@@ -42,11 +42,11 @@ func NextDeadline(c config.Check, newest time.Time) time.Time {
 
 // Overdue returns the missed-deadline results due at now, given the newest
 // result's time and the last time the job reported (a ping or a failure;
-// zero when unknown). A check is missed once now is after a deadline. When
+// zero when unknown). The reason names that time in loc (nil is UTC). A check is missed once now is after a deadline. When
 // several deadlines passed (the daemon was stopped), it returns only two:
 // the first, where the outage starts, and the latest, so the alert counts
 // see more than one miss without filling the history.
-func Overdue(c config.Check, newest, contact, now time.Time) []Result {
+func Overdue(c config.Check, newest, contact, now time.Time, loc *time.Location) []Result {
 	step := c.Period + c.Grace
 	if step <= 0 || !now.After(newest.Add(step)) {
 		return nil
@@ -58,21 +58,25 @@ func Overdue(c config.Check, newest, contact, now time.Time) []Result {
 	}
 	out := make([]Result, len(at))
 	for i, t := range at {
-		out[i] = Result{CheckName: c.Name, At: t, Status: StatusDown, Error: missedReason(contact, t)}
+		out[i] = Result{CheckName: c.Name, At: t, Status: StatusDown, Error: missedReason(contact, t, loc)}
 	}
 	return out
 }
 
-// missedReason names the last contact in UTC, with its date when it was on
-// another day than the deadline.
-func missedReason(contact, deadline time.Time) string {
+// missedReason names the last contact in loc (nil is UTC) with the zone's
+// abbreviation, and its date when it was on another day than the deadline
+// in that zone.
+func missedReason(contact, deadline time.Time, loc *time.Location) string {
 	if contact.IsZero() {
 		return missedPrefix
 	}
-	contact, deadline = contact.UTC(), deadline.UTC()
-	layout := "15:04 UTC"
+	if loc == nil {
+		loc = time.UTC
+	}
+	contact, deadline = contact.In(loc), deadline.In(loc)
+	layout := "15:04 MST"
 	if y, m, d := contact.Date(); y != deadline.Year() || m != deadline.Month() || d != deadline.Day() {
-		layout = "Jan 2 15:04 UTC"
+		layout = "Jan 2 15:04 MST"
 	}
 	return missedPrefix + " since " + contact.Format(layout)
 }

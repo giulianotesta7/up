@@ -15,11 +15,17 @@ type MissedRecorder interface {
 	RecordMissed(ctx context.Context, c config.Check, newest time.Time, r check.Result) (bool, error)
 }
 
+// DefaultsReader is the optional API whose zone names the time in missed
+// reasons. *store.Store implements it.
+type DefaultsReader interface {
+	Defaults(ctx context.Context) (config.Defaults, error)
+}
+
 // watchHeartbeat follows a heartbeat until ctx ends. It makes no outbound
 // check: pings and reported failures are stored by the API, and every
 // discovery interval it observes the new ones, then records a missed
 // deadline when the clock is past the newest result + period + grace (see
-// check.Overdue). Before the first result (WAITING) there is no deadline.
+// check.Overdue), naming the last ping in the Defaults zone. Before the first result (WAITING) there is no deadline.
 // The deadline comes from stored results, so it survives restarts and
 // follows edits. idle rechecks held alerts when nothing new arrived.
 func watchHeartbeat(ctx context.Context, opts Options, c config.Check, observe func(check.Result), idle func()) {
@@ -48,8 +54,8 @@ func watchHeartbeat(ctx context.Context, opts Options, c config.Check, observe f
 				contact = r.At
 			}
 		}
-		if !seen.IsZero() && ctx.Err() == nil {
-			for _, r := range check.Overdue(c, seen, contact, opts.now()) {
+		if now := opts.now(); !seen.IsZero() && ctx.Err() == nil && now.After(check.NextDeadline(c, seen)) {
+			for _, r := range check.Overdue(c, seen, contact, now, missedZone(ctx, opts)) {
 				if !recordMissed(ctx, opts, c, seen, r) {
 					break
 				}
@@ -84,6 +90,28 @@ func recentResults(ctx context.Context, opts Options, c config.Check) []check.Re
 		return nil
 	}
 	return results
+}
+
+// missedZone is the Defaults zone, read when a miss is due so a change applies
+// to the next one. It is UTC without a DefaultsReader or when the read or the
+// zone fails (logged).
+func missedZone(ctx context.Context, opts Options) *time.Location {
+	reader, ok := opts.Store.(DefaultsReader)
+	if !ok {
+		return time.UTC
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	d, err := reader.Defaults(readCtx)
+	if err != nil {
+		opts.Logger.Error("reading defaults failed", "error", err)
+		return time.UTC
+	}
+	loc, err := config.LoadZone(d.Zone)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
 }
 
 // lastContact is the newest ping or reported failure among newest-first

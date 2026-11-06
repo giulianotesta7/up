@@ -212,7 +212,7 @@ func TestRecordMissedOnlyWithoutANewerResult(t *testing.T) {
 	}
 	tok := token(t, s, key, "backup")
 	ping(t, s, tok, false, t0)
-	missed := check.Overdue(beatCheck, t0, t0, t0.Add(3*time.Hour))
+	missed := check.Overdue(beatCheck, t0, t0, t0.Add(3*time.Hour), time.UTC)
 	if len(missed) != 2 {
 		t.Fatalf("Overdue() = %+v", missed)
 	}
@@ -222,7 +222,7 @@ func TestRecordMissedOnlyWithoutANewerResult(t *testing.T) {
 		t.Fatalf("RecordMissed() after a newer ping = %v, %v, want refused", stored, err)
 	}
 	newest := t0.Add(time.Minute)
-	missed = check.Overdue(beatCheck, newest, newest, newest.Add(3*time.Hour))
+	missed = check.Overdue(beatCheck, newest, newest, newest.Add(3*time.Hour), time.UTC)
 	if stored, err := s.RecordMissed(ctx, beatCheck, newest, missed[0]); err != nil || !stored {
 		t.Fatalf("RecordMissed() = %v, %v, want stored", stored, err)
 	}
@@ -402,7 +402,7 @@ func TestPingStoredAfterAMissIsNewest(t *testing.T) {
 	tok := token(t, s, key, "backup")
 	ping(t, s, tok, false, t0)
 	deadline := t0.Add(beatCheck.Period + beatCheck.Grace)
-	missed := check.Overdue(beatCheck, t0, t0, deadline.Add(time.Second))
+	missed := check.Overdue(beatCheck, t0, t0, deadline.Add(time.Second), time.UTC)
 	if stored, err := s.RecordMissed(ctx, beatCheck, t0, missed[0]); err != nil || !stored {
 		t.Fatal(stored, err)
 	}

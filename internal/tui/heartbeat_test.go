@@ -497,7 +497,7 @@ func missedStore(t *testing.T) (*store.Store, Model) {
 		t.Fatal(err)
 	}
 	c, _ := storedByName(t, s, "backup")
-	for _, r := range check.Overdue(c, ping, ping, now) {
+	for _, r := range check.Overdue(c, ping, ping, now, time.UTC) {
 		if ok, err := s.RecordMissed(ctx, c, ping, r); err != nil || !ok {
 			t.Fatalf("RecordMissed = %v, %v", ok, err)
 		}

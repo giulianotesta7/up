@@ -168,7 +168,7 @@ States:
 
 - `WAITING` until the first ping: no deadline and no alerts.
 - `UP` after a ping. The next one is due within period + grace of the last request.
-- `DOWN` when that deadline passes with no ping (the history shows `no ping since 02:14 UTC`), and at once on `/fail` (`reported failure`).
+- `DOWN` when that deadline passes with no ping (the history shows `no ping since 02:14 UTC`, in the [defaults](#defaults) zone), and at once on `/fail` (`reported failure`).
 - `UP` again on the next ping.
 
 Each missed deadline counts as one failed check and each ping as one success, so **alert after** and **recover after** count missed periods and pings. Channels, muting, maintenance windows, history, incidents and the delivery log work as for any monitor. If the daemon was stopped across several deadlines, it records the first and the latest when it starts again.
@@ -245,7 +245,7 @@ Daylight saving: durations are elapsed time. A start that does not exist that da
 
 ### Defaults
 
-`f` opens the defaults for new items: the time zone of new maintenance windows, and the channel, interval, timeout, expected status, alert after and recover after of new monitors. The new monitor and new window forms start from them. Existing monitors, channels and windows keep their values, and each window keeps its own zone. Until you save, the defaults are UTC, no channel, 30s, 5s, 200, and 1 and 1. Deleting the default channel makes the default none.
+`f` opens the defaults for new items: the time zone of new maintenance windows (also the time shown in heartbeat reasons, such as `no ping since 12:10 -03`), and the channel, interval, timeout, expected status, alert after and recover after of new monitors. The new monitor and new window forms start from them. Existing monitors, channels and windows keep their values, and each window keeps its own zone. Until you save, the defaults are UTC, no channel, 30s, 5s, 200, and 1 and 1. Deleting the default channel makes the default none.
 
 ### Certificate expiry
 

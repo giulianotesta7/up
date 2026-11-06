@@ -272,6 +272,35 @@ func TestHeartbeatAlertAfterCountsMissedDeadlines(t *testing.T) {
 	r.waitAlerts(down, up)
 }
 
+func TestHeartbeatMissedReasonUsesTheDefaultsZone(t *testing.T) {
+	r := newBeatRig(t, 1, 1)
+	ctx := context.Background()
+	setZone := func(zone string) {
+		t.Helper()
+		d := config.BuiltinDefaults()
+		d.Zone = zone
+		if err := r.s.SetDefaults(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setZone("America/Argentina/Buenos_Aires")
+	r.start()
+	r.ping(beatStart, false)
+	r.waitResults(1)
+	r.clock.setAt(beatStart.Add(beatStep + time.Second))
+	got := r.waitResults(2)
+	if want := missedAt(beatStart.Add(beatStep), "no ping since 06:00 -03"); got[0] != want {
+		t.Fatalf("missed = %+v, want %+v", got[0], want)
+	}
+	// A Defaults change applies to the next miss without a restart.
+	setZone("Europe/Madrid")
+	r.clock.setAt(beatStart.Add(2*beatStep + time.Second))
+	got = r.waitResults(3)
+	if want := missedAt(beatStart.Add(2*beatStep), "no ping since 10:00 CET"); got[0] != want {
+		t.Fatalf("missed after the change = %+v, want %+v", got[0], want)
+	}
+}
+
 func TestHeartbeatDeadlineSurvivesRestart(t *testing.T) {
 	r := newBeatRig(t, 2, 1)
 	r.start()

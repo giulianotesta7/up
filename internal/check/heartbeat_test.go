@@ -57,7 +57,7 @@ func TestOverdue(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Overdue(beat, tt.newest, tt.contact, tt.now)
+			got := Overdue(beat, tt.newest, tt.contact, tt.now, time.UTC)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("Overdue() = %+v, want %+v", got, tt.want)
 			}
@@ -65,6 +65,40 @@ func TestOverdue(t *testing.T) {
 				if !Missed(r) || Failed(r) {
 					t.Fatalf("%+v is not classified as missed", r)
 				}
+			}
+		})
+	}
+}
+
+func TestOverdueNamesTheContactInTheZone(t *testing.T) {
+	zone := func(name string) *time.Location {
+		loc, err := config.LoadZone(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return loc
+	}
+	ba := zone("America/Argentina/Buenos_Aires")
+	tests := []struct {
+		name    string
+		contact time.Time
+		loc     *time.Location
+		want    string
+	}{
+		{"Buenos Aires", time.Date(2026, 11, 6, 15, 10, 0, 0, time.UTC), ba, "no ping since 12:10 -03"},
+		{"Madrid in winter", time.Date(2026, 1, 6, 15, 10, 0, 0, time.UTC), zone("Europe/Madrid"), "no ping since 16:10 CET"},
+		{"Madrid in summer", time.Date(2026, 7, 6, 15, 10, 0, 0, time.UTC), zone("Europe/Madrid"), "no ping since 17:10 CEST"},
+		{"no zone is UTC", time.Date(2026, 11, 6, 15, 10, 0, 0, time.UTC), nil, "no ping since 15:10 UTC"},
+		// 23:30 -03 on Nov 5, deadline 00:40 -03 on Nov 6: both Nov 6 in UTC.
+		{"midnight in the zone shows the date", time.Date(2026, 11, 6, 2, 30, 0, 0, time.UTC), ba, "no ping since Nov 5 23:30 -03"},
+		// 20:30 -03, deadline 21:40 -03 the same day: midnight only in UTC.
+		{"midnight only in UTC shows no date", time.Date(2026, 11, 5, 23, 30, 0, 0, time.UTC), ba, "no ping since 20:30 -03"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Overdue(beat, tt.contact, tt.contact, tt.contact.Add(70*time.Minute+time.Second), tt.loc)
+			if len(got) != 1 || got[0].Error != tt.want || !Missed(got[0]) {
+				t.Fatalf("Overdue() = %+v, want one miss %q", got, tt.want)
 			}
 		})
 	}

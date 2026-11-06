@@ -258,6 +258,7 @@ func renderDefaults(p defaultsPopup, snap Snapshot, now time.Time, loadErr error
 	}
 	b.WriteString(headerStyle.Render("NEW MAINTENANCE WINDOWS") + "\n")
 	text(defaultsZone, "IANA zone", "e.g. America/New_York")
+	b.WriteString("  " + helpStyle.Render("Also the time in heartbeat reasons.") + "\n")
 	b.WriteString("\n" + headerStyle.Render("NEW MONITORS") + "\n")
 	choices := channelChoices(snap)
 	choices[0] = "none"
