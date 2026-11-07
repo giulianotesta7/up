@@ -34,10 +34,10 @@ func validateHeartbeatFields(c Check) []error {
 		errs = append(errs, errors.New("name is required"))
 	}
 	if c.Period < MinHeartbeatPeriod || c.Period > MaxHeartbeatPeriod {
-		errs = append(errs, fmt.Errorf("period must be between %s and %s", MinHeartbeatPeriod, MaxHeartbeatPeriod))
+		errs = append(errs, fmt.Errorf("period must be between %s and %s", ShortDuration(MinHeartbeatPeriod), ShortDuration(MaxHeartbeatPeriod)))
 	}
 	if c.Grace < 0 || c.Grace > MaxHeartbeatGrace {
-		errs = append(errs, fmt.Errorf("grace must be between 0s and %s", MaxHeartbeatGrace))
+		errs = append(errs, fmt.Errorf("grace must be between 0s and %s", ShortDuration(MaxHeartbeatGrace)))
 	}
 	if c.URL != "" || c.Method != "" || c.ExpectedStatus != 0 || c.Timeout != 0 || c.Interval != 0 {
 		errs = append(errs, errors.New("url, method, expected status, timeout and interval are not used by heartbeat checks"))

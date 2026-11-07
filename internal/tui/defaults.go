@@ -54,7 +54,7 @@ type defaultsMsg struct {
 func newDefaultsPopup(snap Snapshot) *defaultsPopup {
 	d := snap.NewItemDefaults()
 	p := &defaultsPopup{
-		values:  [4]string{d.Zone, d.Interval.String(), d.Timeout.String(), strconv.Itoa(d.ExpectedStatus)},
+		values:  [4]string{d.Zone, shortDuration(d.Interval), shortDuration(d.Timeout), strconv.Itoa(d.ExpectedStatus)},
 		channel: snap.existingChannel(d.Channel), alertAfter: strconv.Itoa(d.AlertAfter), recoverAfter: strconv.Itoa(d.RecoverAfter),
 	}
 	p.cursor = len([]rune(p.values[0]))

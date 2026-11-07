@@ -78,7 +78,7 @@ func newMonitorForm(snap Snapshot) *monitorForm {
 	d := snap.NewItemDefaults()
 	status := strconv.Itoa(d.ExpectedStatus)
 	return &monitorForm{
-		values:  [5]string{"", "", d.Interval.String(), d.Timeout.String(), status},
+		values:  [5]string{"", "", shortDuration(d.Interval), shortDuration(d.Timeout), status},
 		channel: snap.existingChannel(d.Channel), alertAfter: strconv.Itoa(d.AlertAfter), recoverAfter: strconv.Itoa(d.RecoverAfter),
 		tlsExpiry: "on", status: status,
 		period: shortDuration(config.DefaultHeartbeatPeriod), grace: shortDuration(config.DefaultHeartbeatGrace),
@@ -93,7 +93,7 @@ func editMonitorForm(c config.Check, detail bool) *monitorForm {
 		return editHeartbeatForm(c, detail)
 	}
 	return &monitorForm{
-		values:  [5]string{c.Name, c.URL, c.Interval.String(), c.Timeout.String(), strconv.Itoa(c.ExpectedStatus)},
+		values:  [5]string{c.Name, c.URL, shortDuration(c.Interval), shortDuration(c.Timeout), strconv.Itoa(c.ExpectedStatus)},
 		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: tlsChoice(c.TLSOff),
 		adv:   newAdvanced(c),
 		focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail, base: c,
@@ -334,7 +334,7 @@ func detectionHint(f monitorForm) string {
 	if err != nil || ierr != nil || n < 2 || interval <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("Detection time ≈ %d × %s = %s before the first alert", n, interval, time.Duration(n)*interval)
+	return fmt.Sprintf("Detection time ≈ %d × %s = %s before the first alert", n, shortDuration(interval), shortDuration(time.Duration(n)*interval))
 }
 
 func (f *monitorForm) insert(text string) {

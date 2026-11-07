@@ -13,7 +13,7 @@ func TestDetailSectionsAreSpacedAndIndented(t *testing.T) {
 		"\n\nSTATUS\n  Status       DOWN",
 		"  Last error   " + reason,
 		"  Down since   Oct 25 03:44:00 (1m ago)",
-		"\n\nCONFIG\n  Interval     1m0s\n  Timeout      10s\n  Expected     204\n  Channel      none\n",
+		"\n\nCONFIG\n  Interval     1m\n  Timeout      10s\n  Expected     204\n  Channel      none\n",
 		"\n\nLATENCY\n",
 		"\n\nINCIDENTS  30d · 2 incidents · 29m down · 17.1% uptime\n",
 		"\n▌ Oct 25 03:44  ongoing 1m",
