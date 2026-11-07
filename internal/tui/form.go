@@ -303,6 +303,7 @@ func (m Model) submitForm(f *monitorForm) (tea.Model, tea.Cmd) {
 	c, err := f.checkWith(m.snap.PublicKey)
 	f.err, f.confirm = err, false
 	if err != nil {
+		f.focusError(err)
 		return m, nil
 	}
 	f.saving = true

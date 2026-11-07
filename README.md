@@ -138,7 +138,7 @@ Only **name** and **URL** are required; the rest uses the defaults above, with m
 | Expected text | Literal, case-sensitive text the body must contain. The status **and** the text must match. Not allowed with `HEAD`. |
 | Conditions | Optional extra rules the response must meet, see below. |
 
-**Conditions** are checked after the status and the expected text, in order; all must pass and the first that fails is the down reason. Several of each kind are allowed:
+**Conditions** are checked after the status and the expected text, in order; all must pass and the first that fails is the down reason. Several of each kind are allowed. In the form, `space` on `+ Condition` adds one, `←`/`→` on its `Condition` row picks the kind and `ctrl+d` removes the focused one; a save error moves the focus to the condition it names:
 
 | Kind | Passes when | Down reason |
 |---|---|---|
@@ -149,7 +149,7 @@ Only **name** and **URL** are required; the rest uses the defaults above, with m
 
 Received values in reasons are cut to 40 characters, and values of sensitive headers (cookies, `Authorization`, any name with `token`, `secret`, `key`, `password` or `auth`) are never shown. An invalid regex or JSON path, an empty header name or a limit not lower than the timeout is rejected when saving. JSON and regex conditions are not allowed with `HEAD`.
 
-Only the first 1 MiB of a response is read; if the text is not in it, the check fails. Responses are not stored. Latency is the time until the response headers arrive. The detail view shows the method, expected text and conditions.
+Only the first 1 MiB of a response is read; if the text is not in it, the check fails. Responses are not stored. Latency is the time until the response headers arrive. The detail view shows the method, expected text and conditions (one line each under `Expect`).
 
 A monitor with headers or a body does not follow a redirect to another scheme, host or port: it goes down saying so, so those values never reach a host you did not configure. Every other redirect is followed.
 
