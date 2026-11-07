@@ -235,8 +235,10 @@ type SMTPServerDTO struct {
 }
 
 // ChannelDTO is a channel as the snapshot and write responses show it. A
-// webhook shows only its origin (scheme and host) and whether its URL and
-// auth value are set; the protected values never leave the server.
+// webhook, discord or slack channel shows only its origin (scheme and host)
+// and whether its URL and auth value are set; ntfy, telegram and gotify
+// show their plain fields and whether a token is set. The protected values
+// never leave the server.
 type ChannelDTO struct {
 	Name            string   `json:"name"`
 	Kind            string   `json:"kind"`
@@ -246,11 +248,17 @@ type ChannelDTO struct {
 	WebhookURLSet   bool     `json:"webhook_url_set"`
 	WebhookAuthName string   `json:"webhook_auth_name"`
 	WebhookAuthSet  bool     `json:"webhook_auth_set"`
+	ServerURL       string   `json:"server_url"`
+	Topic           string   `json:"topic"`
+	ChatID          string   `json:"chat_id"`
+	TokenSet        bool     `json:"token_set"`
+	Priority        string   `json:"priority"`
 }
 
 func channelDTO(c config.Channel) ChannelDTO {
 	return ChannelDTO{Name: c.Name, Kind: c.Kind, SMTPServer: c.SMTPServer, Recipients: c.Recipients, WebhookOrigin: c.WebhookOrigin,
-		WebhookURLSet: !c.WebhookURL.Empty(), WebhookAuthName: c.WebhookAuthName, WebhookAuthSet: !c.WebhookAuth.Empty()}
+		WebhookURLSet: !c.WebhookURL.Empty(), WebhookAuthName: c.WebhookAuthName, WebhookAuthSet: !c.WebhookAuth.Empty(),
+		ServerURL: c.ServerURL, Topic: c.Topic, ChatID: c.ChatID, TokenSet: !c.Token.Empty(), Priority: c.Priority}
 }
 
 // checkDTO is the read form of a check: plain fields and "set" flags.
@@ -408,12 +416,16 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 		s.SMTPServers = append(s.SMTPServers, config.SMTPServer{Name: v.Name, Host: v.Host, Port: v.Port, TLS: v.TLS, Username: v.Username, Sender: v.Sender, Password: p})
 	}
 	for _, v := range d.Channels {
-		c := config.Channel{Name: v.Name, Kind: v.Kind, SMTPServer: v.SMTPServer, Recipients: v.Recipients, WebhookOrigin: v.WebhookOrigin, WebhookAuthName: v.WebhookAuthName}
+		c := config.Channel{Name: v.Name, Kind: v.Kind, SMTPServer: v.SMTPServer, Recipients: v.Recipients, WebhookOrigin: v.WebhookOrigin, WebhookAuthName: v.WebhookAuthName,
+			ServerURL: v.ServerURL, Topic: v.Topic, ChatID: v.ChatID, Priority: v.Priority}
 		if v.WebhookURLSet {
 			c.WebhookURL = placeholder(d.PublicKey)
 		}
 		if v.WebhookAuthSet {
 			c.WebhookAuth = placeholder(d.PublicKey)
+		}
+		if v.TokenSet {
+			c.Token = placeholder(d.PublicKey)
 		}
 		s.Channels = append(s.Channels, c)
 	}

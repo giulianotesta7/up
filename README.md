@@ -24,7 +24,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 - **Managed from the TUI.** Add, edit, delete and mute monitors; the daemon picks up changes within ~2s.
 - **Remote TUI.** Run the daemon on a server and manage it from your laptop over an authenticated API.
 - **Check history.** Every result is stored and outages are derived from it. Results are kept for 30 days by default; retention is configurable.
-- **Email and webhook alerts** on down and recovery, with optional thresholds so a single timeout does not wake anyone up.
+- **Email, webhook and push alerts** (ntfy, Telegram, Discord, Slack, Gotify) on down and recovery, with optional thresholds so a single timeout does not wake anyone up.
 - **TLS expiry warnings** at 14, 7 and 3 days.
 - **Maintenance mute** from 1 minute to 7 days, without stopping checks or history.
 - **Recurring maintenance windows** that hold alerts and certificate warnings while checks and history continue.
@@ -188,7 +188,7 @@ The endpoint answers `200 {"ok":true}` when the ping is recorded and the same `4
 ## Alerts
 
 1. `s`: add a mail server. For a relay without authentication, set **No login required** to **Yes**.
-2. `c`: add a channel: **email** (that server and one or more comma-separated recipients) or **webhook** (a URL).
+2. `c`: add a channel: **email** (that server and one or more comma-separated recipients), **webhook** (a URL) or a push service: **ntfy**, **telegram**, **discord**, **slack** or **gotify**.
 3. `e` on a monitor: pick the channel. Monitors without a channel never alert.
 
 `up serve` sends one alert when a monitor goes down and one when it recovers, never one per failed check. **Alert after** and **Recover after** (default 1) set how many consecutive failures or successes are needed; meanwhile the list shows `FAILING 2/3` or `RECOVERING 1/2`. Restarting the daemon preserves the streak and does not resend alerts. Recipients only know what was actually sent: if you pick a channel for a monitor that is already down, the down alert is sent right then (once a mute or maintenance window ends, if one holds it) and the recovery follows normally.
@@ -199,7 +199,7 @@ The endpoint answers `200 {"ok":true}` when the ping is recorded and the same `4
 
 TLS modes: `starttls` (default, usually port 587), `tls` (usually 465) and `none` for relays without login. `none` cannot be combined with a username.
 
-Run `up serve` once before entering SMTP passwords, header values, a request body or a webhook URL to create `up.db.key` (required mode `0600`). **Back up the key with the database**; losing it requires re-entering them.
+Run `up serve` once before entering SMTP passwords, header values, a request body, a webhook URL or a push token to create `up.db.key` (required mode `0600`). **Back up the key with the database**; losing it requires re-entering them.
 
 ### Webhook channels
 
@@ -219,13 +219,25 @@ In `c`, set **Kind** to `webhook` (`←`/`→`), then enter the URL and, optiona
 
 A heartbeat's `monitor` also carries its `period_ms` and `grace_ms` (its alert emails show `Heartbeat: every 24h, grace 30m` where other monitors show the URL); the ping token is never sent. `event` is `monitor.down`, `monitor.recovered`, `cert.expiring` (`result` carries `days_remaining`) or `test` (no `monitor` or `result`; it carries `channel` and `message`). A `2xx` response means delivered. Any other status, a network error or a timeout (10s) is a failure. Redirects are not followed and failures are not retried.
 
+### Push channels
+
+| Kind | Fields | Sends |
+| --- | --- | --- |
+| `ntfy` | Server URL (default `https://ntfy.sh`), topic, optional access token, priority `min`, `low`, `default`, `high` or `max` | `POST {server}/{topic}` with `Title`, `Priority` and `Tags` headers, `Bearer` token if set |
+| `telegram` | Bot token, chat ID (`-1001234567890`, or `@name` for a public channel) | Bot API `sendMessage` |
+| `discord` | Webhook URL | The webhook's `content`, without mentions |
+| `slack` | Webhook URL (incoming webhook) | The webhook's `text` |
+| `gotify` | Server URL, app token, priority `0` to `10` (default `5`) | `POST {server}/message` with `X-Gotify-Key` |
+
+Down, recovery, certificate and test notifications carry the same title and text as the alert emails, with the channel's one priority. Tokens and Discord and Slack webhook URLs are sealed like webhook URLs and never shown again: the list shows the server and topic, the chat ID or the URL's origin. Only the ntfy access token can be cleared; without one, anyone who knows the topic can read the alerts. Server URLs may use plain `http` but not credentials. Like webhooks, a `2xx` answer means delivered, redirects are not followed and failures are not retried.
+
 ### Delivery log
 
-Every alert delivery is recorded per channel with its time, monitor, event (`monitor.down`, `monitor.recovered` or `cert.expiring`), outcome (`sent`, `failed` or `held` by a mute or maintenance window) and a short reason that never includes passwords, header values or webhook paths. Channel tests are not recorded, and attempts are kept as long as check history. The Deliveries tab shows the latest 200; times omit seconds.
+Every alert delivery is recorded per channel with its time, monitor, event (`monitor.down`, `monitor.recovered` or `cert.expiring`), outcome (`sent`, `failed` or `held` by a mute or maintenance window) and a short reason that never includes passwords, header values, tokens or webhook paths. Channel tests are not recorded, and attempts are kept as long as check history. The Deliveries tab shows the latest 200; times omit seconds.
 
 ### Testing a channel
 
-On the Channels tab, `t` and then `enter` send a test to the selected channel and show success or the reason it failed. Success means the SMTP server accepted the message (not that it reached the inbox) or the webhook answered `2xx`. A test changes no monitor data, needs `up serve` running and runs one at a time per channel.
+On the Channels tab, `t` and then `enter` send a test to the selected channel and show success or the reason it failed. Success means the SMTP server accepted the message (not that it reached the inbox) or the webhook or push service answered `2xx`. A test changes no monitor data, needs `up serve` running and runs one at a time per channel.
 
 ### Muting
 
@@ -317,7 +329,7 @@ Bodies are strict JSON, limited to 1 MiB. Errors: `400` invalid input, `404` not
 
 - **One token, full access.** There are no roles or rate limiting, except on heartbeat pings. For an internet-facing API, a proxy with rate limiting is recommended.
 - Heartbeat ping tokens (256 random bits) are stored sealed with the server key plus a SHA-256 hash; a ping is matched by the hash, compared in constant time. Unknown and former tokens get the same answer, and tokens are never logged or returned except by the authenticated token route.
-- SMTP passwords, header values, request bodies, webhook URLs and webhook auth values are sealed with the server's public key; the API rejects plaintext values and never returns them or their ciphertext. The private key stays on the server. Edit forms show saved values as `set`, with keep, replace or clear.
+- SMTP passwords, header values, request bodies, webhook URLs (Discord and Slack too), webhook auth values and push tokens are sealed with the server's public key; the API rejects plaintext values and never returns them or their ciphertext. The private key stays on the server. Edit forms show saved values as `set`, with keep, replace or clear.
 - The server stores a SHA-256 token hash and compares it in constant time. Token and remote credential files readable by others are refused.
 - The client does not follow redirects or forward the token to another host. Server text is stripped of terminal escape sequences before display. There is no certificate pinning.
 

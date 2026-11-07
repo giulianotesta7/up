@@ -42,8 +42,9 @@ type smtpWrite struct {
 	PasswordSealed *sealedWire    `json:"password_sealed"`
 }
 
-// channelWrite is the body of a channel create or update. Webhook values are
-// ProtectedDTO objects: absent keeps, "replace" carries a sealed value.
+// channelWrite is the body of a channel create or update. Webhook values and
+// the token are ProtectedDTO objects: absent keeps, "replace" carries a
+// sealed value.
 type channelWrite struct {
 	Name            string        `json:"name"`
 	Kind            string        `json:"kind"`
@@ -53,13 +54,22 @@ type channelWrite struct {
 	WebhookURL      *ProtectedDTO `json:"webhook_url"`
 	WebhookAuthName string        `json:"webhook_auth_name"`
 	WebhookAuth     *ProtectedDTO `json:"webhook_auth"`
+	ServerURL       string        `json:"server_url"`
+	Topic           string        `json:"topic"`
+	ChatID          string        `json:"chat_id"`
+	Token           *ProtectedDTO `json:"token"`
+	Priority        string        `json:"priority"`
 }
 
 // channel converts the body, or returns a client message (400) or an error (500).
 func (in channelWrite) channel(ctx context.Context, keys keyReader, name string) (config.Channel, string, error) {
-	c := config.Channel{Name: name, Kind: in.Kind, SMTPServer: in.SMTPServer, Recipients: in.Recipients, WebhookOrigin: in.WebhookOrigin, WebhookAuthName: in.WebhookAuthName}
+	c := config.Channel{Name: name, Kind: in.Kind, SMTPServer: in.SMTPServer, Recipients: in.Recipients, WebhookOrigin: in.WebhookOrigin, WebhookAuthName: in.WebhookAuthName,
+		ServerURL: in.ServerURL, Topic: in.Topic, ChatID: in.ChatID, Priority: in.Priority}
 	var msg string
 	var err error
+	if c.Token, c.TokenEdit, msg, err = protectedEdit(ctx, keys, in.Token, "token", config.MaxSealedHeaderValue); msg != "" || err != nil {
+		return config.Channel{}, msg, err
+	}
 	if c.WebhookURL, c.WebhookURLEdit, msg, err = protectedEdit(ctx, keys, in.WebhookURL, "webhook_url", config.MaxSealedHeaderValue); msg != "" || err != nil {
 		return config.Channel{}, msg, err
 	}

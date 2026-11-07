@@ -81,7 +81,7 @@ func TestWebhookOrigin(t *testing.T) {
 }
 
 func TestChannelKindsOfferWebhook(t *testing.T) {
-	if got := strings.Join(config.ChannelKinds, ","); got != "email,webhook" {
+	if got := strings.Join(config.ChannelKinds, ","); !strings.HasPrefix(got, "email,webhook,") {
 		t.Fatalf("ChannelKinds = %q", got)
 	}
 }

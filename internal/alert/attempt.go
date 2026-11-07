@@ -26,7 +26,7 @@ type AttemptRecorder interface {
 }
 
 // trace is what one delivery learns on the way that the attempt record
-// needs: the channel's webhook origin and every protected value it opened, so
+// needs: the channel's webhook or server origin and every protected value it opened, so
 // the reason can be scrubbed of them.
 type trace struct {
 	kind    string
@@ -134,7 +134,8 @@ var urlText = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s/]*[^\s]*`)
 // failureReason turns a delivery error into a short reason that carries no
 // secret: transports already keep URLs, credentials and response bodies out
 // of their errors, and this removes any opened protected value and any URL
-// that is left, and names a webhook by its origin only.
+// that is left, and names a webhook, discord, slack, ntfy or gotify channel
+// by its origin only.
 func failureReason(err error, t *trace) string {
 	var rejected *textproto.Error
 	var text string
@@ -161,8 +162,10 @@ func failureReason(err error, t *trace) string {
 		return text
 	}
 	switch t.kind {
-	case config.KindWebhook:
-		text = "webhook " + t.origin + ": " + strings.TrimPrefix(text, "webhook ")
+	case config.KindWebhook, config.KindDiscord, config.KindSlack, config.KindNtfy, config.KindGotify:
+		text = t.kind + " " + t.origin + ": " + strings.TrimPrefix(text, t.kind+" ")
+	case config.KindTelegram:
+		text = "telegram: " + strings.TrimPrefix(text, "telegram ")
 	case config.KindEmail:
 		if !strings.HasPrefix(text, "mail server") {
 			text = "mail server: " + strings.TrimPrefix(text, "alert: ")

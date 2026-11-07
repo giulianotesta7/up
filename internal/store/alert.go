@@ -161,13 +161,14 @@ func (s *Store) writeSMTP(ctx context.Context, v config.SMTPServer, update bool)
 	return tx.Commit()
 }
 
-const channelColumns = "name, kind, smtp_server, recipients, webhook_origin, webhook_url, webhook_url_key, webhook_auth_name, webhook_auth, webhook_auth_key"
+const channelColumns = "name, kind, smtp_server, recipients, webhook_origin, webhook_url, webhook_url_key, webhook_auth_name, webhook_auth, webhook_auth_key, server_url, topic, chat_id, token, token_key, priority"
 
 func scanChannel(row scanner) (config.Channel, error) {
 	var c config.Channel
 	var recipients string
-	var url, urlKey, auth, authKey []byte
-	err := row.Scan(&c.Name, &c.Kind, &c.SMTPServer, &recipients, &c.WebhookOrigin, &url, &urlKey, &c.WebhookAuthName, &auth, &authKey)
+	var url, urlKey, auth, authKey, token, tokenKey []byte
+	err := row.Scan(&c.Name, &c.Kind, &c.SMTPServer, &recipients, &c.WebhookOrigin, &url, &urlKey, &c.WebhookAuthName, &auth, &authKey,
+		&c.ServerURL, &c.Topic, &c.ChatID, &token, &tokenKey, &c.Priority)
 	if recipients != "" {
 		c.Recipients = strings.Split(recipients, "\n")
 	}
@@ -177,11 +178,14 @@ func scanChannel(row scanner) (config.Channel, error) {
 	if len(auth) > 0 {
 		c.WebhookAuth = secret.Sealed{Key: authKey, Data: auth}
 	}
+	if len(token) > 0 {
+		c.Token = secret.Sealed{Key: tokenKey, Data: token}
+	}
 	return c, err
 }
 
-// Channels returns channels ordered by name. Webhook values come back sealed;
-// callers that expose channels must strip them.
+// Channels returns channels ordered by name. Webhook URLs, auth values and
+// tokens come back sealed; callers that expose channels must strip them.
 func (s *Store) Channels(ctx context.Context) ([]config.Channel, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+channelColumns+" FROM channels ORDER BY name")
 	if err != nil {
@@ -251,40 +255,58 @@ func (s *Store) writeChannel(ctx context.Context, c config.Channel, update bool)
 	if !update && exists {
 		return classify(ErrExists, fmt.Errorf("name %q already exists", c.Name))
 	}
-	// Webhook values: resolve keep/replace/clear against the stored ones
-	// (config.Edit). Email channels store none.
-	var url, auth secret.Sealed
-	authName := ""
+	// Protected values: resolve keep/replace/clear against the stored ones
+	// (config.Edit). Keep only finds a value stored for the same kind, so a
+	// kind switch needs new secrets. Email channels store none.
+	var old config.Channel
 	if c.Kind == config.KindEmail {
 		if err = requireSMTP(ctx, tx, c.SMTPServer); err != nil {
 			return
 		}
-	} else {
-		var old config.Channel
-		if update {
-			if old, err = scanChannel(tx.QueryRowContext(ctx, "SELECT "+channelColumns+" FROM channels WHERE name=?", c.Name)); err != nil {
-				return
-			}
+	} else if update {
+		if old, err = scanChannel(tx.QueryRowContext(ctx, "SELECT "+channelColumns+" FROM channels WHERE name=?", c.Name)); err != nil {
+			return
 		}
+		if old.Kind != c.Kind {
+			old = config.Channel{}
+		}
+	}
+	var url, auth, token secret.Sealed
+	origin, authName := "", ""
+	switch c.Kind {
+	case config.KindWebhook, config.KindDiscord, config.KindSlack:
 		url = resolveProtected(c.WebhookURLEdit, c.WebhookURL, old.WebhookURL, update)
+		origin = c.WebhookOrigin
+		what := "webhook URL"
+		if c.Kind != config.KindWebhook {
+			what = c.Kind + " webhook URL"
+		}
+		if url.Empty() {
+			return classify(ErrValidation, fmt.Errorf("%s is required", what))
+		}
+	case config.KindNtfy, config.KindTelegram, config.KindGotify:
+		token = resolveProtected(c.TokenEdit, c.Token, old.Token, update)
+		switch {
+		case c.Kind == config.KindTelegram && token.Empty():
+			return classify(ErrValidation, errors.New("telegram bot token is required"))
+		case c.Kind == config.KindGotify && token.Empty():
+			return classify(ErrValidation, errors.New("gotify app token is required"))
+		}
+	}
+	if c.Kind == config.KindWebhook {
 		auth = resolveProtected(c.WebhookAuthEdit, c.WebhookAuth, old.WebhookAuth, update)
 		authName = c.WebhookAuthName
-		switch {
-		case url.Empty():
-			return classify(ErrValidation, errors.New("webhook URL is required"))
-		case authName == "" && !auth.Empty():
+		if authName == "" && !auth.Empty() {
 			return classify(ErrValidation, errors.New("webhook auth value requires a header name"))
 		}
 	}
-	origin := c.WebhookOrigin
-	if c.Kind == config.KindEmail {
-		origin = ""
-	}
-	values := []any{c.Kind, c.SMTPServer, strings.Join(c.Recipients, "\n"), origin, blob(url.Data), blob(url.Key), authName, blob(auth.Data), blob(auth.Key), c.Name}
+	values := []any{c.Kind, c.SMTPServer, strings.Join(c.Recipients, "\n"), origin, blob(url.Data), blob(url.Key), authName, blob(auth.Data), blob(auth.Key),
+		c.ServerURL, c.Topic, c.ChatID, blob(token.Data), blob(token.Key), c.Priority, c.Name}
+	const columns = "kind, smtp_server, recipients, webhook_origin, webhook_url, webhook_url_key, webhook_auth_name, webhook_auth, webhook_auth_key, server_url, topic, chat_id, token, token_key, priority"
 	if update {
-		_, err = tx.ExecContext(ctx, "UPDATE channels SET kind=?, smtp_server=?, recipients=?, webhook_origin=?, webhook_url=?, webhook_url_key=?, webhook_auth_name=?, webhook_auth=?, webhook_auth_key=? WHERE name=?", values...)
+		_, err = tx.ExecContext(ctx, "UPDATE channels SET "+strings.ReplaceAll(columns, ",", "=?,")+"=? WHERE name=?", values...)
 	} else {
-		_, err = tx.ExecContext(ctx, "INSERT INTO channels (kind, smtp_server, recipients, webhook_origin, webhook_url, webhook_url_key, webhook_auth_name, webhook_auth, webhook_auth_key, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values...)
+		_, err = tx.ExecContext(ctx, "INSERT INTO channels ("+columns+", name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values...)
 	}
 	if err != nil {
 		return
