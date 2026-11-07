@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -225,7 +226,7 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 
 	for name, open := range map[string]func(string) (*Store, error){"Open": Open, "OpenReadOnly": OpenReadOnly} {
 		_, err := open(path)
-		if err == nil || !strings.Contains(err.Error(), "store: database schema version 99 is newer than this up supports (9)") {
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("store: database schema version 99 is newer than this up supports (%d)", schemaVersion)) {
 			t.Errorf("%s() error = %v, want newer-schema refusal", name, err)
 		}
 	}

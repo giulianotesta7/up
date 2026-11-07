@@ -180,7 +180,7 @@ func TestOpenReadOnlyRejectsV1WithUpgradeHint(t *testing.T) {
 	path := v1Database(t)
 
 	_, err := OpenReadOnly(path)
-	if err == nil || !strings.Contains(err.Error(), "database schema version 1 is older than this up (9); open it with `up serve` or `up tui` to upgrade it") {
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("database schema version 1 is older than this up (%d); open it with `up serve` or `up tui` to upgrade it", schemaVersion)) {
 		t.Fatalf("OpenReadOnly(v1) error = %v, want upgrade hint", err)
 	}
 	if got := version(t, path); got != 1 {
@@ -247,7 +247,7 @@ func TestOpenMigratesV5KeepingBehavior(t *testing.T) {
 
 func TestOpenReadOnlyRejectsV5AndOpenUpgradesIt(t *testing.T) {
 	path := v5Database(t)
-	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 5 is older than this up (9)") {
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("database schema version 5 is older than this up (%d)", schemaVersion)) {
 		t.Fatalf("OpenReadOnly(v5) error = %v", err)
 	}
 	s, err := Open(path)
@@ -286,7 +286,7 @@ INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_statu
 
 func TestOpenMigratesV6WithBuiltinDefaultsAndKeepsMonitors(t *testing.T) {
 	path := v6Database(t)
-	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 6 is older than this up (9)") {
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("database schema version 6 is older than this up (%d)", schemaVersion)) {
 		t.Fatalf("OpenReadOnly(v6) error = %v", err)
 	}
 	s, err := Open(path)
@@ -372,7 +372,7 @@ func TestOpenMigratesV7AddingOnlyTheAttemptLog(t *testing.T) {
 	// checks gains columns in v9; its v7 (and v8) columns are compared alone.
 	tables := []string{"smtp_servers", "channels", "results", "mutes", "alert_state", "defaults", "daemon", "certs", "maintenance_windows", "channel_tests", "secret_key"}
 	before, beforeChecks := dumpTables(t, path, tables...), v8Checks(t, path)
-	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 7 is older than this up (9)") {
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("database schema version 7 is older than this up (%d)", schemaVersion)) {
 		t.Fatalf("OpenReadOnly(v7) error = %v", err)
 	}
 	s, err := Open(path)

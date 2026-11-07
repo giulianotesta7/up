@@ -1,7 +1,6 @@
 package check
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -14,7 +13,8 @@ import (
 	"github.com/giulianotesta7/up/internal/secret"
 )
 
-// maxExpectRead bounds how much of a response is read to look for ExpectText.
+// maxExpectRead bounds how much of a response is read to look for ExpectText
+// and to evaluate JSON and body regex conditions.
 const maxExpectRead = 1 << 20
 
 // errUndecryptable is the only thing said about protected request values that
@@ -115,17 +115,17 @@ func (ch *Checker) open(v secret.Sealed) (string, error) {
 	return text, nil
 }
 
-// findText reports whether the response body contains text within the cap.
-// truncated is true when the body is larger than the cap.
-func findText(body io.Reader, text string) (found, truncated bool, err error) {
-	data, err := io.ReadAll(io.LimitReader(body, maxExpectRead+1))
+// readBody reads the response body up to maxExpectRead bytes. truncated is
+// true when the body is larger than the cap.
+func readBody(body io.Reader) (data []byte, truncated bool, err error) {
+	data, err = io.ReadAll(io.LimitReader(body, maxExpectRead+1))
 	if err != nil {
-		return false, false, err
+		return nil, false, err
 	}
 	if len(data) > maxExpectRead {
 		data, truncated = data[:maxExpectRead], true
 	}
-	return bytes.Contains(data, []byte(text)), truncated, nil
+	return data, truncated, nil
 }
 
 // textFailure is the reason ExpectText was not found.

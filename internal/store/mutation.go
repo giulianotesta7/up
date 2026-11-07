@@ -37,9 +37,9 @@ func (s *Store) UpdateCheck(ctx context.Context, c config.Check) error {
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE checks
 SET kind = ?, url = ?, interval_ns = ?, timeout_ns = ?, expected_status = ?, channel = ?, alert_after = ?, recover_after = ?, tls_off = ?,
-    method = ?, headers = ?, body = ?, body_key = ?, expect_text = ?, host = ?, port = ?, period_ns = ?, grace_ns = ? WHERE name = ?`,
+    method = ?, headers = ?, body = ?, body_key = ?, expect_text = ?, host = ?, port = ?, period_ns = ?, grace_ns = ?, conditions = ? WHERE name = ?`,
 		f.kind, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter, c.TLSOff,
-		c.Method, f.headers, blob(f.body.Data), blob(f.body.Key), c.ExpectText, c.Host, c.Port, int64(c.Period), int64(c.Grace), c.Name)
+		c.Method, f.headers, blob(f.body.Data), blob(f.body.Key), c.ExpectText, c.Host, c.Port, int64(c.Period), int64(c.Grace), f.conditions, c.Name)
 	if err != nil {
 		return fmt.Errorf("store: update check: %w", err)
 	}
@@ -105,8 +105,8 @@ func (s *Store) DeleteCheck(ctx context.Context, name string) error {
 // exists unchanged. The comparison and insert share one statement, serialized
 // with mutations even across database handles/processes. The comparison covers
 // every field the check executes with: URL, kind, method, headers, body,
-// expected text, host, port, interval, timeout, expected status, period and
-// grace. It must
+// expected text, conditions, host, port, interval, timeout, expected status,
+// period and grace. It must
 // stay in step with config.Check.SameDefinition (channel and alert settings
 // do not change a measurement, so they are not compared). Schema v1 cannot
 // detect deletion and recreation with an identical definition during an
@@ -124,6 +124,10 @@ func (s *Store) RecordDefined(ctx context.Context, c config.Check, r check.Resul
 	if err != nil {
 		return false, fmt.Errorf("store: record %s: %w", r.CheckName, err)
 	}
+	conds, err := encodeConditions(c.Conditions)
+	if err != nil {
+		return false, fmt.Errorf("store: record %s: %w", r.CheckName, err)
+	}
 	kind := c.Kind
 	if kind == "" {
 		kind = config.CheckHTTP
@@ -133,10 +137,10 @@ INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error)
 SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (
 SELECT 1 FROM checks WHERE name = ? AND url = ? AND interval_ns = ? AND timeout_ns = ? AND expected_status = ?
   AND kind = ? AND method = ? AND headers = ? AND body = ? AND body_key = ? AND expect_text = ? AND host = ? AND port = ?
-  AND period_ns = ? AND grace_ns = ?)`,
+  AND period_ns = ? AND grace_ns = ? AND conditions = ?)`,
 		r.CheckName, r.At.UnixNano(), string(r.Status), int64(r.Latency), r.StatusCode, r.Error,
 		c.Name, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus,
-		kind, c.Method, headers, blob(c.Body.Data), blob(c.Body.Key), c.ExpectText, c.Host, c.Port, int64(c.Period), int64(c.Grace))
+		kind, c.Method, headers, blob(c.Body.Data), blob(c.Body.Key), c.ExpectText, c.Host, c.Port, int64(c.Period), int64(c.Grace), conds)
 	if err != nil {
 		return false, fmt.Errorf("store: record %s: %w", r.CheckName, err)
 	}

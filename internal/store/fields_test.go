@@ -20,6 +20,12 @@ func advanced(name string) config.Check {
 	c.Headers = []config.Header{{Name: "X-Token", Value: seal(1), Edit: config.EditReplace}, {Name: "Accept", Value: seal(2), Edit: config.EditReplace}}
 	c.Body, c.BodyEdit = seal(3, 3), config.EditReplace
 	c.ExpectText = "pong"
+	c.Conditions = []config.Condition{
+		{Kind: config.ConditionJSON, Path: "services.0.status", Value: "ok"},
+		{Kind: config.ConditionRegex, Pattern: `(?i)ready`},
+		{Kind: config.ConditionResponseTime, Within: 800 * time.Millisecond},
+		{Kind: config.ConditionHeader, Name: "X-Version", Value: "3"},
+	}
 	return c
 }
 
@@ -194,7 +200,14 @@ func TestEditingEachNewFieldDropsAStaleResult(t *testing.T) {
 		"body":         func(c *config.Check) { c.Body, c.BodyEdit = seal(43), config.EditReplace },
 		"body cleared": func(c *config.Check) { c.BodyEdit = config.EditClear },
 		"expect text":  func(c *config.Check) { c.ExpectText = "other" },
-		"kind":         func(c *config.Check) { *c = tcp(c.Name) },
+		"condition": func(c *config.Check) {
+			c.Conditions = append([]config.Condition{{Kind: config.ConditionJSON, Path: "services.0.status", Value: "degraded"}}, c.Conditions[1:]...)
+		},
+		"condition order": func(c *config.Check) {
+			c.Conditions = []config.Condition{c.Conditions[1], c.Conditions[0], c.Conditions[2], c.Conditions[3]}
+		},
+		"conditions removed": func(c *config.Check) { c.Conditions = nil },
+		"kind":               func(c *config.Check) { *c = tcp(c.Name) },
 	}
 	for name, edit := range edits {
 		t.Run(name, func(t *testing.T) {

@@ -34,7 +34,7 @@ func duplicateBackend(t *testing.T, backend func(*testing.T) webhookBackend) (we
 	src := config.Check{Name: "api", URL: "https://example.com/health", Interval: 45 * time.Second, Timeout: 7 * time.Second, ExpectedStatus: 204,
 		AlertAfter: 3, RecoverAfter: 2, TLSOff: true, Method: "POST", ExpectText: "pong",
 		Headers: []config.Header{{Name: "Authorization", Value: seal("Bearer s3cret"), Edit: config.EditReplace}, {Name: "X-Empty"}},
-		Body:    seal("body-s3cret"), BodyEdit: config.EditReplace}
+		Body:    seal("body-s3cret"), BodyEdit: config.EditReplace, Conditions: sourceConditions}
 	other := config.Check{Name: "web", URL: "https://example.org", Interval: time.Minute, Timeout: time.Second, ExpectedStatus: 200}
 	for _, c := range []config.Check{src, other} {
 		if err := b.s.AddCheck(ctx, c); err != nil {

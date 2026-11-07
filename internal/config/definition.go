@@ -93,8 +93,9 @@ type Header struct {
 }
 
 // Canonical returns c in its one stored form, without changing c:
-// kind "http" becomes "", method "GET" becomes "" and an empty header list
-// becomes nil. Edit intents are kept. Copies the header slice.
+// kind "http" becomes "", method "GET" becomes "", an empty header or
+// condition list becomes nil and each condition keeps only its kind's fields.
+// Edit intents are kept. Copies the header and condition slices.
 func (c Check) Canonical() Check {
 	if c.Kind == CheckHTTP {
 		c.Kind = ""
@@ -106,6 +107,15 @@ func (c Check) Canonical() Check {
 		c.Headers = nil
 	} else {
 		c.Headers = slices.Clone(c.Headers)
+	}
+	if len(c.Conditions) == 0 {
+		c.Conditions = nil
+	} else {
+		conds := make([]Condition, len(c.Conditions))
+		for i, cond := range c.Conditions {
+			conds[i] = cond.canonical()
+		}
+		c.Conditions = conds
 	}
 	return c
 }
@@ -123,6 +133,7 @@ func (c Check) SameDefinition(o Check) bool {
 		a.Channel == b.Channel && a.AlertAfter == b.AlertAfter && a.RecoverAfter == b.RecoverAfter && a.TLSOff == b.TLSOff &&
 		a.Method == b.Method && sameSealed(a.Body, b.Body) && a.ExpectText == b.ExpectText &&
 		a.Host == b.Host && a.Port == b.Port && a.Period == b.Period && a.Grace == b.Grace &&
+		slices.Equal(a.Conditions, b.Conditions) &&
 		slices.EqualFunc(a.Headers, b.Headers, func(x, y Header) bool {
 			return x.Name == y.Name && sameSealed(x.Value, y.Value)
 		})
@@ -170,6 +181,7 @@ func ValidHeaderName(s string) bool {
 // validateHTTPFields checks the HTTP-only request fields and that no TCP
 // field is set. Bounds: at most MaxHeaders headers, names are tokens,
 // sealed values and the expected text stay within the Max constants.
+// Conditions are checked by validateConditions.
 func validateHTTPFields(c Check) []error {
 	var errs []error
 	if c.Method != "" && !slices.Contains(HTTPMethods, c.Method) {
@@ -199,6 +211,10 @@ func validateHTTPFields(c Check) []error {
 	}
 	if c.Method == "HEAD" && c.ExpectText != "" {
 		errs = append(errs, errors.New("expected text needs a method that returns a body; HEAD does not"))
+	}
+	errs = append(errs, validateConditions(c.Conditions, c.Timeout)...)
+	if c.Method == "HEAD" && slices.ContainsFunc(c.Conditions, readsBody) {
+		errs = append(errs, errors.New("JSON and body regex conditions need a method that returns a body; HEAD does not"))
 	}
 	if c.Host != "" || c.Port != 0 {
 		errs = append(errs, errors.New("host and port are only for tcp checks"))
@@ -232,6 +248,9 @@ func validateTCPFields(c Check) []error {
 	}
 	if c.Method != "" || len(c.Headers) > 0 || !c.Body.Empty() || c.BodyEdit != EditKeep || c.ExpectText != "" {
 		errs = append(errs, errors.New("method, headers, body and expected text are only for http checks"))
+	}
+	if len(c.Conditions) > 0 {
+		errs = append(errs, errors.New("conditions are only for http checks"))
 	}
 	return errs
 }

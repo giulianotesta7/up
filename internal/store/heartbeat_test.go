@@ -316,7 +316,7 @@ func v8Checks(t *testing.T, path string) []string {
 func TestOpenMigratesV8AddingOnlyHeartbeats(t *testing.T) {
 	path := v8Database(t)
 	before, beforeChecks := dumpTables(t, path, v8Tables...), v8Checks(t, path)
-	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 8 is older than this up (9)") {
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("database schema version 8 is older than this up (%d)", schemaVersion)) {
 		t.Fatalf("OpenReadOnly(v8) error = %v", err)
 	}
 	s, err := Open(path)
@@ -324,8 +324,8 @@ func TestOpenMigratesV8AddingOnlyHeartbeats(t *testing.T) {
 		t.Fatalf("Open(v8) error = %v", err)
 	}
 	defer s.Close()
-	if got := version(t, path); got != 9 {
-		t.Fatalf("user_version = %d, want 9", got)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version = %d, want %d", got, schemaVersion)
 	}
 	if after := dumpTables(t, path, v8Tables...); !reflect.DeepEqual(before, after) {
 		t.Fatalf("migration changed existing rows:\nbefore %v\nafter  %v", before, after)

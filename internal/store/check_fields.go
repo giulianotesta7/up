@@ -13,8 +13,8 @@ import (
 // checkColumns lists the checks columns in the order checkFields.values and
 // scanCheck use. checkPlaceholders has one "?" per column.
 const (
-	checkColumns      = "name, kind, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after, tls_off, method, headers, body, body_key, expect_text, host, port, period_ns, grace_ns"
-	checkPlaceholders = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+	checkColumns      = "name, kind, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after, tls_off, method, headers, body, body_key, expect_text, host, port, period_ns, grace_ns, conditions"
+	checkPlaceholders = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
 )
 
 // headerRow is the stored form of one header inside the headers column. The
@@ -52,6 +52,45 @@ func decodeHeaders(text string) ([]config.Header, error) {
 	return headers, nil
 }
 
+// conditionRow is the stored form of one condition inside the conditions
+// column. The encoding is deterministic, so the stale-result guard compares it
+// as text.
+type conditionRow struct {
+	Kind    string `json:"k"`
+	Path    string `json:"p,omitempty"`
+	Name    string `json:"n,omitempty"`
+	Value   string `json:"v,omitempty"`
+	Pattern string `json:"r,omitempty"`
+	Within  int64  `json:"w,omitempty"`
+}
+
+func encodeConditions(conds []config.Condition) (string, error) {
+	if len(conds) == 0 {
+		return "", nil
+	}
+	rows := make([]conditionRow, len(conds))
+	for i, c := range conds {
+		rows[i] = conditionRow{Kind: c.Kind, Path: c.Path, Name: c.Name, Value: c.Value, Pattern: c.Pattern, Within: int64(c.Within)}
+	}
+	b, err := json.Marshal(rows)
+	return string(b), err
+}
+
+func decodeConditions(text string) ([]config.Condition, error) {
+	if text == "" {
+		return nil, nil
+	}
+	var rows []conditionRow
+	if err := json.Unmarshal([]byte(text), &rows); err != nil {
+		return nil, fmt.Errorf("stored conditions are unreadable: %w", err)
+	}
+	conds := make([]config.Condition, len(rows))
+	for i, r := range rows {
+		conds[i] = config.Condition{Kind: r.Kind, Path: r.Path, Name: r.Name, Value: r.Value, Pattern: r.Pattern, Within: time.Duration(r.Within)}
+	}
+	return conds, nil
+}
+
 // protectedValues are the stored values an update may keep.
 type protectedValues struct {
 	headers []config.Header
@@ -60,9 +99,10 @@ type protectedValues struct {
 
 // fields are a check's resolved columns beyond the plain ones.
 type fields struct {
-	headers string
-	body    secret.Sealed
-	kind    string
+	headers    string
+	body       secret.Sealed
+	kind       string
+	conditions string
 }
 
 // checkFields resolves c's protected values into stored form. stored is nil
@@ -103,26 +143,30 @@ func checkFields(c config.Check, stored *protectedValues) (fields, error) {
 	if err != nil {
 		return fields{}, err
 	}
+	conds, err := encodeConditions(c.Conditions)
+	if err != nil {
+		return fields{}, err
+	}
 	kind := c.Kind
 	if kind == "" {
 		kind = config.CheckHTTP
 	}
-	return fields{headers: text, body: body, kind: kind}, nil
+	return fields{headers: text, body: body, kind: kind, conditions: conds}, nil
 }
 
 // values lists the column values in checkColumns order.
 func (f fields) values(c config.Check) []any {
 	return []any{c.Name, f.kind, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter, c.TLSOff,
-		c.Method, f.headers, blob(f.body.Data), blob(f.body.Key), c.ExpectText, c.Host, c.Port, int64(c.Period), int64(c.Grace)}
+		c.Method, f.headers, blob(f.body.Data), blob(f.body.Key), c.ExpectText, c.Host, c.Port, int64(c.Period), int64(c.Grace), f.conditions}
 }
 
 func scanCheck(row scanner) (config.Check, error) {
 	var c config.Check
-	var kind, headers string
+	var kind, headers, conds string
 	var interval, timeout, period, grace int64
 	var body, bodyKey []byte
 	err := row.Scan(&c.Name, &kind, &c.URL, &interval, &timeout, &c.ExpectedStatus, &c.Channel, &c.AlertAfter, &c.RecoverAfter, &c.TLSOff,
-		&c.Method, &headers, &body, &bodyKey, &c.ExpectText, &c.Host, &c.Port, &period, &grace)
+		&c.Method, &headers, &body, &bodyKey, &c.ExpectText, &c.Host, &c.Port, &period, &grace, &conds)
 	if err != nil {
 		return config.Check{}, err
 	}
@@ -132,6 +176,9 @@ func scanCheck(row scanner) (config.Check, error) {
 	c.Interval, c.Timeout = time.Duration(interval), time.Duration(timeout)
 	c.Period, c.Grace = time.Duration(period), time.Duration(grace)
 	if c.Headers, err = decodeHeaders(headers); err != nil {
+		return config.Check{}, err
+	}
+	if c.Conditions, err = decodeConditions(conds); err != nil {
 		return config.Check{}, err
 	}
 	if len(body) > 0 {

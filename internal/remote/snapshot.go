@@ -60,28 +60,30 @@ type HeartbeatDTO struct {
 // HeaderDTO.Value carry the edit (ProtectedDTO; absent keeps) and the *Set
 // fields are ignored. Kind is "http" or "tcp" (empty on write means http) and
 // Method is the HTTP method (empty on write means GET). Host has no brackets
-// for IPv6. A heartbeat has kind "heartbeat", PeriodMS and GraceMS and none of
-// the HTTP or TCP fields; its ping token is never in a CheckDTO.
+// for IPv6. Conditions are plain and travel the same way in both directions.
+// A heartbeat has kind "heartbeat", PeriodMS and GraceMS and none of the HTTP
+// or TCP fields; its ping token is never in a CheckDTO.
 type CheckDTO struct {
-	Name           string        `json:"name"`
-	URL            string        `json:"url"`
-	IntervalMS     int64         `json:"interval_ms"`
-	TimeoutMS      int64         `json:"timeout_ms"`
-	ExpectedStatus int           `json:"expected_status"`
-	Channel        string        `json:"channel"`
-	AlertAfter     int           `json:"alert_after"`
-	RecoverAfter   int           `json:"recover_after"`
-	TLSOff         bool          `json:"tls_off"`
-	Kind           string        `json:"kind"`
-	Method         string        `json:"method"`
-	Headers        []HeaderDTO   `json:"headers"`
-	Body           *ProtectedDTO `json:"body,omitempty"`
-	BodySet        bool          `json:"body_set"`
-	ExpectText     string        `json:"expect_text"`
-	Host           string        `json:"host"`
-	Port           int           `json:"port"`
-	PeriodMS       int64         `json:"period_ms"`
-	GraceMS        int64         `json:"grace_ms"`
+	Name           string         `json:"name"`
+	URL            string         `json:"url"`
+	IntervalMS     int64          `json:"interval_ms"`
+	TimeoutMS      int64          `json:"timeout_ms"`
+	ExpectedStatus int            `json:"expected_status"`
+	Channel        string         `json:"channel"`
+	AlertAfter     int            `json:"alert_after"`
+	RecoverAfter   int            `json:"recover_after"`
+	TLSOff         bool           `json:"tls_off"`
+	Kind           string         `json:"kind"`
+	Method         string         `json:"method"`
+	Headers        []HeaderDTO    `json:"headers"`
+	Body           *ProtectedDTO  `json:"body,omitempty"`
+	BodySet        bool           `json:"body_set"`
+	ExpectText     string         `json:"expect_text"`
+	Conditions     []ConditionDTO `json:"conditions"`
+	Host           string         `json:"host"`
+	Port           int            `json:"port"`
+	PeriodMS       int64          `json:"period_ms"`
+	GraceMS        int64          `json:"grace_ms"`
 }
 
 // HeaderDTO is one request header: a plain name and a protected value.
@@ -89,6 +91,34 @@ type HeaderDTO struct {
 	Name     string        `json:"name"`
 	ValueSet bool          `json:"value_set"`
 	Value    *ProtectedDTO `json:"value,omitempty"`
+}
+
+// ConditionDTO is one HTTP response condition (see config.Condition). Kind is
+// json, regex, response_time or header; only that kind's fields are set.
+type ConditionDTO struct {
+	Kind     string `json:"kind"`
+	Path     string `json:"path,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Value    string `json:"value,omitempty"`
+	Pattern  string `json:"pattern,omitempty"`
+	WithinMS int64  `json:"within_ms,omitempty"`
+}
+
+func conditionDTOs(conds []config.Condition) []ConditionDTO {
+	var out []ConditionDTO
+	for _, c := range conds {
+		out = append(out, ConditionDTO{Kind: c.Kind, Path: c.Path, Name: c.Name, Value: c.Value, Pattern: c.Pattern, WithinMS: c.Within.Milliseconds()})
+	}
+	return out
+}
+
+// conditions converts the wire form; WithinMS must already be in range.
+func conditions(dtos []ConditionDTO) []config.Condition {
+	var out []config.Condition
+	for _, d := range dtos {
+		out = append(out, config.Condition{Kind: d.Kind, Path: d.Path, Name: d.Name, Value: d.Value, Pattern: d.Pattern, Within: time.Duration(d.WithinMS) * time.Millisecond})
+	}
+	return out
 }
 
 // MaintenanceDTO is a stored maintenance window. Weekdays are 0 (Sunday) to 6.
@@ -258,7 +288,7 @@ func checkDTO(c config.Check) CheckDTO {
 	d := CheckDTO{Name: c.Name, URL: c.URL, IntervalMS: c.Interval.Milliseconds(), TimeoutMS: c.Timeout.Milliseconds(), ExpectedStatus: c.ExpectedStatus,
 		Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
 		Kind: c.Kind, Method: c.Method, BodySet: !c.Body.Empty(), ExpectText: c.ExpectText, Host: c.Host, Port: c.Port,
-		PeriodMS: c.Period.Milliseconds(), GraceMS: c.Grace.Milliseconds()}
+		PeriodMS: c.Period.Milliseconds(), GraceMS: c.Grace.Milliseconds(), Conditions: conditionDTOs(c.Conditions)}
 	if d.Kind == "" {
 		d.Kind = config.CheckHTTP
 	}
@@ -467,7 +497,7 @@ func (c CheckDTO) snapshotCheck(key []byte) config.Check {
 	out := config.Check{Name: c.Name, URL: c.URL, Interval: time.Duration(c.IntervalMS) * time.Millisecond, Timeout: time.Duration(c.TimeoutMS) * time.Millisecond,
 		ExpectedStatus: c.ExpectedStatus, Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
 		Kind: c.Kind, Method: c.Method, ExpectText: c.ExpectText, Host: c.Host, Port: c.Port,
-		Period: time.Duration(c.PeriodMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond}
+		Period: time.Duration(c.PeriodMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond, Conditions: conditions(c.Conditions)}
 	if c.BodySet {
 		out.Body = placeholder(key)
 	}
