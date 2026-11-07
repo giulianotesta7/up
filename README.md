@@ -221,6 +221,8 @@ A heartbeat's `monitor` also carries its `period_ms` and `grace_ms` (its alert e
 
 ### Push channels
 
+In `c`, set **Kind** (`←`/`→`) to the service; the form shows its fields below and keeps its size whatever the kind. Tokens are masked as you type; URLs are not. Editing shows a saved token or webhook URL as `set ‹ keep ›`: type to replace it (the ntfy access token can also be cleared). If saving fails, the reason replaces the hint and the cursor moves to that field.
+
 | Kind | Fields | Sends |
 | --- | --- | --- |
 | `ntfy` | Server URL (default `https://ntfy.sh`), topic, optional access token, priority `min`, `low`, `default`, `high` or `max` | `POST {server}/{topic}` with `Title`, `Priority` and `Tags` headers, `Bearer` token if set |

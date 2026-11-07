@@ -12,14 +12,60 @@ import (
 	"github.com/giulianotesta7/up/internal/store"
 )
 
-var channelLabels = [...]string{"Name", "Kind", "SMTP server", "Recipients"}
+// channelRow is one row of the channel form. Which rows show depends on the
+// kind (kindRows); channelForm.focus indexes them.
+type channelRow int
+
+const (
+	rowName channelRow = iota
+	rowKind
+	rowSMTP
+	rowRecipients
+	rowURL
+	rowAuthName
+	rowAuth
+	rowServer
+	rowTopic
+	rowToken
+	rowChat
+	rowPriority
+)
+
+// kindRows are the rows a kind shows, top to bottom.
+func kindRows(kind string) []channelRow {
+	rows := []channelRow{rowName, rowKind}
+	switch kind {
+	case config.KindWebhook:
+		return append(rows, rowURL, rowAuthName, rowAuth)
+	case config.KindNtfy:
+		return append(rows, rowServer, rowTopic, rowToken, rowPriority)
+	case config.KindTelegram:
+		return append(rows, rowToken, rowChat)
+	case config.KindDiscord, config.KindSlack:
+		return append(rows, rowURL)
+	case config.KindGotify:
+		return append(rows, rowServer, rowToken, rowPriority)
+	}
+	return append(rows, rowSMTP, rowRecipients)
+}
+
+// maxKindRows is the most rows any kind shows. Shorter kinds pad to it, so
+// the box keeps one size while Kind cycles.
+func maxKindRows() int {
+	n := 0
+	for _, kind := range config.ChannelKinds {
+		n = max(n, len(kindRows(kind)))
+	}
+	return n
+}
 
 type channelForm struct {
-	values          [4]string
+	values          [4]string // name, kind, SMTP server, recipients
 	focus, cursor   int
 	editing, saving bool
 	err             error
 	hook            hookForm
+	push            pushForm
 }
 type channelSaveMsg struct {
 	generation uint64
@@ -39,56 +85,205 @@ func smtpNames(snap Snapshot) []string {
 	return names
 }
 func newChannelForm(snap Snapshot) *channelForm {
-	f := &channelForm{values: [4]string{"", config.KindEmail, "", ""}}
+	f := &channelForm{values: [4]string{"", config.KindEmail, "", ""}, push: newPushForm()}
 	if names := smtpNames(snap); len(names) > 0 {
 		f.values[2] = names[0]
 	}
 	return f
 }
 func editChannelForm(c config.Channel) *channelForm {
-	return &channelForm{values: [4]string{c.Name, c.Kind, c.SMTPServer, strings.Join(c.Recipients, ", ")}, focus: 1, editing: true, hook: editHookForm(c)}
+	return &channelForm{values: [4]string{c.Name, c.Kind, c.SMTPServer, strings.Join(c.Recipients, ", ")}, focus: 1, editing: true, hook: editHookForm(c), push: editPushForm(c)}
 }
+
+func (f channelForm) kind() string { return f.values[1] }
+
+func (f channelForm) rows() []channelRow { return kindRows(f.kind()) }
+
+// fieldCount is how many rows tab cycles through.
+func (f channelForm) fieldCount() int { return len(f.rows()) }
+
+// row is the focused row.
+func (f channelForm) row() channelRow {
+	rows := f.rows()
+	if f.focus < 0 || f.focus >= len(rows) {
+		return rowName
+	}
+	return rows[f.focus]
+}
+
+func (f channelForm) label(r channelRow) string {
+	switch r {
+	case rowKind:
+		return "Kind"
+	case rowSMTP:
+		return "SMTP server"
+	case rowRecipients:
+		return "Recipients"
+	case rowURL:
+		if f.kind() == config.KindWebhook {
+			return "URL"
+		}
+		return "Webhook URL"
+	case rowAuthName:
+		return "Auth header name"
+	case rowAuth:
+		return "Auth value"
+	case rowServer:
+		return "Server URL"
+	case rowTopic:
+		return "Topic"
+	case rowToken:
+		return tokenLabel(f.kind())
+	case rowChat:
+		return "Chat ID"
+	case rowPriority:
+		return "Priority"
+	}
+	return "Name"
+}
+
+// text is the typed text of a row; nil for a choice.
+func (f *channelForm) text(r channelRow) *string {
+	switch r {
+	case rowName:
+		return &f.values[0]
+	case rowRecipients:
+		return &f.values[3]
+	case rowURL:
+		return &f.hook.url.text
+	case rowAuthName:
+		return &f.hook.authName
+	case rowAuth:
+		return &f.hook.auth.text
+	case rowServer:
+		return &f.push.server[pushSlot(f.kind())]
+	case rowTopic:
+		return &f.push.topic
+	case rowToken:
+		return &f.push.token.text
+	case rowChat:
+		return &f.push.chat
+	}
+	return nil
+}
+
+// choice is the selected value of a ‹ › row; nil for typed text.
+func (f *channelForm) choice(r channelRow) *string {
+	switch r {
+	case rowKind:
+		return &f.values[1]
+	case rowSMTP:
+		return &f.values[2]
+	case rowPriority:
+		return &f.push.priority[pushSlot(f.kind())]
+	}
+	return nil
+}
+
+func (f channelForm) choices(r channelRow, snap Snapshot) []string {
+	switch r {
+	case rowSMTP:
+		return smtpNames(snap)
+	case rowPriority:
+		return priorities(f.kind())
+	}
+	return config.ChannelKinds
+}
+
+// fieldText is the text of the focused row.
+func (f *channelForm) fieldText() string {
+	if t := f.text(f.row()); t != nil {
+		return *t
+	}
+	return ""
+}
+
 func (f *channelForm) insert(text string) {
-	if f.focus == 1 || (f.focus == 2 && !f.isWebhook()) {
-		return
+	r := f.row()
+	switch {
+	case f.text(r) == nil:
+	case f.protected(r) != nil:
+		f.protectedInsert(text)
+	default:
+		editText(f.text(r), &f.cursor, func(e *monitorForm) { e.insert(text) })
 	}
-	if f.isWebhook() && f.focus >= hookURLRow {
-		f.hookInsert(text)
-		return
-	}
-	editor := monitorForm{focus: 0, cursor: f.cursor}
-	editor.values[0] = f.values[f.focus]
-	editor.insert(text)
-	f.values[f.focus] = editor.values[0]
-	f.cursor = editor.cursor
 }
 func (f *channelForm) edit(msg tea.KeyPressMsg, snap Snapshot) {
-	if f.isWebhook() && f.focus >= hookURLRow {
-		f.hookEdit(msg)
-		return
-	}
-	if f.focus == 1 && f.editing {
-		return // the kind of a saved channel does not change
-	}
-	if f.focus == 1 || f.focus == 2 {
-		options := config.ChannelKinds
-		if f.focus == 2 {
-			options = smtpNames(snap)
+	r := f.row()
+	if value := f.choice(r); value != nil {
+		if r == rowKind && f.editing {
+			return // the kind of a saved channel does not change
 		}
 		switch msg.String() {
 		case "left":
-			f.values[f.focus] = cycleChoice(options, f.values[f.focus], -1)
+			*value = cycleChoice(f.choices(r, snap), *value, -1)
 		case "right":
-			f.values[f.focus] = cycleChoice(options, f.values[f.focus], 1)
+			*value = cycleChoice(f.choices(r, snap), *value, 1)
+		default:
+			return
+		}
+		if r == rowKind {
+			f.err = nil
 		}
 		return
 	}
-	editor := monitorForm{focus: 0, cursor: f.cursor}
-	editor.values[0] = f.values[f.focus]
-	editor.edit(msg)
-	f.values[f.focus] = editor.values[0]
-	f.cursor = editor.cursor
+	if f.protected(r) != nil {
+		f.protectedEdit(msg)
+		return
+	}
+	editText(f.text(r), &f.cursor, func(e *monitorForm) { e.edit(msg) })
 }
+
+// editText applies a monitor form text edit to one channel form field.
+func editText(text *string, cursor *int, apply func(*monitorForm)) {
+	editor := monitorForm{focus: 0, cursor: *cursor}
+	editor.values[0] = *text
+	apply(&editor)
+	*text, *cursor = editor.values[0], editor.cursor
+}
+
+// focusError moves the focus to the row an error names, so the fix starts
+// where the cursor is. The error itself shows in the hint slot.
+func (f *channelForm) focusError(err error) {
+	r, ok := errorRow(err)
+	if !ok || (r == rowName && f.editing) {
+		return
+	}
+	for i, row := range f.rows() {
+		if row == r {
+			f.focus = i
+			f.cursor = len([]rune(f.fieldText()))
+			return
+		}
+	}
+}
+
+// errorRow is the row a save error is about, from its first line: the
+// form's own checks and the store's validation name the field.
+func errorRow(err error) (channelRow, bool) {
+	text := strings.ToLower(firstLine(err.Error()))
+	for _, m := range []struct {
+		match string
+		row   channelRow
+	}{
+		{"already exists", rowName}, {"name is required", rowName}, {`name "none"`, rowName},
+		{"smtp server", rowSMTP}, {"recipient", rowRecipients},
+		{"requires a header name", rowAuthName}, {"auth header name", rowAuthName}, {"auth value", rowAuth},
+		{"server url", rowServer}, {"topic", rowTopic}, {"chat id", rowChat}, {"token", rowToken}, {"priority", rowPriority},
+		{"url", rowURL}, {"origin", rowURL}, {"webhook values", rowURL},
+	} {
+		if strings.Contains(text, m.match) {
+			return m.row, true
+		}
+	}
+	return rowName, false
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
+}
+
 func (m Model) handleChannelFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	f := *m.channelForm
 	m.channelForm = &f
@@ -111,15 +306,13 @@ func (m Model) handleChannelFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		f.focus = first + (f.focus-first+delta+count)%count
 		f.cursor = len([]rune(f.fieldText()))
 	case "enter":
-		channel := config.Channel{Name: f.values[0], Kind: f.values[1], SMTPServer: f.values[2], Recipients: config.ParseRecipients(f.values[3])}
-		if f.isWebhook() {
-			var err error
-			if channel, err = f.webhookChannel(m.snap); err != nil {
-				f.err = err
-				return m, nil
-			}
-			f.err = nil
+		channel, err := f.channel(m.snap)
+		if err != nil {
+			f.err = err
+			f.focusError(err)
+			return m, nil
 		}
+		f.err = nil
 		editing := f.editing
 		f.saving = true
 		m.generation++
@@ -195,6 +388,23 @@ func (m Model) handleChannelKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+
+// channel is the channel to save, built from the kind's rows. Email
+// channels are checked by the store; the others are checked here first,
+// because their protected values are sealed before the store sees them.
+func (f channelForm) channel(snap Snapshot) (config.Channel, error) {
+	switch f.kind() {
+	case config.KindEmail:
+		return config.Channel{Name: f.values[0], Kind: config.KindEmail, SMTPServer: f.values[2], Recipients: config.ParseRecipients(f.values[3])}, nil
+	case config.KindWebhook:
+		return f.webhookChannel(snap)
+	}
+	return f.pushChannel(snap)
+}
+
+// renderChannelForm draws the kind's rows padded to the longest kind, then
+// the hint slot, which a save error takes over, so neither the box nor the
+// rows move while Kind cycles.
 func renderChannelForm(f channelForm, snap Snapshot, now time.Time, loadErr error) string {
 	var b strings.Builder
 	title := "New channel"
@@ -202,59 +412,96 @@ func renderChannelForm(f channelForm, snap Snapshot, now time.Time, loadErr erro
 		title = "Edit channel"
 	}
 	b.WriteString(titleStyle.Render(title) + "\n" + renderBanners(snap, now, loadErr))
-	if f.isWebhook() {
-		f.renderHookRows(&b, snap)
-		if f.err != nil {
-			b.WriteString("\n" + warnStyle.Render("Cannot save channel: "+f.err.Error()) + "\n")
+	rows := f.rows()
+	for i, r := range rows {
+		marker, label := " ", f.label(r)
+		if i == f.focus {
+			marker, label = accentStyle.Render(">"), accentStyle.Render(label)
 		}
-		b.WriteString(f.hookHelp())
-		switch {
-		case f.saving:
-			b.WriteString(renderHelp("Saving channel… · ctrl+c quit"))
-		case f.focus == 1:
-			b.WriteString(renderHelp("←/→ choose · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
-		case f.focus == hookURLRow || f.focus == hookAuthRow:
-			b.WriteString(renderHelp("←/→ keep/replace/clear · tab/shift+tab focus · enter save · esc cancel"))
-		default:
-			b.WriteString(renderHelp("tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
-		}
-		return b.String()
+		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, f.renderValue(r, i == f.focus, snap))
 	}
-	for i, label := range channelLabels {
-		marker := " "
-		value := f.values[i]
-		focused := i == f.focus
-		if i == 1 {
-			value = renderChoice(value, nil, focused)
-		} else if i == 2 {
-			names := smtpNames(snap)
-			if len(names) == 0 {
-				value = helpStyle.Render("(none — press esc twice, then s to add one)")
-			} else {
-				value = renderChoice(value, names, focused)
-			}
-		} else if focused {
-			runes := []rune(value)
-			value = string(runes[:f.cursor]) + accentStyle.Render("│") + string(runes[f.cursor:])
-		}
-		if focused {
-			marker = accentStyle.Render(">")
-			label = accentStyle.Render(label)
-		}
-		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, value)
-	}
+	b.WriteString(strings.Repeat("\n", maxKindRows()-len(rows)) + "\n")
+	// The hint slot is two lines: the hint and a spacer, or an error that
+	// wraps once.
+	hint := f.hint(snap)
 	if f.err != nil {
-		b.WriteString("\n" + warnStyle.Render("Cannot save channel: "+f.err.Error()) + "\n")
+		hint = wrapStyled(warnStyle, "Cannot save channel: "+firstLine(f.err.Error()))
 	}
-	b.WriteString("\n" + helpStyle.Render("comma-separated") + "\n")
-	if f.saving {
+	if !strings.Contains(hint, "\n") {
+		hint += "\n"
+	}
+	b.WriteString(hint + "\n")
+	r := f.row()
+	switch {
+	case f.saving:
 		b.WriteString(renderHelp("Saving channel… · ctrl+c quit"))
-	} else if f.focus == 1 || f.focus == 2 {
+	case f.choice(r) != nil:
 		b.WriteString(renderHelp("←/→ choose · tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
-	} else {
+	case f.protected(r) != nil:
+		actions := make([]string, 0, 3)
+		for _, a := range f.actions(r) {
+			actions = append(actions, editLabel(a))
+		}
+		b.WriteString(renderHelp("←/→ " + strings.Join(actions, "/") + " · tab/shift+tab focus · enter save · esc cancel"))
+	default:
 		b.WriteString(renderHelp("tab/shift+tab focus · enter save · esc cancel · ctrl+c quit"))
 	}
 	return b.String()
+}
+
+func (f channelForm) renderValue(r channelRow, focused bool, snap Snapshot) string {
+	cursor := func(text string) string {
+		if !focused {
+			return text
+		}
+		runes := []rune(text)
+		at := min(f.cursor, len(runes))
+		return string(runes[:at]) + accentStyle.Render("│") + string(runes[at:])
+	}
+	switch r {
+	case rowKind:
+		return renderChoice(f.kind(), nil, focused)
+	case rowSMTP:
+		if len(smtpNames(snap)) == 0 {
+			return helpStyle.Render("(none — press esc twice, then s to add one)")
+		}
+		return renderChoice(f.values[2], nil, focused)
+	case rowPriority:
+		return renderChoice(*f.choice(r), nil, focused)
+	case rowURL, rowAuth, rowToken:
+		p := *f.protected(r)
+		shown, origin := p.text, ""
+		if r == rowURL {
+			origin = f.hook.origin
+		} else {
+			shown = strings.Repeat("•", len([]rune(p.text)))
+		}
+		if p.set && (p.edit != config.EditReplace || p.text == "") {
+			state := helpStyle.Render("set")
+			if origin != "" {
+				state = origin + " " + state
+			}
+			return state + " " + renderChoice(editLabel(p.edit), nil, focused)
+		}
+		if p.set {
+			return cursor(shown) + " " + renderChoice("replace", nil, focused)
+		}
+		return cursor(shown)
+	}
+	return cursor(*f.text(r))
+}
+
+// hint is the line under the rows: what to type, or a warning.
+func (f channelForm) hint(snap Snapshot) string {
+	switch kind := f.kind(); {
+	case kind != config.KindEmail && !snap.HasKey:
+		return warnStyle.Render(noKeyHint)
+	case kind == config.KindEmail:
+		return helpStyle.Render("comma-separated")
+	case kind == config.KindWebhook:
+		return helpStyle.Render("Sends a JSON POST. Any 2xx counts as delivered; no retries.")
+	}
+	return f.pushHint()
 }
 func renderChannelDelete(p deletePrompt, snap Snapshot, now time.Time, loadErr error) string {
 	content := titleStyle.Render("Delete channel") + "\n" + renderBanners(snap, now, loadErr) + fmt.Sprintf("Delete channel %q? This cannot be undone.\n", p.name)

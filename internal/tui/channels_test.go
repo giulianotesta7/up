@@ -40,7 +40,7 @@ func TestChannelsCreateEdit(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].SMTPServer != "relay" || strings.Join(list[0].Recipients, ",") != "ana@example.com,oncall@example.com" {
 		t.Fatalf("channel %v %v", list, err)
 	}
-	requireText(t, m, "Channels", "ops-team", "relay", "ana@example.com, oncall@example.com")
+	requireText(t, m, "Channels", "ops-team", "relay → ana@example.com +1")
 	m, _ = press(t, m, keyE)
 	requireText(t, m, "Edit channel", "Name: ops-team")
 	m, _ = press(t, m, keyShiftTab)
@@ -105,7 +105,7 @@ func TestChannelsListAndDeletion(t *testing.T) {
 	next, _ := m.Update(m.Init()())
 	m = next.(Model)
 	m, _ = press(t, m, keyC)
-	requireText(t, m, "NAME", "KIND", "SMTP SERVER", "RECIPIENTS", "MONITORS", "ana@example.com, web@example.com")
+	requireText(t, m, "NAME", "KIND", "SENDS TO", "MONITORS", "gmail → ana@example.com +1")
 	out := view(m)
 	counts := map[string]string{"ops-team": "2", "unused": "0"}
 	for _, line := range strings.Split(out, "\n") {

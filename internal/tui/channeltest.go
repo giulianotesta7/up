@@ -17,7 +17,7 @@ import (
 // Copy shown by the channel test popup.
 const (
 	testAcceptedSMTP = "Accepted by the mail server; inbox delivery is not confirmed."
-	testAcceptedHook = "Accepted (HTTP 2xx)"
+	testAcceptedHook = "Accepted (HTTP 2xx)" // webhook and push services
 	testRunning      = "Sending test…"
 	testAlready      = "A test is already running for this channel."
 	testNoDaemon     = "Daemon not running; start `up serve` (or reconnect to the server) and retry."
@@ -146,7 +146,7 @@ func renderChannelTest(p channelTestPrompt, snap Snapshot, now time.Time, loadEr
 		}
 	case seen && t.Status == config.TestOK:
 		text := testAcceptedSMTP
-		if kind == config.KindWebhook {
+		if kind != config.KindEmail {
 			text = testAcceptedHook
 		}
 		b.WriteString(upStyle.Render("✓ " + text))
