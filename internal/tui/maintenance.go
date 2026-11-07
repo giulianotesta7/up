@@ -456,16 +456,7 @@ func describeWindow(w config.MaintenanceWindow) string {
 
 // shortDuration formats d like the durations the mute prompt accepts: "2h",
 // "1h30m", "45m".
-func shortDuration(d time.Duration) string {
-	s := d.String()
-	if strings.HasSuffix(s, "m0s") {
-		s = strings.TrimSuffix(s, "0s")
-	}
-	if strings.HasSuffix(s, "h0m") {
-		s = strings.TrimSuffix(s, "0m")
-	}
-	return s
-}
+func shortDuration(d time.Duration) string { return config.ShortDuration(d) }
 
 // heldPending is what the recipients will be told when nothing holds alerts:
 // "down", "recovery" or "" (nothing).

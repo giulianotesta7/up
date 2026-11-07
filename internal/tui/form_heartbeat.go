@@ -39,7 +39,7 @@ func editHeartbeatForm(c config.Check, detail bool) *monitorForm {
 	d := config.BuiltinDefaults()
 	return &monitorForm{
 		kind:   kindHeartbeat,
-		values: [5]string{c.Name, "", d.Interval.String(), d.Timeout.String()}, period: shortDuration(c.Period), grace: shortDuration(c.Grace),
+		values: [5]string{c.Name, "", shortDuration(d.Interval), shortDuration(d.Timeout)}, period: shortDuration(c.Period), grace: shortDuration(c.Grace),
 		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: "on",
 		focus: focusPeriod, cursor: len([]rune(shortDuration(c.Period))), editing: true, returnDetail: detail, base: c, hadToken: true,
 	}
