@@ -2,6 +2,7 @@
 package check
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -74,7 +75,8 @@ func New() *Checker {
 
 // Run performs one check for c: a TCP connect for Kind tcp, otherwise one
 // request (GET unless it sets a method). Redirects are followed and the final
-// status is compared with c.ExpectedStatus.
+// status is compared with c.ExpectedStatus, then the expected text and the
+// conditions are checked in order; the first that fails is the reason.
 func (ch *Checker) Run(ctx context.Context, c config.Check) Result {
 	if c.Kind == config.CheckTCP {
 		return ch.runTCP(ctx, c)
@@ -123,12 +125,15 @@ func (ch *Checker) Run(ctx context.Context, c config.Check) Result {
 		res.Error = fmt.Sprintf("unexpected status %d (expected %d)", resp.StatusCode, c.ExpectedStatus)
 		return res
 	}
-	if c.ExpectText == "" {
+	if !c.ReadsBody() {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrain))
-		res.Status = StatusUp
+		res.Status, res.Error = StatusUp, failedCondition(c.Conditions, &response{latency: res.Latency, header: resp.Header})
+		if res.Error != "" {
+			res.Status = StatusDown
+		}
 		return res
 	}
-	found, truncated, err := findText(resp.Body, c.ExpectText)
+	body, truncated, err := readBody(resp.Body)
 	switch {
 	case err != nil && ctx.Err() != nil:
 		res.Status = StatusCanceled
@@ -136,10 +141,14 @@ func (ch *Checker) Run(ctx context.Context, c config.Check) Result {
 		res.Status, res.Error = StatusDown, fmt.Sprintf("timeout after %s", c.Timeout)
 	case err != nil:
 		res.Status, res.Error = StatusDown, err.Error()
-	case !found:
+	case c.ExpectText != "" && !bytes.Contains(body, []byte(c.ExpectText)):
 		res.Status, res.Error = StatusDown, textFailure(truncated)
 	default:
 		res.Status = StatusUp
+		r := response{latency: res.Latency, header: resp.Header, body: body, truncated: truncated}
+		if res.Error = failedCondition(c.Conditions, &r); res.Error != "" {
+			res.Status = StatusDown
+		}
 	}
 	return res
 }

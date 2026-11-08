@@ -19,7 +19,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 
 ## Features
 
-- **HTTP checks** with per-monitor interval, timeout and expected status. Redirects are followed. Optional method, headers, body and expected text.
+- **HTTP checks** with per-monitor interval, timeout and expected status. Redirects are followed. Optional method, headers, body, expected text and response conditions (JSON value, body regex, max response time, response header).
 - **TCP checks** that connect to a host and port, for services without an HTTP endpoint.
 - **Managed from the TUI.** Add, edit, delete and mute monitors; the daemon picks up changes within ~2s.
 - **Remote TUI.** Run the daemon on a server and manage it from your laptop over an authenticated API.
@@ -136,8 +136,20 @@ Only **name** and **URL** are required; the rest uses the defaults above, with m
 | Headers | Name/value pairs sent on every check. `space` on `+ Header` adds one, `ctrl+d` removes the focused one. Names must be unique, ignoring case. |
 | Request body | Text sent as the body. |
 | Expected text | Literal, case-sensitive text the body must contain. The status **and** the text must match. Not allowed with `HEAD`. |
+| Conditions | Optional extra rules the response must meet, see below. |
 
-Only the first 1 MiB of a response is read; if the text is not in it, the check fails. Responses are not stored. Latency is the time until the response headers arrive. The detail view shows the method and expected text.
+**Conditions** are checked after the status and the expected text, in order; all must pass and the first that fails is the down reason. Several of each kind are allowed. In the form, `space` on `+ Condition` adds one, `←`/`→` on its `Condition` row picks the kind and `ctrl+d` removes the focused one; a save error moves the focus to the condition it names:
+
+| Kind | Passes when | Down reason |
+|---|---|---|
+| JSON value | The value at a dot-separated path (numbers index arrays: `services.0.status`) equals the text given, ignoring case. Values compare as text: `ok` matches `"ok"`, `true` matches `true` and `"true"`, `3` matches `3`. Empty: the path only has to exist. | `JSON status = "degraded", want "ok"`, `JSON checks.db.healthy missing` |
+| Body regex | The body matches a [Go regular expression](https://pkg.go.dev/regexp/syntax); use flags such as `(?i)` for case. | `body does not match /ready/` |
+| Max response time | The response headers arrive within the limit, which must be lower than the timeout. | `response took 1.24s, limit 800ms` |
+| Response header | A response header equals the value given; name and value ignore case. Empty: the header only has to be present. | `header X-Version = "2", want "3"` |
+
+Received values in reasons are cut to 40 characters, and values of sensitive headers (cookies, `Authorization`, any name with `token`, `secret`, `key`, `password` or `auth`) are never shown. An invalid regex or JSON path, an empty header name or a limit not lower than the timeout is rejected when saving. JSON and regex conditions are not allowed with `HEAD`.
+
+Only the first 1 MiB of a response is read; if the text is not in it, the check fails. Responses are not stored. Latency is the time until the response headers arrive. The detail view shows the method, expected text and conditions (one line each under `Expect`).
 
 A monitor with headers or a body does not follow a redirect to another scheme, host or port: it goes down saying so, so those values never reach a host you did not configure. Every other redirect is followed.
 
@@ -323,7 +335,7 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 | `POST`/`GET /api/v1/channels/{name}/test` | requests a channel test (`202`, or `409` while one is active) and reads the newest one; the daemon sends it |
 | `GET`/`POST /api/v1/checks/{name}/heartbeat-token` | shows a heartbeat's ping token, or replaces it (the old one stops working), as `{"token", "path"}`; `404` for a monitor that is not a heartbeat |
 
-Heartbeat monitors use `"kind": "heartbeat"` with `period_ms` and `grace_ms`. The snapshot carries each heartbeat's `heartbeat` state (`waiting`, `last_ping`, `deadline`) and the daemon's `api` listener (`listen`, `tls`); never the ping token.
+HTTP monitors take optional `conditions`, an ordered list of `{"kind": "json", "path", "value"}`, `{"kind": "regex", "pattern"}`, `{"kind": "response_time", "within_ms"}` or `{"kind": "header", "name", "value"}`; the snapshot returns them the same way. Heartbeat monitors use `"kind": "heartbeat"` with `period_ms` and `grace_ms`. The snapshot carries each heartbeat's `heartbeat` state (`waiting`, `last_ping`, `deadline`) and the daemon's `api` listener (`listen`, `tls`); never the ping token.
 
 Bodies are strict JSON, limited to 1 MiB. Errors: `400` invalid input, `404` not found, `409` duplicate or still in use. Rejected requests change nothing.
 

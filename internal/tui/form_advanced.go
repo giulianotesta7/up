@@ -3,10 +3,14 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/giulianotesta7/up/internal/config"
 	"github.com/giulianotesta7/up/internal/secret"
@@ -94,6 +98,13 @@ type headerRow struct {
 	value protectedField
 }
 
+// condRow is one response condition. The fields of every kind are kept while
+// the kind is cycled; only the chosen kind's fields are saved.
+type condRow struct {
+	kind                               string
+	path, name, value, pattern, within string
+}
+
 // advancedForm is the optional HTTP request section. The zero value is a
 // closed fold with GET and nothing else.
 type advancedForm struct {
@@ -102,12 +113,20 @@ type advancedForm struct {
 	headers []headerRow
 	body    protectedField
 	expect  string
+	conds   []condRow
 }
 
 func newAdvanced(c config.Check) advancedForm {
 	a := advancedForm{method: c.Method, body: newProtected(c.Body), expect: c.ExpectText}
 	for _, h := range c.Headers {
 		a.headers = append(a.headers, headerRow{name: h.Name, orig: h.Name, value: newProtected(h.Value)})
+	}
+	for _, cond := range c.Conditions {
+		row := condRow{kind: cond.Kind, path: cond.Path, name: cond.Name, value: cond.Value, pattern: cond.Pattern}
+		if cond.Within > 0 {
+			row.within = config.ShortDuration(cond.Within)
+		}
+		a.conds = append(a.conds, row)
 	}
 	a.open = a.configured()
 	return a
@@ -122,7 +141,7 @@ func (a advancedForm) methodName() string {
 
 // configured reports whether any advanced setting differs from the default.
 func (a advancedForm) configured() bool {
-	return a.methodName() != "GET" || len(a.headers) > 0 || a.body.had || a.body.text != "" || a.expect != ""
+	return a.methodName() != "GET" || len(a.headers) > 0 || a.body.had || a.body.text != "" || a.expect != "" || len(a.conds) > 0
 }
 
 // Advanced stops follow focusAdvanced while the fold is open.
@@ -135,7 +154,22 @@ const (
 	stopAdd
 	stopBody
 	stopExpect
+	stopCondKind
+	stopCondPath
+	stopCondName
+	stopCondValue
+	stopCondPattern
+	stopCondWithin
+	stopCondAdd
 )
+
+// condFields are the stops after a condition's kind row, by kind.
+var condFields = map[string][]advStopKind{
+	config.ConditionJSON:         {stopCondPath, stopCondValue},
+	config.ConditionRegex:        {stopCondPattern},
+	config.ConditionResponseTime: {stopCondWithin},
+	config.ConditionHeader:       {stopCondName, stopCondValue},
+}
 
 type advStop struct {
 	kind advStopKind
@@ -150,7 +184,53 @@ func (a advancedForm) stops() []advStop {
 	for i := range a.headers {
 		out = append(out, advStop{stopHeaderName, i}, advStop{stopHeaderValue, i})
 	}
-	return append(out, advStop{kind: stopAdd}, advStop{kind: stopBody}, advStop{kind: stopExpect})
+	out = append(out, advStop{kind: stopAdd}, advStop{kind: stopBody}, advStop{kind: stopExpect})
+	for i, c := range a.conds {
+		out = append(out, advStop{stopCondKind, i})
+		for _, kind := range condFields[c.kind] {
+			out = append(out, advStop{kind, i})
+		}
+	}
+	return append(out, advStop{kind: stopCondAdd})
+}
+
+// focusStop moves the focus to the first advanced stop of row with one of
+// kinds, or to the row's kind row when it has none of them.
+func (f *monitorForm) focusStop(row int, kinds ...advStopKind) {
+	at := -1
+	for i, s := range f.adv.stops() {
+		if s.row != row || s.kind < stopCondKind || s.kind == stopCondAdd {
+			continue
+		}
+		if at < 0 || slices.Contains(kinds, s.kind) {
+			at = i
+		}
+		if slices.Contains(kinds, s.kind) {
+			break
+		}
+	}
+	if at >= 0 {
+		f.focus = focusCount + at
+		f.cursor = f.focusCursor()
+	}
+}
+
+// condText is the condition text field of stop s.
+func (a *advancedForm) condText(s advStop) *string {
+	c := &a.conds[s.row]
+	switch s.kind {
+	case stopCondPath:
+		return &c.path
+	case stopCondName:
+		return &c.name
+	case stopCondValue:
+		return &c.value
+	case stopCondPattern:
+		return &c.pattern
+	case stopCondWithin:
+		return &c.within
+	}
+	return nil
 }
 
 func (f monitorForm) stop() (advStop, bool) {
@@ -169,6 +249,8 @@ func (f *monitorForm) advText() *string {
 		return &f.adv.headers[s.row].name
 	case ok && s.kind == stopExpect:
 		return &f.adv.expect
+	case ok && s.kind > stopCondKind && s.kind < stopCondAdd:
+		return f.adv.condText(s)
 	}
 	return nil
 }
@@ -188,6 +270,7 @@ func (f *monitorForm) handleAdvancedKey(msg tea.KeyPressMsg, hasKey bool) bool {
 		return false
 	}
 	f.adv.headers = slices.Clone(f.adv.headers)
+	f.adv.conds = slices.Clone(f.adv.conds)
 	key := msg.String()
 	if f.focus == focusAdvanced {
 		switch key {
@@ -234,8 +317,39 @@ func (f *monitorForm) handleAdvancedKey(msg tea.KeyPressMsg, hasKey bool) bool {
 		}
 	case stopExpect:
 		f.editText(msg)
+	case stopCondAdd:
+		if key == "space" || key == "right" || key == "+" {
+			f.adv.conds = append(f.adv.conds, condRow{kind: config.ConditionJSON})
+			f.focusStop(len(f.adv.conds) - 1)
+		}
+	case stopCondKind:
+		switch key {
+		case "ctrl+d":
+			f.removeCondition(s.row)
+		case "left", "right":
+			delta := map[string]int{"left": -1, "right": 1}[key]
+			f.adv.conds[s.row].kind = cycleChoice(config.ConditionKinds, f.adv.conds[s.row].kind, delta)
+		}
+	default:
+		if key == "ctrl+d" {
+			f.removeCondition(s.row)
+			return true
+		}
+		f.editText(msg)
 	}
 	return true
+}
+
+// removeCondition deletes a condition and focuses the next one, or the add
+// row.
+func (f *monitorForm) removeCondition(row int) {
+	f.adv.conds = slices.Delete(f.adv.conds, row, row+1)
+	if row < len(f.adv.conds) {
+		f.focusStop(row)
+		return
+	}
+	f.focus = focusCount + len(f.adv.stops()) - 1
+	f.cursor = 0
 }
 
 func (f *monitorForm) editText(msg tea.KeyPressMsg) {
@@ -275,9 +389,67 @@ func (f monitorForm) applyAdvanced(c *config.Check, key []byte) error {
 		}
 		c.Headers = append(c.Headers, h)
 	}
+	c.Conditions = nil
+	for i, row := range a.conds {
+		cond := config.Condition{Kind: row.kind}
+		switch row.kind {
+		case config.ConditionJSON:
+			cond.Path, cond.Value = row.path, row.value
+		case config.ConditionRegex:
+			cond.Pattern = row.pattern
+		case config.ConditionHeader:
+			cond.Name, cond.Value = row.name, row.value
+		case config.ConditionResponseTime:
+			if row.within == "" {
+				break
+			}
+			d, err := time.ParseDuration(row.within)
+			if err != nil {
+				return fmt.Errorf("condition %d: max response time %q is not valid: use a duration like 800ms", i+1, row.within)
+			}
+			cond.Within = d
+		}
+		c.Conditions = append(c.Conditions, cond)
+	}
 	var err error
 	c.Body, c.BodyEdit, err = a.body.seal(key, config.EditKeep)
 	return err
+}
+
+// conditionError matches the position a save error names.
+var conditionError = regexp.MustCompile(`(?m)^condition (\d+): (.*)$`)
+
+// focusError moves the focus to the condition field a save error names, if
+// it names one.
+func (f *monitorForm) focusError(err error) {
+	if err == nil || f.kind != "" {
+		return
+	}
+	found := conditionError.FindStringSubmatch(err.Error())
+	if found == nil {
+		return
+	}
+	n, _ := strconv.Atoi(found[1])
+	if n < 1 || n > len(f.adv.conds) {
+		return
+	}
+	var field advStopKind
+	switch text := found[2]; {
+	case strings.HasPrefix(text, "JSON path"):
+		field = stopCondPath
+	case strings.HasPrefix(text, "body regex"):
+		field = stopCondPattern
+	case strings.HasPrefix(text, "max response time"):
+		field = stopCondWithin
+	case strings.HasPrefix(text, "header name"):
+		field = stopCondName
+	case strings.HasPrefix(text, "JSON value"), strings.HasPrefix(text, "header value"):
+		field = stopCondValue
+	default:
+		field = stopCondKind
+	}
+	f.adv.open = true
+	f.focusStop(n-1, field)
 }
 
 func (a advancedForm) valueView(p protectedField, focused, hasKey bool) string {
@@ -350,6 +522,48 @@ func (f monitorForm) renderAdvanced(b *strings.Builder, hasKey bool, focusLine *
 		expect = string(r[:f.cursor]) + accentStyle.Render("│") + string(r[f.cursor:])
 	}
 	line(base+2, "Expected text", expect, "  ")
+	base += 3
+	labels := make([]string, len(config.ConditionKinds))
+	for i, kind := range config.ConditionKinds {
+		labels[i] = config.ConditionLabel(kind)
+	}
+	for i, c := range f.adv.conds {
+		line(base, fmt.Sprintf("Condition %d", i+1), renderChoice(config.ConditionLabel(c.kind), labels, f.focus == base), "  ")
+		base++
+		for _, kind := range condFields[c.kind] {
+			text := *f.adv.condText(advStop{kind, i})
+			line(base, condFieldLabels[kind], f.textView(text, condHints[kind], f.focus == base), "    ")
+			base++
+		}
+	}
+	add = helpStyle.Render("space to add · all must pass")
+	if f.focus == base {
+		add = "space to add · all must pass"
+	}
+	line(base, "+ Condition", add, "  ")
+}
+
+var condFieldLabels = map[advStopKind]string{
+	stopCondPath: "Path", stopCondName: "Name", stopCondValue: "Equals", stopCondPattern: "Pattern", stopCondWithin: "At most",
+}
+
+// condHints show the format of an empty field.
+var condHints = map[advStopKind]string{
+	stopCondPath:   "e.g. services.0.status",
+	stopCondWithin: "e.g. 800ms",
+}
+
+// textView is a text field's value, with the cursor when focused and the
+// hint while it is empty.
+func (f monitorForm) textView(text, hint string, focused bool) string {
+	if focused {
+		r := []rune(text)
+		text = string(r[:f.cursor]) + accentStyle.Render("│") + string(r[f.cursor:])
+	}
+	if hint != "" && (text == "" || text == accentStyle.Render("│")) {
+		text += helpStyle.Render(hint)
+	}
+	return text
 }
 
 // advancedHelp is the footer for the focused advanced position.
@@ -369,6 +583,13 @@ func (f monitorForm) advancedHelp() string {
 	case s.kind == stopHeaderValue || s.kind == stopBody:
 		return "←/→ action · " + tail
 	case s.kind == stopHeaderName:
+		return "ctrl+d del · " + tail
+	case s.kind == stopCondAdd:
+		return "space add · " + tail
+	case s.kind == stopCondKind:
+		// Without ctrl+c quit, so the keys fit an 80-column terminal.
+		return "←/→ kind · ctrl+d del · tab/shift+tab focus · enter save · esc cancel"
+	case s.kind > stopCondKind:
 		return "ctrl+d del · " + tail
 	}
 	return tail
@@ -408,12 +629,22 @@ func scrollForm(screen string, focusLine, height int) string {
 }
 
 // renderRequestFields adds the advanced request settings that are set to the
-// detail view. Protected values (header values, body) are never shown.
-func renderRequestFields(field func(label, value string), c config.Check) {
+// detail view, one line per condition cut to width. Protected values (header
+// values, body) are never shown.
+func renderRequestFields(field func(label, value string), c config.Check, width int) {
 	if c.Method != "" && c.Method != "GET" {
 		field("Method", c.Method)
 	}
 	if c.ExpectText != "" {
 		field("Text", fmt.Sprintf("contains %q", c.ExpectText))
+	}
+	label := "Expect"
+	for _, cond := range c.Conditions {
+		summary := cond.Summary()
+		if width > 0 {
+			summary = ansi.Truncate(summary, max(width-15, 10), "…")
+		}
+		field(label, summary)
+		label = ""
 	}
 }

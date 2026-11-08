@@ -94,6 +94,11 @@ func (d CheckDTO) checkOrError(ctx context.Context, s any) (c config.Check, msg 
 	case d.Name == "." || d.Name == "..":
 		return config.Check{}, `name cannot be "." or ".." over the API`, nil
 	}
+	for i, cond := range d.Conditions {
+		if cond.WithinMS > maxDurationMS || cond.WithinMS < -maxDurationMS {
+			return config.Check{}, fmt.Sprintf("conditions[%d].within_ms is out of range", i), nil
+		}
+	}
 	keys, _ := s.(keyReader)
 	c = d.check()
 	if c.Body, c.BodyEdit, msg, err = protectedEdit(ctx, keys, d.Body, "body", config.MaxSealedBody); msg != "" || err != nil {
@@ -114,7 +119,7 @@ func (d CheckDTO) checkOrError(ctx context.Context, s any) (c config.Check, msg 
 func (d CheckDTO) check() config.Check {
 	return config.Check{Name: d.Name, URL: d.URL, Interval: time.Duration(d.IntervalMS) * time.Millisecond, Timeout: time.Duration(d.TimeoutMS) * time.Millisecond, ExpectedStatus: d.ExpectedStatus, Channel: d.Channel, AlertAfter: d.AlertAfter, RecoverAfter: d.RecoverAfter, TLSOff: d.TLSOff,
 		Kind: d.Kind, Method: d.Method, ExpectText: d.ExpectText, Host: d.Host, Port: d.Port,
-		Period: time.Duration(d.PeriodMS) * time.Millisecond, Grace: time.Duration(d.GraceMS) * time.Millisecond}
+		Period: time.Duration(d.PeriodMS) * time.Millisecond, Grace: time.Duration(d.GraceMS) * time.Millisecond, Conditions: conditions(d.Conditions)}
 }
 
 // WriteRoutes handles check and mute mutations after authentication.

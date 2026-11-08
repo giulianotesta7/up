@@ -9,7 +9,8 @@ rebasing on this one; migrations are append-only.
 
 | Type | Fields added |
 |---|---|
-| `Check` | `Kind` (`""`/`"http"` = HTTP, `"tcp"`), `Method` (`""` = GET), `Headers []Header`, `Body secret.Sealed`, `BodyEdit Edit`, `ExpectText`, `Host`, `Port` |
+| `Check` | `Kind` (`""`/`"http"` = HTTP, `"tcp"`), `Method` (`""` = GET), `Headers []Header`, `Body secret.Sealed`, `BodyEdit Edit`, `ExpectText`, `Conditions []Condition`, `Host`, `Port` |
+| `Condition` | `Kind` (`ConditionJSON` `"json"`, `ConditionRegex` `"regex"`, `ConditionResponseTime` `"response_time"`, `ConditionHeader` `"header"`), `Path`, `Name`, `Value`, `Pattern`, `Within`; `Summary()`, `ConditionLabel(kind)`, `ConditionKinds`, `SensitiveHeader(name)`, `JSONPath(path)` |
 | `Header` | `Name`, `Value secret.Sealed`, `Edit Edit` |
 | `Defaults` | `Zone`, `Channel` (`""` = none), `Interval`, `Timeout`, `ExpectedStatus`, `AlertAfter`, `RecoverAfter`; `BuiltinDefaults()` is UTC, no channel, 30s, 5s, 200, 1, 1; `ValidateDefaults` reuses `ValidateZone` and `ValidateCheck` and requires thresholds 1..10 |
 | `Channel` | `WebhookOrigin`, `WebhookURL`/`WebhookURLEdit`, `WebhookAuthName`, `WebhookAuth`/`WebhookAuthEdit`; `Kind` is `KindEmail` or `KindWebhook` |
@@ -17,8 +18,12 @@ rebasing on this one; migrations are append-only.
 | `ChannelTest` | `ID`, `Channel`, `Status` (`TestPending`/`TestSending`/`TestOK`/`TestError`), `Error`, `Requested`, `Started`, `Finished` |
 
 - `Check` is not comparable with `==`. Use `a.SameDefinition(b)`; call `c.Canonical()` on external input (`"http"` and `"GET"` become `""`, empty headers become nil). A new field that changes how a check runs must be added to `SameDefinition` **and** to the `RecordDefined` SQL.
-- `ValidateCheck`, `ValidateChannel`, `ValidateMaintenanceWindow` are the only validators. Bounds: methods `GET HEAD POST PUT PATCH DELETE OPTIONS`; 32 headers; header names are RFC tokens and unique case-insensitively; `HEAD` with `ExpectText` is rejected; sealed value limits `MaxSealedHeaderValue` (4096) and `MaxSealedBody` (64 KiB + 256); `MaxExpectText` 1024; TCP host without scheme/brackets/port (bare IPv6), port 1..65535, no HTTP-only fields, `expected_status` 0; window duration 1m..7d, weekdays distinct 0..6, zone loads and is not `Local` (tzdata is embedded).
+- `ValidateCheck`, `ValidateChannel`, `ValidateMaintenanceWindow` are the only validators. Bounds: methods `GET HEAD POST PUT PATCH DELETE OPTIONS`; 32 headers; header names are RFC tokens and unique case-insensitively; `HEAD` with `ExpectText` is rejected; sealed value limits `MaxSealedHeaderValue` (4096) and `MaxSealedBody` (64 KiB + 256); `MaxExpectText` 1024; at most `MaxConditions` (32) conditions, paths/values/patterns at most `MaxConditionText` (1024) bytes, JSON paths non-empty dot-separated segments, regex compiles, header names are tokens, `Within` > 0, whole milliseconds and < `Timeout`, each condition sets only its kind's fields (others are rejected, e.g. `condition 1: pattern is not used by JSON value conditions`), JSON/regex conditions not with `HEAD`, messages prefixed `condition N: `; TCP host without scheme/brackets/port (bare IPv6), port 1..65535, no HTTP-only fields, `expected_status` 0; window duration 1m..7d, weekdays distinct 0..6, zone loads and is not `Local` (tzdata is embedded).
 - `ChannelKinds` (what the TUI offers) lists email, webhook, ntfy, telegram, discord, slack and gotify, in that order.
+
+### Response conditions (schema v11)
+
+`Check.Conditions` is an ordered list of `Condition{Kind, Path, Name, Value, Pattern, Within}`; kinds `json`, `regex`, `response_time`, `header` (`ConditionKinds`), HTTP only, all must pass and the first failure is the down reason. v11 adds `checks.conditions` (see Store below).
 
 ### Push channels (schema v10)
 
@@ -42,7 +47,7 @@ Header values, HTTP body, webhook URL and webhook auth value are `secret.Sealed`
 
 ## Store (`internal/store`)
 
-- Checks: `AddCheck`, `UpdateCheck`, `SetChecks`, `Checks` carry every field above; `RecordDefined` compares URL, kind, method, headers, body, expect text, host, port, interval, timeout, status.
+- Checks: `AddCheck`, `UpdateCheck`, `SetChecks`, `Checks` carry every field above; `RecordDefined` compares URL, kind, method, headers, body, expect text, conditions, host, port, interval, timeout, status. Conditions (v11 `checks.conditions`, a deterministic JSON list of `{k,p,n,v,r,w}`, `''` = none) hold no secrets.
 - Channels: `AddChannel`, `UpdateChannel`, `Channels`, `Channel` carry the webhook fields (sealed values come back sealed). `DeleteChannel` also deletes its test requests.
 - Windows (max `MaxMaintenanceWindows` = 20 per check): `AddMaintenanceWindow(ctx, w) (w with ID, error)`, `UpdateMaintenanceWindow(ctx, w)`, `DeleteMaintenanceWindow(ctx, check, id)`, `MaintenanceWindows(ctx, check)`, `AllMaintenanceWindows(ctx)`. `DeleteCheck` deletes its windows. Unknown check/window is `ErrNotFound`, invalid input `ErrValidation`.
 - Defaults (v7 `defaults`, one row with `id = 1`; no row reads as `BuiltinDefaults`): `Defaults(ctx)`, `SetDefaults(ctx, d)` (invalid input or a channel that does not exist is `ErrValidation`; nothing is stored). `DeleteChannel` sets a default channel of that name to none, so reads never name a deleted channel.
@@ -83,8 +88,9 @@ JSON shapes:
 
 ```
 check (write)   {"name","url","interval_ms","timeout_ms","expected_status","channel","alert_after","recover_after","tls_off",
-                 "kind":"http|tcp","method","headers":[{"name","value":PROT}],"body":PROT,"expect_text","host","port"}
+                 "kind":"http|tcp","method","headers":[{"name","value":PROT}],"body":PROT,"expect_text","conditions":[COND],"host","port"}
 check (read)    same, but headers [{"name","value_set"}], "body_set", kind always set, method "GET" when empty
+COND            {"kind":"json|regex|response_time|header","path","name","value","pattern","within_ms"}   only the kind's fields (another kind's field is 400 `condition N: ... not used by ...`); same in read
 PROT            {"action":"keep|replace|clear","sealed":{"key":b64,"data":b64}}   sealed only with replace; absent = keep
 channel (write) {"name","kind":"email|webhook|ntfy|telegram|discord|slack|gotify","smtp_server","recipients","webhook_origin","webhook_url":PROT,"webhook_auth_name","webhook_auth":PROT,
                  "server_url","topic","chat_id","token":PROT,"priority"}

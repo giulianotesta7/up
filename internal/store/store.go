@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 10
+const schemaVersion = 11
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -198,6 +198,11 @@ ALTER TABLE channels ADD COLUMN token      BLOB NOT NULL DEFAULT x'';
 ALTER TABLE channels ADD COLUMN token_key  BLOB NOT NULL DEFAULT x'';
 ALTER TABLE channels ADD COLUMN priority   TEXT NOT NULL DEFAULT '';
 `,
+	// v10 -> v11: HTTP response conditions. Additive: existing rows read an
+	// empty list. Conditions are a JSON list of {k, p, n, v, r, w} (kind,
+	// JSON path, header name, value, regex pattern, max response time in
+	// nanoseconds) in check order; they hold no secrets.
+	`ALTER TABLE checks ADD COLUMN conditions TEXT NOT NULL DEFAULT '';`,
 }
 
 // Outage is a period during which a check was down. Ongoing outages have a

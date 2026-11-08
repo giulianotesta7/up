@@ -52,6 +52,9 @@ type Check struct {
 	// ExpectText is a literal, case-sensitive text the response body must
 	// contain. HTTP checks only.
 	ExpectText string
+	// Conditions are extra rules the response must meet, in order (see
+	// Condition). Empty means none. HTTP checks only.
+	Conditions []Condition
 	// Host and Port are the TCP target. Host has no brackets for IPv6.
 	// TCP checks only.
 	Host string

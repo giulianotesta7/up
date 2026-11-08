@@ -318,7 +318,7 @@ func v8Checks(t *testing.T, path string) []string {
 func TestOpenMigratesV8AddingOnlyHeartbeats(t *testing.T) {
 	path := v8Database(t)
 	before, beforeChecks, beforeChannels := dumpTables(t, path, v8Tables...), v8Checks(t, path), v9Channels(t, path)
-	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 8 is older than this up (10)") {
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("database schema version 8 is older than this up (%d)", schemaVersion)) {
 		t.Fatalf("OpenReadOnly(v8) error = %v", err)
 	}
 	s, err := Open(path)

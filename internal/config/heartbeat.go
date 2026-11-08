@@ -45,6 +45,9 @@ func validateHeartbeatFields(c Check) []error {
 	if len(c.Headers) > 0 || !c.Body.Empty() || c.BodyEdit != EditKeep || c.ExpectText != "" || c.Host != "" || c.Port != 0 || c.TLSOff {
 		errs = append(errs, errors.New("headers, body, expected text, host, port and tls are not used by heartbeat checks"))
 	}
+	if len(c.Conditions) > 0 {
+		errs = append(errs, errors.New("conditions are not used by heartbeat checks"))
+	}
 	return errs
 }
 

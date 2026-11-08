@@ -283,24 +283,25 @@ func (c *Client) PublicKey(context.Context) ([]byte, bool, error)          { ret
 // first release are omitted when empty, so a plain check keeps its old wire
 // form.
 type checkWrite struct {
-	Name           string          `json:"name"`
-	URL            string          `json:"url"`
-	IntervalMS     int64           `json:"interval_ms"`
-	TimeoutMS      int64           `json:"timeout_ms"`
-	ExpectedStatus int             `json:"expected_status"`
-	Channel        string          `json:"channel"`
-	AlertAfter     int             `json:"alert_after"`
-	RecoverAfter   int             `json:"recover_after"`
-	TLSOff         bool            `json:"tls_off"`
-	Kind           string          `json:"kind,omitempty"`
-	Method         string          `json:"method,omitempty"`
-	Headers        []headerWrite   `json:"headers,omitempty"`
-	Body           *protectedWrite `json:"body,omitempty"`
-	ExpectText     string          `json:"expect_text,omitempty"`
-	Host           string          `json:"host,omitempty"`
-	Port           int             `json:"port,omitempty"`
-	PeriodMS       int64           `json:"period_ms,omitempty"`
-	GraceMS        int64           `json:"grace_ms,omitempty"`
+	Name           string                `json:"name"`
+	URL            string                `json:"url"`
+	IntervalMS     int64                 `json:"interval_ms"`
+	TimeoutMS      int64                 `json:"timeout_ms"`
+	ExpectedStatus int                   `json:"expected_status"`
+	Channel        string                `json:"channel"`
+	AlertAfter     int                   `json:"alert_after"`
+	RecoverAfter   int                   `json:"recover_after"`
+	TLSOff         bool                  `json:"tls_off"`
+	Kind           string                `json:"kind,omitempty"`
+	Method         string                `json:"method,omitempty"`
+	Headers        []headerWrite         `json:"headers,omitempty"`
+	Body           *protectedWrite       `json:"body,omitempty"`
+	ExpectText     string                `json:"expect_text,omitempty"`
+	Conditions     []remote.ConditionDTO `json:"conditions,omitempty"`
+	Host           string                `json:"host,omitempty"`
+	Port           int                   `json:"port,omitempty"`
+	PeriodMS       int64                 `json:"period_ms,omitempty"`
+	GraceMS        int64                 `json:"grace_ms,omitempty"`
 	// CopyFrom (create only) names the stored monitor whose protected values
 	// the server copies for every value this check keeps.
 	CopyFrom string `json:"copy_from,omitempty"`
@@ -318,6 +319,9 @@ func checkDTO(v config.Check) checkWrite {
 		PeriodMS: v.Period.Milliseconds(), GraceMS: v.Grace.Milliseconds()}
 	for _, h := range v.Headers {
 		d.Headers = append(d.Headers, headerWrite{Name: h.Name, Value: protectedFor(h.Edit, h.Value)})
+	}
+	for _, c := range v.Conditions {
+		d.Conditions = append(d.Conditions, remote.ConditionDTO{Kind: c.Kind, Path: c.Path, Name: c.Name, Value: c.Value, Pattern: c.Pattern, WithinMS: c.Within.Milliseconds()})
 	}
 	return d
 }

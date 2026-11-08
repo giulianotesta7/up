@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -32,8 +33,9 @@ INSERT INTO daemon_api (id, listen, tls) VALUES (1, ':8080', 0);`); err != nil {
 	return path
 }
 
-// v9Tables are the tables whose rows and columns v10 leaves alone.
-var v9Tables = []string{"smtp_servers", "checks", "results", "mutes", "alert_state", "defaults", "daemon", "daemon_api", "certs", "maintenance_windows", "channel_tests", "secret_key", "delivery_attempts"}
+// v9Tables are the tables whose rows and columns v10 and v11 leave alone;
+// checks gains a column in v11 and v9Checks compares its earlier columns.
+var v9Tables = []string{"smtp_servers", "results", "mutes", "alert_state", "defaults", "daemon", "daemon_api", "certs", "maintenance_windows", "channel_tests", "secret_key", "delivery_attempts"}
 
 // v9Channels dumps the channels columns that schema v9 has.
 func v9Channels(t *testing.T, path string) []string {
@@ -61,8 +63,8 @@ func v9Channels(t *testing.T, path string) []string {
 
 func TestOpenMigratesV9AddingOnlyPushFields(t *testing.T) {
 	path := v9Database(t)
-	before, beforeChannels := dumpTables(t, path, v9Tables...), v9Channels(t, path)
-	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), "database schema version 9 is older than this up (10)") {
+	before, beforeChecks, beforeChannels := dumpTables(t, path, v9Tables...), v9Checks(t, path), v9Channels(t, path)
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("database schema version 9 is older than this up (%d)", schemaVersion)) {
 		t.Fatalf("OpenReadOnly(v9) error = %v", err)
 	}
 	s, err := Open(path)
@@ -70,11 +72,14 @@ func TestOpenMigratesV9AddingOnlyPushFields(t *testing.T) {
 		t.Fatalf("Open(v9) error = %v", err)
 	}
 	defer s.Close()
-	if got := version(t, path); got != 10 {
-		t.Fatalf("user_version = %d, want 10", got)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version = %d, want %d", got, schemaVersion)
 	}
 	if after := dumpTables(t, path, v9Tables...); !reflect.DeepEqual(before, after) {
 		t.Fatalf("migration changed existing rows:\nbefore %v\nafter  %v", before, after)
+	}
+	if after := v9Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
+		t.Fatalf("migration changed existing checks:\nbefore %v\nafter  %v", beforeChecks, after)
 	}
 	if after := v9Channels(t, path); !reflect.DeepEqual(beforeChannels, after) {
 		t.Fatalf("migration changed existing channels:\nbefore %v\nafter  %v", beforeChannels, after)
@@ -121,7 +126,7 @@ func TestOpenV9FailingMidMigrationChangesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
-	before, beforeChannels := dumpTables(t, path, v9Tables...), v9Channels(t, path)
+	before, beforeChecks, beforeChannels := dumpTables(t, path, v9Tables...), v9Checks(t, path), v9Channels(t, path)
 	if s, err := Open(path); err == nil || !strings.Contains(err.Error(), "migrate schema 9 to 10") {
 		if s != nil {
 			s.Close()
@@ -133,6 +138,9 @@ func TestOpenV9FailingMidMigrationChangesNothing(t *testing.T) {
 	}
 	if after := dumpTables(t, path, v9Tables...); !reflect.DeepEqual(before, after) {
 		t.Fatalf("failed migration changed rows:\nbefore %v\nafter  %v", before, after)
+	}
+	if after := v9Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
+		t.Fatalf("failed migration changed checks:\nbefore %v\nafter  %v", beforeChecks, after)
 	}
 	if after := v9Channels(t, path); !reflect.DeepEqual(beforeChannels, after) {
 		t.Fatalf("failed migration changed channels:\nbefore %v\nafter  %v", beforeChannels, after)
