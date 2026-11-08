@@ -283,7 +283,9 @@ INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_statu
 	return path
 }
 
-var v8Tables = []string{"smtp_servers", "channels", "results", "mutes", "alert_state", "defaults", "daemon", "certs", "maintenance_windows", "channel_tests", "secret_key", "delivery_attempts"}
+// v8Tables leaves out channels, which gains columns in v10; v9Channels
+// compares its earlier columns.
+var v8Tables = []string{"smtp_servers", "results", "mutes", "alert_state", "defaults", "daemon", "certs", "maintenance_windows", "channel_tests", "secret_key", "delivery_attempts"}
 
 // v8Checks dumps the checks columns that schema v8 has.
 func v8Checks(t *testing.T, path string) []string {
@@ -315,7 +317,7 @@ func v8Checks(t *testing.T, path string) []string {
 
 func TestOpenMigratesV8AddingOnlyHeartbeats(t *testing.T) {
 	path := v8Database(t)
-	before, beforeChecks := dumpTables(t, path, v8Tables...), v8Checks(t, path)
+	before, beforeChecks, beforeChannels := dumpTables(t, path, v8Tables...), v8Checks(t, path), v9Channels(t, path)
 	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("database schema version 8 is older than this up (%d)", schemaVersion)) {
 		t.Fatalf("OpenReadOnly(v8) error = %v", err)
 	}
@@ -332,6 +334,9 @@ func TestOpenMigratesV8AddingOnlyHeartbeats(t *testing.T) {
 	}
 	if after := v8Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
 		t.Fatalf("migration changed existing checks:\nbefore %v\nafter  %v", beforeChecks, after)
+	}
+	if after := v9Channels(t, path); !reflect.DeepEqual(beforeChannels, after) {
+		t.Fatalf("migration changed existing channels:\nbefore %v\nafter  %v", beforeChannels, after)
 	}
 	ctx := context.Background()
 	checks, err := s.Checks(ctx)
@@ -367,7 +372,7 @@ func TestOpenV8FailingMidMigrationChangesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
-	before, beforeChecks := dumpTables(t, path, v8Tables...), v8Checks(t, path)
+	before, beforeChecks, beforeChannels := dumpTables(t, path, v8Tables...), v8Checks(t, path), v9Channels(t, path)
 	if s, err := Open(path); err == nil || !strings.Contains(err.Error(), "migrate schema 8 to 9") {
 		if s != nil {
 			s.Close()
@@ -382,6 +387,9 @@ func TestOpenV8FailingMidMigrationChangesNothing(t *testing.T) {
 	}
 	if after := v8Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
 		t.Fatalf("failed migration changed checks:\nbefore %v\nafter  %v", beforeChecks, after)
+	}
+	if after := v9Channels(t, path); !reflect.DeepEqual(beforeChannels, after) {
+		t.Fatalf("failed migration changed channels:\nbefore %v\nafter  %v", beforeChannels, after)
 	}
 	ro, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	if err != nil {

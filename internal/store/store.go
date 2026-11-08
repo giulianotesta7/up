@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 10
+const schemaVersion = 11
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -186,7 +186,19 @@ CREATE TABLE daemon_api (
 	tls    INTEGER NOT NULL
 );
 `,
-	// v9 -> v10: HTTP response conditions. Additive: existing rows read an
+	// v9 -> v10: ntfy, telegram, discord, slack and gotify channels.
+	// Additive: existing channels read no push fields. Discord and slack keep
+	// their URL in the webhook columns; token is the ntfy access token, the
+	// telegram bot token or the gotify app token, sealed like webhook URLs.
+	`
+ALTER TABLE channels ADD COLUMN server_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE channels ADD COLUMN topic      TEXT NOT NULL DEFAULT '';
+ALTER TABLE channels ADD COLUMN chat_id    TEXT NOT NULL DEFAULT '';
+ALTER TABLE channels ADD COLUMN token      BLOB NOT NULL DEFAULT x'';
+ALTER TABLE channels ADD COLUMN token_key  BLOB NOT NULL DEFAULT x'';
+ALTER TABLE channels ADD COLUMN priority   TEXT NOT NULL DEFAULT '';
+`,
+	// v10 -> v11: HTTP response conditions. Additive: existing rows read an
 	// empty list. Conditions are a JSON list of {k, p, n, v, r, w} (kind,
 	// JSON path, header name, value, regex pattern, max response time in
 	// nanoseconds) in check order; they hold no secrets.

@@ -369,9 +369,10 @@ func dumpTables(t *testing.T, path string, tables ...string) map[string][]string
 
 func TestOpenMigratesV7AddingOnlyTheAttemptLog(t *testing.T) {
 	path := v7Database(t)
-	// checks gains columns in v9; its v7 (and v8) columns are compared alone.
-	tables := []string{"smtp_servers", "channels", "results", "mutes", "alert_state", "defaults", "daemon", "certs", "maintenance_windows", "channel_tests", "secret_key"}
-	before, beforeChecks := dumpTables(t, path, tables...), v8Checks(t, path)
+	// checks gains columns in v9 and channels in v10; their earlier columns
+	// are compared alone.
+	tables := []string{"smtp_servers", "results", "mutes", "alert_state", "defaults", "daemon", "certs", "maintenance_windows", "channel_tests", "secret_key"}
+	before, beforeChecks, beforeChannels := dumpTables(t, path, tables...), v8Checks(t, path), v9Channels(t, path)
 	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("database schema version 7 is older than this up (%d)", schemaVersion)) {
 		t.Fatalf("OpenReadOnly(v7) error = %v", err)
 	}
@@ -388,6 +389,9 @@ func TestOpenMigratesV7AddingOnlyTheAttemptLog(t *testing.T) {
 	}
 	if after := v8Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
 		t.Fatalf("migration changed existing checks:\nbefore %v\nafter  %v", beforeChecks, after)
+	}
+	if after := v9Channels(t, path); !reflect.DeepEqual(beforeChannels, after) {
+		t.Fatalf("migration changed existing channels:\nbefore %v\nafter  %v", beforeChannels, after)
 	}
 	ctx := context.Background()
 	if got, err := s.Attempts(ctx, AttemptFilter{}); err != nil || len(got) != 0 {

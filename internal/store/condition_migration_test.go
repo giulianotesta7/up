@@ -13,14 +13,14 @@ import (
 )
 
 // conditionsVersion is the schema version that adds HTTP response conditions.
-const conditionsVersion = 10
+const conditionsVersion = 11
 
-// v9Database writes a database as the previous release left it (migrations 0
-// to 8) with rows in every table that has user data, including an advanced
-// HTTP check and a heartbeat.
-func v9Database(t *testing.T) string {
+// v10Database writes a database as the previous release left it (migrations
+// 0 to 9) with rows in every table that has user data, including an advanced
+// HTTP check, a heartbeat and an ntfy channel.
+func v10Database(t *testing.T) string {
 	t.Helper()
-	path := v8Database(t)
+	path := v9Database(t)
 	db, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
@@ -32,15 +32,16 @@ func v9Database(t *testing.T) string {
 	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d;
 INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, method, headers, expect_text) VALUES (2, 'adv', 'https://example.com', 60000000000, 5000000000, 200, 'POST', '[{"n":"Accept"}]', 'pong');
 INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, kind, period_ns, grace_ns) VALUES (3, 'job', '', 0, 0, 0, 'heartbeat', 3600000000000, 60000000000);
-INSERT INTO daemon_api (id, listen, tls) VALUES (1, ':8080', 0);`, conditionsVersion-1)); err != nil {
+INSERT INTO channels (name, kind, smtp_server, recipients, server_url, topic, priority) VALUES ('phone', 'ntfy', '', '', 'https://ntfy.sh', 'up-alerts', 'high');`, conditionsVersion-1)); err != nil {
 		t.Fatal(err)
 	}
 	return path
 }
 
-var v9Tables = append([]string{"daemon_api"}, v8Tables...)
+// v10Tables are the tables whose rows and columns v11 leaves alone.
+var v10Tables = append([]string{"channels"}, v9Tables...)
 
-// v9Checks dumps the checks columns that schema v9 has.
+// v9Checks dumps the checks columns that schemas v9 and v10 have.
 func v9Checks(t *testing.T, path string) []string {
 	t.Helper()
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
@@ -69,25 +70,25 @@ func v9Checks(t *testing.T, path string) []string {
 	return out
 }
 
-func TestOpenMigratesV9AddingOnlyConditions(t *testing.T) {
+func TestOpenMigratesV10AddingOnlyConditions(t *testing.T) {
 	if schemaVersion != conditionsVersion {
 		t.Fatalf("schemaVersion = %d, want %d", schemaVersion, conditionsVersion)
 	}
-	path := v9Database(t)
-	before, beforeChecks := dumpTables(t, path, v9Tables...), v9Checks(t, path)
+	path := v10Database(t)
+	before, beforeChecks := dumpTables(t, path, v10Tables...), v9Checks(t, path)
 	want := fmt.Sprintf("database schema version %d is older than this up (%d)", conditionsVersion-1, conditionsVersion)
 	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("OpenReadOnly(v9) error = %v", err)
+		t.Fatalf("OpenReadOnly(v10) error = %v", err)
 	}
 	s, err := Open(path)
 	if err != nil {
-		t.Fatalf("Open(v9) error = %v", err)
+		t.Fatalf("Open(v10) error = %v", err)
 	}
 	defer s.Close()
 	if got := version(t, path); got != conditionsVersion {
 		t.Fatalf("user_version = %d, want %d", got, conditionsVersion)
 	}
-	if after := dumpTables(t, path, v9Tables...); !reflect.DeepEqual(before, after) {
+	if after := dumpTables(t, path, v10Tables...); !reflect.DeepEqual(before, after) {
 		t.Fatalf("migration changed existing rows:\nbefore %v\nafter  %v", before, after)
 	}
 	if after := v9Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
@@ -105,6 +106,9 @@ func TestOpenMigratesV9AddingOnlyConditions(t *testing.T) {
 		if err := config.ValidateCheck(c); err != nil {
 			t.Fatalf("%s invalid after migration: %v", c.Name, err)
 		}
+	}
+	if phone, ok, err := s.Channel(ctx, "phone"); err != nil || !ok || phone.Kind != config.KindNtfy || phone.Topic != "up-alerts" || phone.Priority != "high" {
+		t.Fatalf("Channel(phone) after migration = %+v, %v, %v", phone, ok, err)
 	}
 	// Migrated monitors keep accepting results for their unchanged definition.
 	if stored, err := s.RecordDefined(ctx, checks[2], check.Result{CheckName: "adv", At: t0, Status: check.StatusUp}); err != nil || !stored {
@@ -130,10 +134,66 @@ func TestOpenMigratesV9AddingOnlyConditions(t *testing.T) {
 	}
 }
 
-// A migration that fails (the column already exists) rolls back as a whole:
-// the database stays v9 with its rows.
-func TestOpenV9FailingMigrationChangesNothing(t *testing.T) {
+// A v9 database upgrades through both steps: it gains push channel fields and
+// conditions, and keeps both after a reopen.
+func TestOpenMigratesV9ThroughPushChannelsAndConditions(t *testing.T) {
 	path := v9Database(t)
+	before, beforeChecks, beforeChannels := dumpTables(t, path, v9Tables...), v9Checks(t, path), v9Channels(t, path)
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(v9) error = %v", err)
+	}
+	defer s.Close()
+	if got := version(t, path); got != conditionsVersion {
+		t.Fatalf("user_version = %d, want %d", got, conditionsVersion)
+	}
+	if after := dumpTables(t, path, v9Tables...); !reflect.DeepEqual(before, after) {
+		t.Fatalf("migration changed existing rows:\nbefore %v\nafter  %v", before, after)
+	}
+	if after := v9Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
+		t.Fatalf("migration changed existing checks:\nbefore %v\nafter  %v", beforeChecks, after)
+	}
+	if after := v9Channels(t, path); !reflect.DeepEqual(beforeChannels, after) {
+		t.Fatalf("migration changed existing channels:\nbefore %v\nafter  %v", beforeChannels, after)
+	}
+	ctx := context.Background()
+	phone := config.Channel{Name: "phone", Kind: config.KindNtfy, ServerURL: config.DefaultNtfyServer, Topic: "up-alerts"}
+	if err := s.AddChannel(ctx, phone); err != nil {
+		t.Fatal(err)
+	}
+	checks, err := s.Checks(ctx)
+	if err != nil || len(checks) == 0 {
+		t.Fatalf("Checks() after migration = %+v, %v", checks, err)
+	}
+	edited := checks[0]
+	if edited.Name != "api" || edited.URL == "" {
+		t.Fatalf("first migrated check = %+v, want the HTTP check api", edited)
+	}
+	edited.Conditions = []config.Condition{{Kind: config.ConditionHeader, Name: "Content-Type", Value: "application/json"}}
+	if err := s.UpdateCheck(ctx, edited); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ro, err := OpenReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly after upgrade: %v", err)
+	}
+	defer ro.Close()
+	if got, ok, err := ro.Channel(ctx, "phone"); err != nil || !ok || got.Topic != "up-alerts" || got.ServerURL != config.DefaultNtfyServer {
+		t.Fatalf("Channel(phone) after reopen = %+v, %v, %v", got, ok, err)
+	}
+	got, err := ro.Checks(ctx)
+	if err != nil || !reflect.DeepEqual(got[0].Conditions, edited.Conditions) {
+		t.Fatalf("reopened conditions = %+v, %v", got, err)
+	}
+}
+
+// A migration that fails (the column already exists) rolls back as a whole:
+// the database stays v10 with its rows.
+func TestOpenV10FailingMigrationChangesNothing(t *testing.T) {
+	path := v10Database(t)
 	db, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
@@ -142,18 +202,18 @@ func TestOpenV9FailingMigrationChangesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
-	before, beforeChecks := dumpTables(t, path, v9Tables...), v9Checks(t, path)
+	before, beforeChecks := dumpTables(t, path, v10Tables...), v9Checks(t, path)
 	step := fmt.Sprintf("migrate schema %d to %d", conditionsVersion-1, conditionsVersion)
 	if s, err := Open(path); err == nil || !strings.Contains(err.Error(), step) {
 		if s != nil {
 			s.Close()
 		}
-		t.Fatalf("Open(v9 with a clashing column) error = %v, want %q", err, step)
+		t.Fatalf("Open(v10 with a clashing column) error = %v, want %q", err, step)
 	}
 	if got := version(t, path); got != conditionsVersion-1 {
 		t.Fatalf("user_version = %d, want %d", got, conditionsVersion-1)
 	}
-	if after := dumpTables(t, path, v9Tables...); !reflect.DeepEqual(before, after) {
+	if after := dumpTables(t, path, v10Tables...); !reflect.DeepEqual(before, after) {
 		t.Fatalf("failed migration changed rows:\nbefore %v\nafter  %v", before, after)
 	}
 	if after := v9Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {

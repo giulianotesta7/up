@@ -351,21 +351,20 @@ func renderSMTPTable(snap Snapshot, selected int) []string {
 	return lines
 }
 
-// renderChannelTable is the Channels tab: one row per channel with its last
-// delivery, and the selected channel described under the table. A narrow
-// screen drops the server and recipients columns; the description keeps them.
+// renderChannelTable is the Channels tab: one row per channel with where it
+// sends and its last delivery, and the selected channel described under the
+// table. A narrow screen drops the SENDS TO column; the description keeps it.
 func renderChannelTable(snap Snapshot, selected int, now time.Time, width int) []string {
 	if len(snap.Channels) == 0 {
 		return []string{helpStyle.Render("No channels configured.")}
 	}
-	widths := [4]int{4, 4, len("SMTP SERVER / ORIGIN"), len("RECIPIENTS / AUTH")}
-	rows := make([][4]string, len(snap.Channels))
+	widths := [3]int{4, 4, len("SENDS TO")}
+	rows := make([][3]string, len(snap.Channels))
 	counts := make([]int, len(rows))
 	last := make([]string, len(rows))
 	countWidth, lastWidth := len("MONITORS"), len("LAST DELIVERY")
 	for i, c := range snap.Channels {
-		target, detail := channelTarget(c)
-		rows[i] = [4]string{c.Name, c.Kind, target, detail}
+		rows[i] = [3]string{c.Name, c.Kind, c.SendsTo()}
 		for j, v := range rows[i] {
 			widths[j] = max(widths[j], ansi.StringWidth(v))
 		}
@@ -378,8 +377,8 @@ func renderChannelTable(snap Snapshot, selected int, now time.Time, width int) [
 		last[i] = lastDelivery(snap, c.Name, now)
 		lastWidth = max(lastWidth, ansi.StringWidth(last[i]))
 	}
-	columns, countHeader := 4, "MONITORS"
-	full := 4 + widths[0] + widths[1] + widths[2] + widths[3] + 8 + countWidth + 2 + lastWidth
+	columns, countHeader := 3, "MONITORS"
+	full := 4 + widths[0] + widths[1] + widths[2] + 6 + countWidth + 2 + lastWidth
 	if width > 0 && full > width {
 		columns, countHeader = 2, "MON"
 		countWidth = len(countHeader)
@@ -387,7 +386,7 @@ func renderChannelTable(snap Snapshot, selected int, now time.Time, width int) [
 			countWidth = max(countWidth, len(strconv.Itoa(n)))
 		}
 	}
-	line := func(marker string, cols [4]string, count, delivery string) string {
+	line := func(marker string, cols [3]string, count, delivery string) string {
 		var out strings.Builder
 		out.WriteString(marker + "   ")
 		for i, v := range cols[:columns] {
@@ -397,7 +396,7 @@ func renderChannelTable(snap Snapshot, selected int, now time.Time, width int) [
 		out.WriteString(strings.Repeat(" ", countWidth-ansi.StringWidth(count)) + count + "  " + delivery)
 		return strings.TrimRight(out.String(), " ")
 	}
-	lines := []string{headerStyle.Render(line(" ", [4]string{"NAME", "KIND", "SMTP SERVER / ORIGIN", "RECIPIENTS / AUTH"}, countHeader, "LAST DELIVERY"))}
+	lines := []string{headerStyle.Render(line(" ", [3]string{"NAME", "KIND", "SENDS TO"}, countHeader, "LAST DELIVERY"))}
 	for i, row := range rows {
 		marker := " "
 		if i == selected {
@@ -413,21 +412,36 @@ func renderChannelTable(snap Snapshot, selected int, now time.Time, width int) [
 	return lines
 }
 
-// channelLine describes where a channel delivers: the mail server and the
-// first recipient, or the webhook origin and its authentication.
+// channelLine describes where a channel delivers, never a secret: the mail
+// server and first recipient, the webhook origin and its authentication, or
+// a push service's target and options.
 func channelLine(c config.Channel) string {
-	if c.Kind == config.KindWebhook {
-		target, auth := channelTarget(c)
-		return c.Kind + " · " + target + " · " + auth
-	}
-	to := ""
-	if len(c.Recipients) > 0 {
-		to = " → " + c.Recipients[0]
-		if more := len(c.Recipients) - 1; more > 0 {
-			to += fmt.Sprintf(" +%d", more)
+	parts := []string{c.Kind}
+	priority := func(def string) string {
+		if c.Priority == "" {
+			return "priority " + def
 		}
+		return "priority " + c.Priority
 	}
-	return c.Kind + " · " + c.SMTPServer + to
+	switch c.Kind {
+	case config.KindWebhook:
+		auth := "no auth"
+		if c.WebhookAuthName != "" {
+			auth = c.WebhookAuthName
+		}
+		parts = append(parts, c.WebhookOrigin, auth)
+	case config.KindNtfy:
+		token := "no access token"
+		if !c.Token.Empty() {
+			token = "access token"
+		}
+		parts = append(parts, c.ServerURL, "topic "+c.Topic, priority(config.DefaultNtfyPriority), token)
+	case config.KindGotify:
+		parts = append(parts, c.ServerURL, priority(config.DefaultGotifyPriority))
+	default:
+		parts = append(parts, c.SendsTo())
+	}
+	return strings.Join(parts, " · ")
 }
 
 // lastDelivery is the Channels tab cell: the outcome, time and reason of the

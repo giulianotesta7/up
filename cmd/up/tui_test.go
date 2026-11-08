@@ -31,7 +31,7 @@ func TestTUICreationHelp(t *testing.T) {
 		"Terminals of at least 110x30 show the selected monitor's detail beside the list, with an activity feed below; enter is not needed there.",
 		"Manage SMTP servers and channels for email alerts with s and c; choose a monitor's channel in its form.",
 		"SMTP passwords are encrypted with the key that 'up serve' keeps in <db>.key; run it once before entering a password, and back up that file with the database.",
-		"Channels are email or webhook (a generic JSON POST, not a native Slack or Discord format); webhook URLs and auth values use the same key and are never shown again.",
+		"Channels are email, webhook (a generic JSON POST), ntfy, telegram, discord, slack or gotify; webhook URLs, auth values and tokens use the same key and are never shown again.",
 		"Type chooses HTTP, TCP or Heartbeat with ←/→",
 		"A heartbeat takes a period and a grace; its job POSTs to a ping URL, which needs 'up serve --api-listen'.",
 		"WAITING until the first ping",

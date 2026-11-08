@@ -23,7 +23,8 @@ func TestChannelInvalidRecipientsAndRetry(t *testing.T) {
 		t.Fatal("saving accepted another operation")
 	}
 	m = finishCommand(t, busy, cmd)
-	requireText(t, m, `Cannot save channel: store: add channel: recipient "invalid" is not a valid email address`)
+	// The error takes the hint slot and wraps to its second line.
+	requireText(t, m, `Cannot save channel: store: add channel: recipient "invalid" is not a`, "valid email address", "> Recipients:")
 	channels, err := s.Channels(context.Background())
 	if err != nil || len(channels) != 0 {
 		t.Fatalf("invalid save changed channels: %v %v", channels, err)
