@@ -34,7 +34,7 @@ func foundationServer(t *testing.T) (http.Handler, *store.Store) {
 		t.Fatal(err)
 	}
 	h, _ := testHandler(t, func(m *http.ServeMux) {
-		writes, alerts := WriteRoutes(s), AlertWriteRoutes(s)
+		writes, alerts := WriteRoutes(s), AlertWriteRoutes(s, nil)
 		for _, p := range []string{"/api/v1/checks", "/api/v1/checks/"} {
 			m.Handle(p, writes)
 		}

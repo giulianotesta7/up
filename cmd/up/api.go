@@ -23,7 +23,8 @@ type apiRecorder interface {
 }
 
 // startAPI serves the API on addr. secretKey opens heartbeat ping tokens
-// for the authenticated reveal route.
+// for the authenticated reveal route and new telegram bot tokens to check
+// their format.
 func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, tokenPath string, stderr io.Writer, s tui.Store, secretKey *secret.Key) (<-chan error, error) {
 	_, err := remote.LoadVerifier(tokenPath)
 	missing := errors.Is(err, remote.ErrNoToken)
@@ -66,7 +67,7 @@ func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, t
 	writes := remote.WriteRoutes(s)
 	routes.Handle("/api/v1/checks", writes)
 	routes.Handle("/api/v1/checks/", writes)
-	alerts := remote.AlertWriteRoutes(s)
+	alerts := remote.AlertWriteRoutes(s, secretKey)
 	for _, path := range []string{"/api/v1/smtp-servers", "/api/v1/smtp-servers/", "/api/v1/channels", "/api/v1/channels/"} {
 		routes.Handle(path, alerts)
 	}

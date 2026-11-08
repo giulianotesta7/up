@@ -150,3 +150,27 @@ func TestAPIAlertWritesKeepPasswordsSealed(t *testing.T) {
 		}
 	}
 }
+
+// The daemon opens a new telegram bot token with its key to check the format.
+func TestAPIChecksTelegramTokenFormat(t *testing.T) {
+	call := startTestAPI(t)
+	code, body := call("GET", "/api/v1/snapshot", "")
+	var d remote.SnapshotDTO
+	if code != 200 || json.Unmarshal([]byte(body), &d) != nil {
+		t.Fatalf("snapshot: %d %s", code, body)
+	}
+	channel := func(token string) string {
+		sealed, err := secret.Seal(d.PublicKey, token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return `{"name":"tg","kind":"telegram","chat_id":"-1","token":{"action":"replace","sealed":{"key":"` +
+			base64.StdEncoding.EncodeToString(sealed.Key) + `","data":"` + base64.StdEncoding.EncodeToString(sealed.Data) + `"}}}`
+	}
+	if code, body := call("POST", "/api/v1/channels", channel("notatoken")); code != 400 || !strings.Contains(body, "bot token must look like 123456:ABC-def") || strings.Contains(body, "notatoken") {
+		t.Fatalf("bad token: %d %s", code, body)
+	}
+	if code, body := call("POST", "/api/v1/channels", channel("123456:ABC-def")); code != 201 {
+		t.Fatalf("valid token: %d %s", code, body)
+	}
+}

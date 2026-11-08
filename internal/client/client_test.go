@@ -61,7 +61,7 @@ func realServer(t *testing.T) (*Client, *store.Store, *secret.Key) {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/snapshot", remote.SnapshotRoutes(func(ctx context.Context, now time.Time) (tui.Snapshot, error) { return tui.Load(ctx, s, now) }))
-	writes, alerts := remote.WriteRoutes(s), remote.AlertWriteRoutes(s)
+	writes, alerts := remote.WriteRoutes(s), remote.AlertWriteRoutes(s, key)
 	for _, p := range []string{"/api/v1/checks", "/api/v1/checks/"} {
 		mux.Handle(p, writes)
 	}
