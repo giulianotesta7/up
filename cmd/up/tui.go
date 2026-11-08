@@ -27,6 +27,7 @@ connection opens: no TLS validation, no application health, no certificate
 tracking.
 A heartbeat takes a period and a grace; its job POSTs to a ping URL, which needs 'up serve --api-listen'.
 It shows WAITING until the first ping and is down when none arrives within period + grace.
+Schedule ‹ Cron › replaces the period with a cron expression (min hour day month weekday) run in the defaults zone.
 The URL is shown once after saving; v in the detail shows it again, and Token: new in Edit monitor replaces it.
 An edit cannot rename a monitor;
 a confirmed delete removes history and cannot be undone.
@@ -37,7 +38,7 @@ Channels are email, webhook (a generic JSON POST), ntfy, telegram, discord, slac
 
 Keys: ↑/↓ or k/j select · enter details (small terminals) · n new monitor · e edit · d delete · s SMTP servers · c channels · v ping URL (heartbeats) · a toggle animation · ? all keys · esc back · q/ctrl+c quit
 Terminals of at least 110x30 show the selected monitor's detail beside the list, with an activity feed below; enter is not needed there.
-Form: tab/shift+tab focus · ←/→ choose (Type, Channel, thresholds, Token) · enter save · esc cancel · ctrl+c quit
+Form: tab/shift+tab focus · ←/→ choose (Type, Schedule, Channel, thresholds, Token) · enter save · esc cancel · ctrl+c quit
 Delete: y delete · n cancel · esc cancel · ctrl+c quit
 
 Use --remote or UP_REMOTE=true to connect to the remote saved by 'up login'.

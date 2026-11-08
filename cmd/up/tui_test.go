@@ -35,6 +35,8 @@ func TestTUICreationHelp(t *testing.T) {
 		"Type chooses HTTP, TCP or Heartbeat with ←/→",
 		"A heartbeat takes a period and a grace; its job POSTs to a ping URL, which needs 'up serve --api-listen'.",
 		"WAITING until the first ping",
+		"Schedule ‹ Cron › replaces the period with a cron expression (min hour day month weekday) run in the defaults zone.",
+		"←/→ choose (Type, Schedule, Channel, thresholds, Token)",
 		"The URL is shown once after saving; v in the detail shows it again, and Token: new in Edit monitor replaces it.",
 		"v ping URL (heartbeats)",
 	} {

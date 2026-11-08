@@ -129,8 +129,9 @@ func remoteHeartbeatFlow(t *testing.T, login string) {
 		t.Fatalf("v did not reveal through the server:\n%s", remoteScreen(m))
 	}
 
+	// From Period: Schedule, Type, then Token.
 	m, _ = remotePress(t, m, tea.KeyPressMsg{Code: 'e', Text: "e"}, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift},
-		tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, right, tea.KeyPressMsg{Code: tea.KeyEnter})
+		tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, right, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if strings.Contains(remoteScreen(m), token) || !strings.Contains(remoteScreen(m), "Replace the token?") {
 		t.Fatalf("confirm:\n%s", remoteScreen(m))
 	}

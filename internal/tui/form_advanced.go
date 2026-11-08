@@ -419,10 +419,17 @@ func (f monitorForm) applyAdvanced(c *config.Check, key []byte) error {
 // conditionError matches the position a save error names.
 var conditionError = regexp.MustCompile(`(?m)^condition (\d+): (.*)$`)
 
-// focusError moves the focus to the condition field a save error names, if
-// it names one.
+// focusError moves the focus to the condition field (or the Cron row) a
+// save error names, if it names one.
 func (f *monitorForm) focusError(err error) {
-	if err == nil || f.kind != "" {
+	if err == nil {
+		return
+	}
+	if f.isCron() {
+		f.focusCronError(err)
+		return
+	}
+	if f.kind != "" {
 		return
 	}
 	found := conditionError.FindStringSubmatch(err.Error())

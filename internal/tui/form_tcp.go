@@ -33,7 +33,7 @@ func (f monitorForm) kindName() string {
 
 // choiceFocus reports whether the focused row is chosen with ←/→ instead of typed.
 func (f monitorForm) choiceFocus() bool {
-	return f.focus >= focusChannel && f.focus < focusAdvanced && f.focus != focusPort && f.focus != focusPeriod && f.focus != focusGrace
+	return f.focus >= focusChannel && f.focus < focusAdvanced && f.focus != focusPort && f.focus != focusPeriod && f.focus != focusGrace && f.focus != focusCron
 }
 
 // order is the tab order of the focusable rows, Type first. An existing
@@ -44,7 +44,10 @@ func (f monitorForm) order() []int {
 	case f.isTCP():
 		rows = []int{focusType, 0, 1, focusPort, 2, 3, focusChannel, focusAlertAfter, focusRecoverAfter}
 	case f.isHeartbeat():
-		rows = []int{focusType, 0, focusPeriod, focusGrace, focusChannel, focusAlertAfter, focusRecoverAfter}
+		rows = []int{focusType, 0, focusSchedule, focusPeriod, focusGrace, focusChannel, focusAlertAfter, focusRecoverAfter}
+		if f.isCron() {
+			rows[3] = focusCron
+		}
 		if f.tokenRow() {
 			rows = append(rows, focusToken)
 		}
@@ -74,13 +77,15 @@ func (f *monitorForm) text() *string {
 		return &f.period
 	case f.focus == focusGrace:
 		return &f.grace
+	case f.focus == focusCron:
+		return &f.cron
 	}
 	return f.advText()
 }
 
 // setKind switches the monitor type. The other type's values are dropped, not
-// hidden: the target field, port, expected status, TLS choice, period, grace
-// and every field carried over from an edited monitor start over, keeping
+// hidden: the target field, port, expected status, TLS choice, schedule,
+// period, cron, grace and every field carried over from an edited monitor start over, keeping
 // only the name.
 func (f *monitorForm) setKind(kind string) {
 	if f.kind == kind {
@@ -88,6 +93,7 @@ func (f *monitorForm) setKind(kind string) {
 	}
 	f.kind, f.newToken = kind, false
 	f.period, f.grace = shortDuration(config.DefaultHeartbeatPeriod), shortDuration(config.DefaultHeartbeatGrace)
+	f.schedule, f.cron = "", ""
 	f.values[1], f.port, f.tlsExpiry = "", "", "on"
 	f.values[4] = ""
 	if !f.isTCP() {

@@ -78,7 +78,7 @@ func createHeartbeat(t *testing.T, m Model, name string) (Model, tea.Cmd) {
 	m = openHeartbeatForm(t, m)
 	m, _ = press(t, m, keyTab)
 	m = typeText(t, m, name)
-	m, _ = press(t, m, keyTab)
+	m, _ = press(t, m, keyTab, keyTab) // Schedule, then Period
 	m = replaceField(t, m, "24h", "2h")
 	m, _ = press(t, m, keyTab)
 	m = replaceField(t, m, "1h", "15m")
@@ -149,7 +149,7 @@ func TestHeartbeatFormRejectsBadPeriodAndKeepsStore(t *testing.T) {
 	m = openHeartbeatForm(t, m)
 	m, _ = press(t, m, keyTab)
 	m = typeText(t, m, "nightly")
-	m, _ = press(t, m, keyTab)
+	m, _ = press(t, m, keyTab, keyTab) // Schedule, then Period
 	m = replaceField(t, m, "24h", "30s")
 	m, cmd := press(t, m, keyEnter)
 	if cmd != nil {
@@ -378,7 +378,7 @@ func TestHeartbeatEditReplacesTheTokenOnlyAfterConfirming(t *testing.T) {
 	m, _ = press(t, m, keyE)
 	requireText(t, m, "Edit monitor", "Type: ‹ Heartbeat ›", "Name: backup", "Period: 1h", "Grace: 10m", "Token: ‹ keep ›")
 	box := boxGeometry(t, m, "Edit monitor")
-	m, _ = press(t, m, keyShiftTab, keyShiftTab, keyRight)
+	m, _ = press(t, m, keyShiftTab, keyShiftTab, keyShiftTab, keyRight) // Schedule, Type, Token
 	requireText(t, m, "Token: ‹ new ›")
 	m, cmd := press(t, m, keyEnter)
 	if cmd != nil {
@@ -402,7 +402,7 @@ func TestHeartbeatEditReplacesTheTokenOnlyAfterConfirming(t *testing.T) {
 	}
 	requireAbsent(t, m, "uphb_", "Ping URL")
 
-	m, _ = press(t, m, keyE, keyShiftTab, keyShiftTab, keyRight, keyEnter)
+	m, _ = press(t, m, keyE, keyShiftTab, keyShiftTab, keyShiftTab, keyRight, keyEnter)
 	m, cmd = press(t, m, keyY)
 	m = run(t, m, cmd)
 	fresh := revealed(t, s, path, "backup")

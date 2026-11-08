@@ -33,6 +33,8 @@ const (
 	focusPeriod
 	focusGrace
 	focusToken
+	focusSchedule
+	focusCron
 	focusAdvanced // HTTP fold row; the fields inside follow (form_advanced.go)
 	focusCount
 )
@@ -47,6 +49,8 @@ type monitorForm struct {
 	port         string       // TCP only
 	period       string       // heartbeat only
 	grace        string       // heartbeat only
+	schedule     string       // heartbeat only: "" is a period, config.ScheduleCron a cron expression
+	cron         string       // heartbeat only
 	adv          advancedForm // HTTP only
 	focus        int
 	cursor       int // rune offset in the focused field
@@ -280,6 +284,8 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			case delta == 0:
 			case f.focus == focusType:
 				f.setKind(map[string]string{"HTTP": "", "TCP": kindTCP, "Heartbeat": kindHeartbeat}[cycleChoice(kindChoices, f.kindName(), delta)])
+			case f.focus == focusSchedule:
+				f.schedule = map[string]string{"Period": "", "Cron": config.ScheduleCron}[cycleChoice(scheduleChoices, f.scheduleName(), delta)]
 			case f.focus == focusToken:
 				f.newToken = cycleChoice(tokenChoices, tokenChoice(f.newToken), delta) == "new"
 			case f.focus == focusChannel:
@@ -464,7 +470,9 @@ func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error)
 	}
 	if f.isHeartbeat() {
 		b.WriteString("\n")
-		if hint := firstAlertHint(f); hint != "" {
+		if f.isCron() {
+			renderCronRuns(&b, f, snap, now)
+		} else if hint := firstAlertHint(f); hint != "" {
 			b.WriteString(helpStyle.Render(hint) + "\n")
 		}
 		if !snap.API.Enabled() {

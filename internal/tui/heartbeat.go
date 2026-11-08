@@ -143,7 +143,29 @@ func (m Model) handleSaved(msg saveMsg) Model {
 
 // heartbeatTarget is the detail title's text after the name.
 func heartbeatTarget(c config.Check) string {
+	if isCronCheck(c) {
+		return fmt.Sprintf("heartbeat · cron %s · grace %s", c.Cron, shortDuration(c.Grace))
+	}
 	return fmt.Sprintf("heartbeat · every %s · grace %s", shortDuration(c.Period), shortDuration(c.Grace))
+}
+
+func isCronCheck(c config.Check) bool { return c.Schedule == config.ScheduleCron }
+
+// heartbeatCells is one result per cell of a heartbeat's trend, newest
+// first: per period, or for a cron heartbeat per expected run.
+func heartbeatCells(s Service, snap Snapshot) []check.Result {
+	return check.RunResults(s.Check, s.Recent, snap.ScheduleZone())
+}
+
+// heartbeatClock is clockWithDay for a heartbeat's times; a cron
+// heartbeat's are in the Defaults zone with its abbreviation ("02:30 -03").
+func heartbeatClock(t time.Time, s Service, snap Snapshot, now time.Time) string {
+	if !isCronCheck(s.Check) {
+		return clockWithDay(t, now)
+	}
+	zone := snap.ScheduleZone()
+	local := t.In(zone)
+	return clockWithDay(local, now.In(zone)) + " " + local.Format("MST")
 }
 
 // pingCells is one cell per heartbeat result, newest right, padded to width:
@@ -178,7 +200,7 @@ func heartbeatLast(s Service, now time.Time) string {
 func heartbeatReason(s Service, snap Snapshot, now time.Time) string {
 	due := ""
 	if !s.Heartbeat.Deadline.IsZero() {
-		due = clockWithDay(s.Heartbeat.Deadline, now)
+		due = heartbeatClock(s.Heartbeat.Deadline, s, snap, now)
 	}
 	switch {
 	case !s.HasResult && !snap.API.Enabled():
@@ -194,7 +216,7 @@ func heartbeatReason(s Service, snap Snapshot, now time.Time) string {
 }
 
 // heartbeatStatus writes a heartbeat's STATUS rows up to Last error.
-func heartbeatStatus(field func(label, value string), s Service, now time.Time) {
+func heartbeatStatus(field func(label, value string), s Service, snap Snapshot, now time.Time) {
 	status := styledLabel(s, 0) + "   no ping yet"
 	if !s.Heartbeat.LastPing.IsZero() {
 		status = styledLabel(s, 0) + "   last ping " + ago(now, s.Heartbeat.LastPing)
@@ -202,7 +224,7 @@ func heartbeatStatus(field func(label, value string), s Service, now time.Time) 
 	field("Status", status)
 	due := "after the first ping"
 	if d := s.Heartbeat.Deadline; !d.IsZero() {
-		due = "before " + clockWithDay(d, now)
+		due = "before " + heartbeatClock(d, s, snap, now)
 		if d.After(now) {
 			due += " (in " + timeLeft(d.Sub(now)) + ")"
 		} else {
@@ -212,9 +234,14 @@ func heartbeatStatus(field func(label, value string), s Service, now time.Time) 
 	field("Next due", due)
 }
 
-// renderPings is the PINGS section, which takes the latency chart's place.
-func renderPings(b *strings.Builder, s Service, width int, opts detailOptions, blank string) {
-	b.WriteString(blank + headerStyle.Render("PINGS") + "  " + helpStyle.Render("one cell per period, newest right") + "\n")
+// renderPings is the PINGS section, which takes the latency chart's place:
+// one cell per period, or per expected run of a cron heartbeat.
+func renderPings(b *strings.Builder, s Service, snap Snapshot, width int, opts detailOptions, blank string) {
+	unit := "period"
+	if isCronCheck(s.Check) {
+		unit = "run"
+	}
+	b.WriteString(blank + headerStyle.Render("PINGS") + "  " + helpStyle.Render("one cell per "+unit+", newest right") + "\n")
 	if len(s.Recent) == 0 {
 		b.WriteString("  No pings yet.\n")
 		return
@@ -227,7 +254,7 @@ func renderPings(b *strings.Builder, s Service, width int, opts detailOptions, b
 		}
 		cells = min(cells, max(8, width-2-padding))
 	}
-	window := graphWindow(s.Recent, cells)
+	window := graphWindow(heartbeatCells(s, snap), cells)
 	b.WriteString("  " + pingCells(window, cells, true) + "\n")
 	b.WriteString(helpStyle.Render("  older"+strings.Repeat(" ", max(1, cells-8))+"now") + "\n")
 	if opts.hideStats {
@@ -241,7 +268,7 @@ func renderPings(b *strings.Builder, s Service, width int, opts detailOptions, b
 			failed++
 		}
 	}
-	fmt.Fprintf(b, "%s  %s · %d on time · %s · %s\n", blank, plural(len(window), "period"), len(window)-missed-failed,
+	fmt.Fprintf(b, "%s  %s · %d on time · %s · %s\n", blank, plural(len(window), unit), len(window)-missed-failed,
 		downStyle.Render(fmt.Sprintf("░ %d missed", missed)), downStyle.Render(fmt.Sprintf("█ %d failed", failed)))
 }
 
