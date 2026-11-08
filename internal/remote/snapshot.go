@@ -61,8 +61,10 @@ type HeartbeatDTO struct {
 // fields are ignored. Kind is "http" or "tcp" (empty on write means http) and
 // Method is the HTTP method (empty on write means GET). Host has no brackets
 // for IPv6. Conditions are plain and travel the same way in both directions.
-// A heartbeat has kind "heartbeat", PeriodMS and GraceMS and none of the HTTP
-// or TCP fields; its ping token is never in a CheckDTO.
+// A heartbeat has kind "heartbeat", GraceMS, a Schedule ("period", read
+// back for every period heartbeat, or "cron"; empty on write means period)
+// with PeriodMS or Cron, and none of the HTTP or TCP fields; its ping token
+// is never in a CheckDTO.
 type CheckDTO struct {
 	Name           string         `json:"name"`
 	URL            string         `json:"url"`
@@ -84,6 +86,8 @@ type CheckDTO struct {
 	Port           int            `json:"port"`
 	PeriodMS       int64          `json:"period_ms"`
 	GraceMS        int64          `json:"grace_ms"`
+	Schedule       string         `json:"schedule"`
+	Cron           string         `json:"cron"`
 }
 
 // HeaderDTO is one request header: a plain name and a protected value.
@@ -296,9 +300,13 @@ func checkDTO(c config.Check) CheckDTO {
 	d := CheckDTO{Name: c.Name, URL: c.URL, IntervalMS: c.Interval.Milliseconds(), TimeoutMS: c.Timeout.Milliseconds(), ExpectedStatus: c.ExpectedStatus,
 		Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
 		Kind: c.Kind, Method: c.Method, BodySet: !c.Body.Empty(), ExpectText: c.ExpectText, Host: c.Host, Port: c.Port,
-		PeriodMS: c.Period.Milliseconds(), GraceMS: c.Grace.Milliseconds(), Conditions: conditionDTOs(c.Conditions)}
+		PeriodMS: c.Period.Milliseconds(), GraceMS: c.Grace.Milliseconds(), Conditions: conditionDTOs(c.Conditions),
+		Schedule: c.Schedule, Cron: c.Cron}
 	if d.Kind == "" {
 		d.Kind = config.CheckHTTP
+	}
+	if d.Kind == config.CheckHeartbeat && d.Schedule == "" {
+		d.Schedule = config.SchedulePeriod
 	}
 	if d.Kind == config.CheckHTTP && d.Method == "" {
 		d.Method = "GET"
@@ -509,7 +517,8 @@ func (c CheckDTO) snapshotCheck(key []byte) config.Check {
 	out := config.Check{Name: c.Name, URL: c.URL, Interval: time.Duration(c.IntervalMS) * time.Millisecond, Timeout: time.Duration(c.TimeoutMS) * time.Millisecond,
 		ExpectedStatus: c.ExpectedStatus, Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
 		Kind: c.Kind, Method: c.Method, ExpectText: c.ExpectText, Host: c.Host, Port: c.Port,
-		Period: time.Duration(c.PeriodMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond, Conditions: conditions(c.Conditions)}
+		Period: time.Duration(c.PeriodMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond, Conditions: conditions(c.Conditions),
+		Schedule: c.Schedule, Cron: c.Cron}
 	if c.BodySet {
 		out.Body = placeholder(key)
 	}

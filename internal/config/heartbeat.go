@@ -26,16 +26,14 @@ const (
 	DefaultHeartbeatGrace  = time.Hour
 )
 
-// validateHeartbeatFields checks a heartbeat's name, period and grace and
-// that no field of a check the daemon runs is set.
+// validateHeartbeatFields checks a heartbeat's name, schedule (period or
+// cron) and grace and that no field of a check the daemon runs is set.
 func validateHeartbeatFields(c Check) []error {
 	var errs []error
 	if c.Name == "" {
 		errs = append(errs, errors.New("name is required"))
 	}
-	if c.Period < MinHeartbeatPeriod || c.Period > MaxHeartbeatPeriod {
-		errs = append(errs, fmt.Errorf("period must be between %s and %s", ShortDuration(MinHeartbeatPeriod), ShortDuration(MaxHeartbeatPeriod)))
-	}
+	errs = append(errs, validateSchedule(c)...)
 	if c.Grace < 0 || c.Grace > MaxHeartbeatGrace {
 		errs = append(errs, fmt.Errorf("grace must be between 0s and %s", ShortDuration(MaxHeartbeatGrace)))
 	}

@@ -94,9 +94,13 @@ func (n *Notifier) content(ctx context.Context, e event) (subject, body string) 
 }
 
 // heartbeatSchedule stands in for the URL a heartbeat does not have: its
-// period and grace ("Heartbeat: every 24h, grace 30m"). The ping token is
-// never part of an alert.
+// period or cron and its grace ("Heartbeat: every 24h, grace 30m",
+// "Heartbeat: cron 0 2 * * 1-5, grace 30m"). The ping token is never part of
+// an alert.
 func heartbeatSchedule(c config.Check) string {
+	if c.Schedule == config.ScheduleCron {
+		return fmt.Sprintf("Heartbeat: cron %s, grace %s", c.Cron, shortDuration(c.Grace))
+	}
 	return fmt.Sprintf("Heartbeat: every %s, grace %s", shortDuration(c.Period), shortDuration(c.Grace))
 }
 

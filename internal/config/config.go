@@ -76,6 +76,13 @@ type Check struct {
 	// URL, method, expected status, interval or timeout.
 	Period time.Duration
 	Grace  time.Duration
+	// Schedule is how a heartbeat's runs are expected: SchedulePeriod (the
+	// default; empty means it) or ScheduleCron, which expects a ping for every
+	// run of Cron, a standard 5-field expression in the Defaults zone (see
+	// ParseCron), and is missed Grace after a run without one; Period is 0.
+	// Heartbeat checks only.
+	Schedule string
+	Cron     string
 }
 
 // MaxAlertThreshold is the largest AlertAfter and RecoverAfter.
@@ -112,6 +119,9 @@ func ValidateCheck(c Check) error {
 		errs = validateHeartbeatFields(c)
 	default:
 		errs = append(errs, fmt.Errorf("kind %q must be http, tcp or heartbeat", c.Kind))
+	}
+	if c.Kind != CheckHeartbeat && (c.Schedule != "" || c.Cron != "") {
+		errs = append(errs, errors.New("schedule and cron are only for heartbeat checks"))
 	}
 	switch {
 	case c.Kind == CheckHeartbeat:

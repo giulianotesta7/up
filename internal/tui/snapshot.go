@@ -96,16 +96,18 @@ type HeartbeatState struct {
 	// LastPing is the newest ping among Recent; zero when none.
 	LastPing time.Time
 	// Deadline is when the monitor is missed without another ping: the
-	// newest result + period + grace. Zero while waiting.
+	// newest result + period + grace, or for a cron heartbeat the next run
+	// owed a ping + grace (see check.Deadline). Zero while waiting.
 	Deadline time.Time
 }
 
-// heartbeatState derives the state from newest-first results.
-func heartbeatState(c config.Check, recent []check.Result) HeartbeatState {
+// heartbeatState derives the state from newest-first results, with cron
+// runs in loc.
+func heartbeatState(c config.Check, recent []check.Result, loc *time.Location) HeartbeatState {
 	if len(recent) == 0 {
 		return HeartbeatState{Waiting: true}
 	}
-	h := HeartbeatState{Deadline: check.NextDeadline(c, recent[0].At)}
+	h := HeartbeatState{Deadline: check.Deadline(c, recent, loc)}
 	for _, r := range recent {
 		if r.Status == check.StatusUp {
 			h.LastPing = r.At
@@ -260,6 +262,31 @@ func (s Snapshot) NewItemDefaults() config.Defaults {
 		return config.BuiltinDefaults()
 	}
 	return s.Defaults
+}
+
+// ScheduleZone is the zone cron heartbeats run in: the Defaults zone, or UTC
+// when it cannot be loaded.
+func (s Snapshot) ScheduleZone() *time.Location {
+	loc, err := config.LoadZone(s.NewItemDefaults().Zone)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
+// NextRuns lists the next n runs after after of the cron heartbeat c in the
+// snapshot's ScheduleZone; nil for a period heartbeat, another kind or an
+// expression that does not parse. It works the same on a remote snapshot,
+// which carries the check and the Defaults.
+func (s Snapshot) NextRuns(c config.Check, after time.Time, n int) []time.Time {
+	if c.Kind != config.CheckHeartbeat || c.Schedule != config.ScheduleCron {
+		return nil
+	}
+	cron, err := config.ParseCron(c.Cron)
+	if err != nil {
+		return nil
+	}
+	return cron.NextRuns(after, n, s.ScheduleZone())
 }
 
 // Stale reports whether the daemon stopped writing heartbeats. Service
@@ -552,6 +579,7 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 		}
 	}
 	var observedMonitors int
+	zone := snap.ScheduleZone()
 	checks, err := s.Checks(ctx)
 	if err != nil {
 		return Snapshot{}, err
@@ -581,7 +609,7 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 			svc.Latest, svc.HasResult = svc.Recent[0], true
 		}
 		if c.Kind == config.CheckHeartbeat {
-			svc.Heartbeat = heartbeatState(c, svc.Recent)
+			svc.Heartbeat = heartbeatState(c, svc.Recent, zone)
 		}
 		svc.Streak = check.Replay(svc.Recent, c.FailuresToAlert(), c.SuccessesToRecover())
 		svc.KnownAlerting = svc.Streak.Alerting && c.Channel != ""

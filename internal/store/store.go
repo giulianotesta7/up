@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 11
+const schemaVersion = 12
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -203,6 +203,14 @@ ALTER TABLE channels ADD COLUMN priority   TEXT NOT NULL DEFAULT '';
 	// JSON path, header name, value, regex pattern, max response time in
 	// nanoseconds) in check order; they hold no secrets.
 	`ALTER TABLE checks ADD COLUMN conditions TEXT NOT NULL DEFAULT '';`,
+	// v11 -> v12: heartbeat cron schedules. Additive: existing rows read an
+	// empty schedule (period) and no cron expression, so existing heartbeats
+	// keep their period. schedule is '' or 'cron'; cron is the expression
+	// with its fields separated by one space.
+	`
+ALTER TABLE checks ADD COLUMN schedule TEXT NOT NULL DEFAULT '';
+ALTER TABLE checks ADD COLUMN cron     TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // Outage is a period during which a check was down. Ongoing outages have a

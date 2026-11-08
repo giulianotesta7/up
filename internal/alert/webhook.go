@@ -40,9 +40,11 @@ var webhookClient = &http.Client{
 type webhookMonitor struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
-	// PeriodMS and GraceMS are a heartbeat's schedule; omitted for others.
-	PeriodMS int64 `json:"period_ms,omitempty"`
-	GraceMS  int64 `json:"grace_ms,omitempty"`
+	// PeriodMS (or Cron) and GraceMS are a heartbeat's schedule; omitted for
+	// others.
+	PeriodMS int64  `json:"period_ms,omitempty"`
+	Cron     string `json:"cron,omitempty"`
+	GraceMS  int64  `json:"grace_ms,omitempty"`
 }
 
 type webhookResult struct {
@@ -74,7 +76,7 @@ func webhookBody(e event, now time.Time) webhookPayload {
 	}
 	p := webhookPayload{Version: WebhookPayloadVersion, Monitor: &webhookMonitor{Name: e.check.Name, Type: kind}}
 	if kind == config.CheckHeartbeat {
-		p.Monitor.PeriodMS, p.Monitor.GraceMS = e.check.Period.Milliseconds(), e.check.Grace.Milliseconds()
+		p.Monitor.PeriodMS, p.Monitor.Cron, p.Monitor.GraceMS = e.check.Period.Milliseconds(), e.check.Cron, e.check.Grace.Milliseconds()
 	}
 	if e.cert != nil {
 		days := int(e.remaining / (24 * time.Hour))

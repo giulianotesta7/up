@@ -8,7 +8,8 @@ import (
 )
 
 // Reasons of a heartbeat's down results. A missed deadline's reason starts
-// with missedPrefix and names the last ping (or reported failure) it knows.
+// with missedPrefix and names the last ping (or reported failure) it knows,
+// or for a cron heartbeat the run it missed.
 const (
 	ReasonReportedFailure = "reported failure"
 	missedPrefix          = "no ping"

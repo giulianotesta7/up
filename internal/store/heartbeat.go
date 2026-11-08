@@ -189,7 +189,8 @@ func (s *Store) PingHeartbeat(ctx context.Context, token string, failed bool, at
 }
 
 // RecordMissed stores a heartbeat's missed-deadline result r only while the
-// heartbeat c still exists with the same period and grace and has no result
+// heartbeat c still exists with the same schedule (period or cron) and grace
+// and has no result
 // after newest, the result the deadline was computed from. A ping that
 // arrived meanwhile wins: the miss is not stored. The check and the insert
 // are one statement.
@@ -197,12 +198,13 @@ func (s *Store) RecordMissed(ctx context.Context, c config.Check, newest time.Ti
 	if r.CheckName != c.Name || r.Status != check.StatusDown {
 		return false, fmt.Errorf("store: refusing to record a missed deadline %+v for %s", r, c.Name)
 	}
+	c = c.Canonical()
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error)
 SELECT ?1, ?2, 'down', 0, 0, ?3
- WHERE EXISTS (SELECT 1 FROM checks WHERE name = ?1 AND kind = ?4 AND period_ns = ?5 AND grace_ns = ?6)
+ WHERE EXISTS (SELECT 1 FROM checks WHERE name = ?1 AND kind = ?4 AND period_ns = ?5 AND grace_ns = ?6 AND schedule = ?8 AND cron = ?9)
    AND NOT EXISTS (SELECT 1 FROM results WHERE check_name = ?1 AND at_ns > ?7)`,
-		c.Name, r.At.UnixNano(), r.Error, config.CheckHeartbeat, int64(c.Period), int64(c.Grace), newest.UnixNano())
+		c.Name, r.At.UnixNano(), r.Error, config.CheckHeartbeat, int64(c.Period), int64(c.Grace), newest.UnixNano(), c.Schedule, c.Cron)
 	if err != nil {
 		return false, fmt.Errorf("store: record %s: %w", c.Name, err)
 	}
