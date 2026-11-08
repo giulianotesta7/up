@@ -21,6 +21,12 @@ rebasing on this one; migrations are append-only.
 - `ValidateCheck`, `ValidateChannel`, `ValidateMaintenanceWindow` are the only validators. Bounds: methods `GET HEAD POST PUT PATCH DELETE OPTIONS`; 32 headers; header names are RFC tokens and unique case-insensitively; `HEAD` with `ExpectText` is rejected; sealed value limits `MaxSealedHeaderValue` (4096) and `MaxSealedBody` (64 KiB + 256); `MaxExpectText` 1024; at most `MaxConditions` (32) conditions, paths/values/patterns at most `MaxConditionText` (1024) bytes, JSON paths non-empty dot-separated segments, regex compiles, header names are tokens, `Within` > 0, whole milliseconds and < `Timeout`, each condition sets only its kind's fields (others are rejected, e.g. `condition 1: pattern is not used by JSON value conditions`), JSON/regex conditions not with `HEAD`, messages prefixed `condition N: `; TCP host without scheme/brackets/port (bare IPv6), port 1..65535, no HTTP-only fields, `expected_status` 0; window duration 1m..7d, weekdays distinct 0..6, zone loads and is not `Local` (tzdata is embedded).
 - `ChannelKinds` (what the TUI offers) lists email, webhook, ntfy, telegram, discord, slack and gotify, in that order.
 
+### Tags (schema v12)
+
+`Check.Tags []string`: every kind, at most `MaxTags` (5), each lowercase `a-z`, digits and `-`, at most `MaxTagLength` (32) characters; `Canonical` normalizes them (`NormalizeTags`: trimmed, lowercased, order as typed, repeats dropped, so `NAS` is stored as `nas`). Messages: `at most 5 tags are allowed`, `tag "x y" may only use letters a-z, digits and -`, `tag "..." must be at most 32 characters`. Helpers: `ParseTags("nas, home")`, `FormatTags`, `ValidateTag`, `TagsInUse(checks)` (sorted, for the form's "in use" hint), `c.HasTag(tag)`. Tags are not part of `SameDefinition`. `MaintenanceWindow.Tag` makes a window the tag's (`Check` is ignored on writes); `Mute.Tag` names the tag a monitor's mute comes from.
+
+A tag's mutes and windows name the tag, never its monitors: membership is resolved on every read, so a monitor tagged later is covered and one that drops the tag is not. For a monitor, its mute is the one that **ends last** of its own and its tags' (`Tag` set when that is a tag's; an own mute that ties wins), and its windows are its own plus its tags'. Removing a tag from its last monitor (edit, delete or `SetChecks`) deletes that tag's mutes and windows in the same transaction.
+
 ### Response conditions (schema v11)
 
 `Check.Conditions` is an ordered list of `Condition{Kind, Path, Name, Value, Pattern, Within}`; kinds `json`, `regex`, `response_time`, `header` (`ConditionKinds`), HTTP only, all must pass and the first failure is the down reason. v11 adds `checks.conditions` (see Store below).
@@ -49,7 +55,8 @@ Header values, HTTP body, webhook URL and webhook auth value are `secret.Sealed`
 
 - Checks: `AddCheck`, `UpdateCheck`, `SetChecks`, `Checks` carry every field above; `RecordDefined` compares URL, kind, method, headers, body, expect text, conditions, host, port, interval, timeout, status. Conditions (v11 `checks.conditions`, a deterministic JSON list of `{k,p,n,v,r,w}`, `''` = none) hold no secrets.
 - Channels: `AddChannel`, `UpdateChannel`, `Channels`, `Channel` carry the webhook fields (sealed values come back sealed). `DeleteChannel` also deletes its test requests.
-- Windows (max `MaxMaintenanceWindows` = 20 per check): `AddMaintenanceWindow(ctx, w) (w with ID, error)`, `UpdateMaintenanceWindow(ctx, w)`, `DeleteMaintenanceWindow(ctx, check, id)`, `MaintenanceWindows(ctx, check)`, `AllMaintenanceWindows(ctx)`. `DeleteCheck` deletes its windows. Unknown check/window is `ErrNotFound`, invalid input `ErrValidation`.
+- Windows (max `MaxMaintenanceWindows` = 20 per check and per tag): `AddMaintenanceWindow(ctx, w) (w with ID, error)` (with `w.Tag`, the tag's; a tag no monitor carries is `ErrNotFound`), `UpdateMaintenanceWindow(ctx, w)` (by `w.Tag` when set), `DeleteMaintenanceWindow(ctx, check, id)` (also a window of one of the check's tags), `DeleteTagMaintenanceWindow(ctx, tag, id)`, `MaintenanceWindows(ctx, check)` and `AllMaintenanceWindows(ctx)` (own windows plus the check's tags' windows, reported with `Check` the monitor and `Tag` set), `TagMaintenanceWindows(ctx, tag)`. `DeleteCheck` deletes its windows. Unknown check/window is `ErrNotFound`, invalid input `ErrValidation`.
+- Tags (v12: `checks.tags`, the normalized list joined by commas; `maintenance_windows.tag`, a tag's window has `check_name = ''`; `tag_mutes(tag, until_ns)`): `SetTagMute(ctx, tag, until)` (`ErrValidation` invalid tag, `ErrNotFound` no monitor carries it), `UnmuteTag(ctx, tag)` (deletes it; the daemon then sends what is owed), `TagMutes(ctx)`. `Mute(ctx, check)` and `Mutes(ctx)` return each monitor's mute that ends last (see Tags above); `ClearMute` also deletes its tags' ended mutes.
 - Defaults (v7 `defaults`, one row with `id = 1`; no row reads as `BuiltinDefaults`): `Defaults(ctx)`, `SetDefaults(ctx, d)` (invalid input or a channel that does not exist is `ErrValidation`; nothing is stored). `DeleteChannel` sets a default channel of that name to none, so reads never name a deleted channel.
 - Alert state (v6 `alert_state`, a trigger deletes it with its check): `AlertState(ctx, check) (known, found, err)`, `SetAlertState(ctx, check, known)` (`ErrNotFound` unknown check), `AlertStates(ctx)`. It records whether recipients were last told the check is down; the monitor writes it when it sends or settles and reads it on loop start (a live mute's `was_alerting` first, no row falls back to the streak). Snapshot: `Service.KnownAlerting`, `services[].known_alerting`.
 - Heartbeats (v9 adds `checks.period_ns`, `grace_ns`, `ping_token`, `ping_token_key`, `ping_token_hash` with a unique partial index, and the one-row `daemon_api` table): adding or making a heartbeat creates a token (`uphb_` + 256 bits base64url) sealed to the stored public key (`ErrValidation` without one) plus its SHA-256; edits keep it, another kind clears it, delete removes it, copies get their own. `HeartbeatToken(ctx, name) (secret.Sealed, error)`, `RegenerateHeartbeatToken(ctx, name) (string, error)` (`ErrNotFound` unless a heartbeat), `PingHeartbeat(ctx, token, failed, at) (found, error)` (hash lookup, constant-time compare), `RecordMissed(ctx, c, newest, r) (stored, error)` (only while the definition is unchanged and no result is newer than `newest`), `SetAPIListener`/`APIListener` (written by every `up serve` start; zero = no API).
@@ -75,7 +82,9 @@ All routes need the bearer token except heartbeat pings; bodies are strict JSON 
 | `POST /api/v1/channels`, `PUT /api/v1/channels/{name}` | channel write body; 201 returns `ChannelDTO` |
 | `GET /api/v1/checks/{name}/maintenance` | 200 `[MaintenanceDTO]` |
 | `POST /api/v1/checks/{name}/maintenance` | `MaintenanceWriteDTO`; 201 `MaintenanceDTO` |
-| `PUT`/`DELETE /api/v1/checks/{name}/maintenance/{id}` | `MaintenanceWriteDTO` / none; 204 |
+| `PUT`/`DELETE /api/v1/checks/{name}/maintenance/{id}` | `MaintenanceWriteDTO` / none; 204 (DELETE also removes a window of one of the monitor's tags) |
+| `PUT`/`DELETE /api/v1/tags/{tag}/mute` | `{"duration_ms"}` (1 minute to 7 days) / none; 204 |
+| `GET`/`POST /api/v1/tags/{tag}/maintenance`, `PUT`/`DELETE .../maintenance/{id}` | as the monitor's routes, for the tag's windows (`remote.TagRoutes` on `remote.TagPatterns`); invalid tag 400, tag no monitor carries 404 |
 | `POST /api/v1/channels/{name}/test` | none; 202 `ChannelTestDTO` (404 unknown channel, 409 one already active) |
 | `GET /api/v1/channels/{name}/test` | 200 `ChannelTestDTO`, 404 if none |
 | `GET /api/v1/defaults` | 200 `DefaultsDTO` |
@@ -88,18 +97,18 @@ JSON shapes:
 
 ```
 check (write)   {"name","url","interval_ms","timeout_ms","expected_status","channel","alert_after","recover_after","tls_off",
-                 "kind":"http|tcp","method","headers":[{"name","value":PROT}],"body":PROT,"expect_text","conditions":[COND],"host","port"}
+                 "kind":"http|tcp","method","headers":[{"name","value":PROT}],"body":PROT,"expect_text","conditions":[COND],"host","port","tags":["nas"]}
 check (read)    same, but headers [{"name","value_set"}], "body_set", kind always set, method "GET" when empty
 COND            {"kind":"json|regex|response_time|header","path","name","value","pattern","within_ms"}   only the kind's fields (another kind's field is 400 `condition N: ... not used by ...`); same in read
 PROT            {"action":"keep|replace|clear","sealed":{"key":b64,"data":b64}}   sealed only with replace; absent = keep
 channel (write) {"name","kind":"email|webhook|ntfy|telegram|discord|slack|gotify","smtp_server","recipients","webhook_origin","webhook_url":PROT,"webhook_auth_name","webhook_auth":PROT,
                  "server_url","topic","chat_id","token":PROT,"priority"}
 channel (read)  {"name","kind","smtp_server","recipients","webhook_origin","webhook_url_set","webhook_auth_name","webhook_auth_set","server_url","topic","chat_id","token_set","priority"}
-window          {"id","weekdays":[0..6],"start_minute","duration_ms","zone"}   (write omits id)
+window          {"id","weekdays":[0..6],"start_minute","duration_ms","zone","tag"}   (write omits id and tag; "tag" only on a tag's window)
 defaults        {"zone","channel","interval_ms","timeout_ms","expected_status","alert_after","recover_after"}
 channel test    {"id","channel","status":"pending|sending|ok|error","error","requested","started","finished"}
-snapshot adds   services[].maintenance [window], services[].in_maintenance, services[].maintenance_end, channel_tests [channel test], defaults
+snapshot adds   services[].mute.tag (when the mute comes from a tag), services[].maintenance [window], services[].in_maintenance, services[].maintenance_end, channel_tests [channel test], defaults
 heartbeat       check adds "period_ms","grace_ms" (kind "heartbeat"; write omits them for other kinds); services[].heartbeat {"waiting","last_ping","deadline"} (heartbeats only); snapshot "api" {"listen","tls"}
 ```
 
-Sealed values must be sealed to the key in the snapshot's `public_key`; `sealed.key` must equal it (400 otherwise). `cmd/up/api.go` mounts the wildcard routes; `internal/client` implements the matching methods and `LoadSnapshot` shifts `in_maintenance`'s end and channel test times by clock skew.
+Sealed values must be sealed to the key in the snapshot's `public_key`; `sealed.key` must equal it (400 otherwise). `cmd/up/api.go` mounts the wildcard routes; `internal/client` implements the matching methods (`SetTagMute`, `UnmuteTag`, `DeleteTagMaintenanceWindow`; window writes with `Tag` go to the tag routes) and `LoadSnapshot` shifts `in_maintenance`'s end and channel test times by clock skew.

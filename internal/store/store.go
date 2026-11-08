@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 11
+const schemaVersion = 12
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -203,6 +203,18 @@ ALTER TABLE channels ADD COLUMN priority   TEXT NOT NULL DEFAULT '';
 	// JSON path, header name, value, regex pattern, max response time in
 	// nanoseconds) in check order; they hold no secrets.
 	`ALTER TABLE checks ADD COLUMN conditions TEXT NOT NULL DEFAULT '';`,
+	// v11 -> v12: monitor tags, and mutes and maintenance windows for a tag.
+	// Additive: existing monitors read no tags and existing windows belong to
+	// their check. tags is the normalized list joined by commas. A tag's
+	// window has an empty check_name; tag_mutes holds one mute per tag and no
+	// notification state. Membership is resolved on every read, and removing
+	// a tag from its last monitor deletes its mutes and windows.
+	`
+ALTER TABLE checks ADD COLUMN tags TEXT NOT NULL DEFAULT '';
+ALTER TABLE maintenance_windows ADD COLUMN tag TEXT NOT NULL DEFAULT '';
+CREATE INDEX maintenance_windows_by_tag ON maintenance_windows (tag) WHERE check_name = '';
+CREATE TABLE tag_mutes (tag TEXT PRIMARY KEY, until_ns INTEGER NOT NULL);
+`,
 }
 
 // Outage is a period during which a check was down. Ongoing outages have a
@@ -313,7 +325,8 @@ func migrate(db *sql.DB) error {
 }
 
 // SetChecks replaces the configured checks, keeping their order. Results of
-// removed checks are kept.
+// removed checks are kept; mutes and windows of tags no check carries any
+// more are deleted.
 func (s *Store) SetChecks(ctx context.Context, checks []config.Check) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -327,6 +340,9 @@ func (s *Store) SetChecks(ctx context.Context, checks []config.Check) error {
 		if err := insertCheck(ctx, tx, i, c, nil); err != nil {
 			return fmt.Errorf("store: set checks: %w", err)
 		}
+	}
+	if err := pruneTags(ctx, tx); err != nil {
+		return fmt.Errorf("store: set checks: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: set checks: %w", err)
