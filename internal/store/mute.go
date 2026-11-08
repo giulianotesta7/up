@@ -57,15 +57,15 @@ func (s *Store) ClearMute(ctx context.Context, name string, notAfter time.Time) 
 // muteRows selects every mute that applies to a check as (check, until,
 // was_alerting, tag): its own, and those of the tags it carries with the
 // recipients' known state (false when none is recorded). The rows of one
-// check are ordered by end, the own mute before a tag's ending at the same
-// time, so the last one is the check's mute.
+// check are ordered by end, a tag's mute before the own one ending at the
+// same time, so the last one is the check's mute and the own mute wins a tie.
 const muteRows = `
 SELECT check_name, until_ns, was_alerting, '' FROM mutes WHERE check_name = ?1 OR ?1 IS NULL
 UNION ALL
 SELECT c.name, t.until_ns, COALESCE((SELECT known_alerting FROM alert_state a WHERE a.check_name = c.name), 0), t.tag
   FROM tag_mutes t JOIN checks c ON ` + "instr(',' || c.tags || ',', ',' || t.tag || ',') > 0" + `
  WHERE c.name = ?1 OR ?1 IS NULL
-ORDER BY 1, 2, 4`
+ORDER BY 1, 2, 4 DESC`
 
 // readMutes returns the mute of each check (all when name is nil) ordered
 // by check name: the one that ends last of its own and its tags' (see

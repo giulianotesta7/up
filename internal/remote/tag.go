@@ -35,7 +35,8 @@ var TagPatterns = []string{"/api/v1/tags/{tag}/mute", "/api/v1/tags/{tag}/mainte
 //	DELETE /api/v1/tags/{tag}/maintenance/{id}   204
 //
 // The tag is normalized ("NAS" is "nas"). An invalid tag or body is 400, a
-// tag no monitor carries or an unknown window 404, and nothing changes on any
+// write for a tag no monitor carries or an unknown window 404 (listing such a
+// tag's windows is 200 with none, like a check's), and nothing changes on any
 // error.
 func TagRoutes(s TagStore) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
