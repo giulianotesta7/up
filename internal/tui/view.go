@@ -261,33 +261,43 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		}
 		field("Status", status)
 	}
-	if s.Muted(now) {
-		held := "nothing pending"
-		switch s.Pending() {
+	// hold writes a Muted or Maintenance row: until when, through which tag
+	// and the alert held. Too wide for the screen, the outage start is left
+	// to Down since; still too wide, the alert held goes on a line below.
+	hold := func(label, head, pending string) {
+		held, short := "nothing pending", "nothing pending"
+		switch pending {
 		case "down":
 			held = "1 alert pending (down since " + formatTime(s.DownSince, now) + ")"
+			short = "1 alert pending (down)"
 		case "recovery":
 			held = "1 alert pending (recovery)"
+			short = held
 		}
-		through := ""
+		fits := func(value string) bool { return width <= 0 || 15+ansi.StringWidth(value) <= width }
+		switch {
+		case fits(head + " · " + held):
+			field(label, head+" · "+held)
+		case fits(head + " · " + short):
+			field(label, head+" · "+short)
+		default:
+			field(label, head)
+			field("", held)
+		}
+	}
+	if s.Muted(now) {
+		head := warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))
 		if s.Mute.Tag != "" {
-			through = " · through #" + s.Mute.Tag
+			head += " · through #" + s.Mute.Tag
 		}
-		field("Muted", warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))+through+" · "+held)
+		hold("Muted", head, s.Pending())
 	}
 	if s.InMaintenance.Active {
-		held := "nothing pending"
-		switch s.heldPending() {
-		case "down":
-			held = "1 alert pending (down since " + formatTime(s.DownSince, now) + ")"
-		case "recovery":
-			held = "1 alert pending (recovery)"
-		}
-		through := ""
+		head := warnStyle.Render(fmt.Sprintf("until %s (%s left)", clockWithDay(s.InMaintenance.End, now), timeLeft(s.InMaintenance.End.Sub(now))))
 		if tag := tagMaintenance(s, now); tag != "" {
-			through = " · through #" + tag
+			head += " · through #" + tag
 		}
-		field("Maintenance", warnStyle.Render(fmt.Sprintf("until %s (%s left)", clockWithDay(s.InMaintenance.End, now), timeLeft(s.InMaintenance.End.Sub(now))))+through+" · "+held)
+		hold("Maintenance", head, s.heldPending())
 	}
 	field("Last error", orDash(s.Latest.Error))
 	if streak := streakLine(s, now); streak != "" {

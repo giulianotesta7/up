@@ -216,8 +216,11 @@ func renderUnmuteTag(p unmuteTagPrompt, snap Snapshot, now time.Time, loadErr er
 	b.WriteString(titleStyle.Render("Unmute #"+p.tag) + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
 	b.WriteString(p.name + " is muted through #" + p.tag + ".\n")
-	prefix := "Unmuting ends the mute for "
+	// The snapshot carries only the winning mute, so a member's own mute is
+	// unknown here; it is never ended, which the last line says.
+	prefix := "Unmuting ends the #" + p.tag + " mute for "
 	b.WriteString(prefix + membersText(snap.tagMembers(p.tag), p.tag, popupRowWidth-ansi.StringWidth(prefix)-1) + ".\n")
+	b.WriteString(helpStyle.Render("Mutes set on a single monitor stay.") + "\n")
 	b.WriteString("\n" + renderHelp("y unmute · n cancel"))
 	return b.String()
 }
@@ -230,7 +233,7 @@ func renderMute(p mutePrompt, snap Snapshot, now time.Time, loadErr error) strin
 	if len(p.tags) > 0 {
 		row := "Mute " + renderChoice(p.targetName(), nil, !p.custom)
 		if tag := p.tag(); tag != "" {
-			row += "  " + helpStyle.Render(coversText(snap, tag, popupRowWidth-ansi.StringWidth(row)-2))
+			row += "  " + helpStyle.Render(coversText(snap, tag))
 		}
 		b.WriteString(row + "\n\n")
 	}

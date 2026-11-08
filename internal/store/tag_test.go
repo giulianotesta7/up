@@ -393,3 +393,25 @@ func TestSetChecksRemovingATagDeletesItsHolds(t *testing.T) {
 		t.Fatalf("holds after SetChecks = %v, want %v", got, want)
 	}
 }
+
+func TestTagCleanupKeepsOwnWindows(t *testing.T) {
+	s, _ := tagStore(t)
+	if err := s.AddCheck(ctx, tagged("api", "nas")); err != nil {
+		t.Fatal(err)
+	}
+	own := tagWindow("")
+	own.Check = "api"
+	if _, err := s.AddMaintenanceWindow(ctx, own); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddMaintenanceWindow(ctx, tagWindow("nas")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateCheck(ctx, tagged("api")); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := s.MaintenanceWindows(ctx, "api")
+	if err != nil || len(ws) != 1 || ws[0].Tag != "" {
+		t.Fatalf("windows = %+v, %v; want only the own window", ws, err)
+	}
+}

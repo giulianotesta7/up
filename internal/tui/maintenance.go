@@ -467,7 +467,7 @@ func renderWindowForm(b *strings.Builder, f windowForm, name string, snap Snapsh
 		target := windowOwner(config.MaintenanceWindow{Tag: f.windowTag()}, name)
 		row := fmt.Sprintf("%s %s %s", marker(focused), label, renderChoice(target, nil, focused))
 		if tag := f.windowTag(); tag != "" {
-			row += "   " + helpStyle.Render(coversText(snap, tag, popupRowWidth-ansi.StringWidth(row)-3))
+			row += "   " + helpStyle.Render(coversText(snap, tag))
 		}
 		b.WriteString(row + "\n")
 	case f.tag != "" || len(f.tags) > 0:

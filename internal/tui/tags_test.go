@@ -256,13 +256,13 @@ func TestMuteTagTarget(t *testing.T) {
 	requireText(t, m, "Mute alerts · api", "Mute ‹ api ›", "←/→ target · ↑/↓ choose · enter mute · esc cancel")
 	left, width := modalBorder(t, m, "Mute alerts · api")
 	m, _ = press(t, m, keyRight)
-	requireText(t, m, "Mute alerts · #nas", "Mute ‹ #nas ›  covers api, db and monitors tagged nas later",
+	requireText(t, m, "Mute alerts · #nas", "Mute ‹ #nas ›  covers api, db and any tagged later",
 		"If a monitor is still down when the mute ends, you get the alert then.")
 	if l, w := modalBorder(t, m, "Mute alerts · #nas"); l != left || w != width {
 		t.Fatalf("the target moved the popup: %d/%d -> %d/%d", left, width, l, w)
 	}
 	m, _ = press(t, m, keyRight)
-	requireText(t, m, "Mute ‹ #home ›  covers api, job and monitors tagged home later")
+	requireText(t, m, "Mute ‹ #home ›  covers api, job and any tagged later")
 	m, _ = press(t, m, keyRight)
 	requireText(t, m, "Mute ‹ api ›")
 	m, _ = press(t, m, keyLeft, keyLeft)
@@ -301,7 +301,7 @@ func TestUnmuteThroughTagAsksFirst(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("u unmuted the tag without asking")
 	}
-	requireText(t, m, "Unmute #nas", "api is muted through #nas.", "Unmuting ends the mute for api and db.", "y unmute · n cancel")
+	requireText(t, m, "Unmute #nas", "api is muted through #nas.", "Unmuting ends the #nas mute for api and db.", "Mutes set on a single monitor stay.", "y unmute · n cancel")
 	m, _ = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if strings.Contains(view(m), "Unmute #nas") {
 		t.Fatal("n did not close the question")
@@ -328,7 +328,7 @@ func TestTagMaintenanceWindow(t *testing.T) {
 	requireText(t, m, "> Applies to   ‹ api ›", "←/→ day or target")
 	left, width := modalBorder(t, m, "Maintenance · api")
 	m, _ = press(t, m, keyRight)
-	requireText(t, m, "> Applies to   ‹ #nas ›   covers api, db and monitors tagged nas later")
+	requireText(t, m, "> Applies to   ‹ #nas ›   covers api, db and any tagged later")
 	if l, w := modalBorder(t, m, "Maintenance · api"); l != left || w != width {
 		t.Fatalf("the target moved the popup: %d/%d -> %d/%d", left, width, l, w)
 	}
@@ -443,7 +443,7 @@ func TestTagScreensFit80x24(t *testing.T) {
 	maint, _ := press(t, m, keyW, keyA, keyRight)
 	// The window form's weekday row is too wide for a popup at 80 columns
 	// with or without tags, so it takes the screen there as before.
-	if screen := renderAt(t, maint, 80, 24); !strings.Contains(screen, "Applies to   ‹ #nas ›   covers api, db and monitors tagged nas later") {
+	if screen := renderAt(t, maint, 80, 24); !strings.Contains(screen, "Applies to   ‹ #nas ›   covers api, db and any tagged later") {
 		t.Fatalf("maintenance window form at 80x24:\n%s", screen)
 	}
 	detail, _ := press(t, m, keyEnter)

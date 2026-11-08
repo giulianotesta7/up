@@ -56,6 +56,9 @@ type monitorForm struct {
 	saving       bool
 	editing      bool
 	returnDetail bool
+	// tagsWidth is the widest the Tags row may be so its hint never widens
+	// the box; 0 means popupRowWidth.
+	tagsWidth int
 	// copyOf is the monitor a new form was started from ("duplicate").
 	copyOf string
 	// status is the expected status a new HTTP monitor starts with (the

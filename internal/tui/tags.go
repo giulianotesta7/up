@@ -52,15 +52,17 @@ func membersText(names []string, tag string, room int) string {
 	return plural(len(names), "monitor") + " tagged " + tag
 }
 
-// coversText says what a mute or window for tag holds, in at most room cells:
-// "covers nas-smb, nas-web and monitors tagged nas later".
-func coversText(snap Snapshot, tag string, room int) string {
+// coversText says what a mute or window for tag holds: "covers nas-smb,
+// nas-web and any tagged later", or "covers 2 monitors and any tagged later"
+// when the names do not fit after the window form's Applies to row, the
+// wider of the two rows that show it, so both say it the same way.
+func coversText(snap Snapshot, tag string) string {
 	names := snap.tagMembers(tag)
-	text := "covers " + strings.Join(names, ", ") + " and monitors tagged " + tag + " later"
-	if ansi.StringWidth(text) <= room {
+	room := popupRowWidth - ansi.StringWidth(fmt.Sprintf("> %-12s ‹ #%s ›   ", "Applies to", tag))
+	if text := "covers " + strings.Join(names, ", ") + " and any tagged later"; ansi.StringWidth(text) <= room {
 		return text
 	}
-	return "covers " + plural(len(names), "monitor") + " and any tagged " + tag + " later"
+	return "covers " + plural(len(names), "monitor") + " and any tagged later"
 }
 
 // hashTags renders tags as "#nas #home".
@@ -100,6 +102,11 @@ func tagsLine(f monitorForm, snap Snapshot) string {
 			fresh = append(fresh, t)
 		}
 	}
+	width := popupRowWidth
+	if f.tagsWidth > 0 {
+		width = f.tagsWidth
+	}
+	room := width - ansi.StringWidth(line) - 3
 	hint, warning := "", ""
 	switch {
 	case len(fresh) == 1:
@@ -108,6 +115,15 @@ func tagsLine(f monitorForm, snap Snapshot) string {
 		warning = joinNames(fresh) + " are new tags"
 	case focused && len(inUse) > 0:
 		hint = " · in use: " + strings.Join(inUse, ", ")
+	}
+	// Names that would not fit the box become a count.
+	if prefix := ""; warning != "" {
+		if focused {
+			prefix = "comma-separated · "
+		}
+		if ansi.StringWidth(prefix+warning) > room {
+			warning = plural(len(fresh), "new tag")
+		}
 	}
 	switch {
 	case focused && warning != "":
@@ -119,7 +135,6 @@ func tagsLine(f monitorForm, snap Snapshot) string {
 	default:
 		return line + "\n"
 	}
-	room := popupRowWidth - ansi.StringWidth(line) - 3
 	if room < 8 {
 		return line + "\n"
 	}

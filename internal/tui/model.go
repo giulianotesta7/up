@@ -725,10 +725,12 @@ func (m Model) View() tea.View {
 			screen = renderDelete(*m.deletion, m.snap, now, m.err)
 		default:
 			// The box keeps one size for every Type, focus and the token
-			// question, so none of them moves it.
+			// question, so none of them moves it. It is measured without the
+			// typed tags, whose hint then fits the box rather than widen it.
 			var focusLine, height int
 			for _, f := range formVariants(*m.form) {
 				height = max(height, strings.Count(renderForm(f, m.snap, now, m.err), "\n")+1)
+				f.tags = ""
 				for focus := 0; focus < focusCount; focus++ {
 					if f.editing && focus == 0 {
 						continue
@@ -737,7 +739,9 @@ func (m Model) View() tea.View {
 					minimum = max(minimum, modalContentWidth(renderForm(f, m.snap, now, m.err)))
 				}
 			}
-			screen, focusLine = renderFormFocus(*m.form, m.snap, now, m.err)
+			form := *m.form
+			form.tagsWidth = min(popupRowWidth, minimum-4)
+			screen, focusLine = renderFormFocus(form, m.snap, now, m.err)
 			screen = scrollForm(padFormHeight(screen, height), focusLine, m.height)
 		}
 		title, body := splitModalScreen(screen)

@@ -99,7 +99,7 @@ func TestRemoteTagsMuteAndMaintenance(t *testing.T) {
 
 	// Mute #nas, then unmute it from db after the question.
 	m, _ = remotePress(t, m, key("m"), right)
-	if !strings.Contains(remoteScreen(m), "Mute ‹ #nas ›  covers api, db and monitors tagged nas later") {
+	if !strings.Contains(remoteScreen(m), "Mute ‹ #nas ›  covers api, db and any tagged later") {
 		fail("no tag target")
 	}
 	m, cmd = remotePress(t, m, enter)
