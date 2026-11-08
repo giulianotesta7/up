@@ -119,7 +119,7 @@ The database is resolved in this order: `--db`, `$UP_DB`, `/var/lib/up/up.db` if
 
 ### Keys
 
-`j`/`k` move · `/` search (the footer becomes the prompt · `tab` status: all, down, failing, held · `enter` keep · `esc` clear) · `enter` details · `n` new · `e` edit · `y` duplicate · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` mail servers · `c` channels · `f` defaults · `v` ping URL (heartbeat detail) · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
+`j`/`k` move · `/` search (the footer becomes the prompt · `#` lists the tags and `#nas` shows the monitors tagged `nas` · `tab` status: all, down, failing, held · `enter` keep · `esc` clear) · `enter` details · `n` new · `e` edit · `y` duplicate · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` mail servers · `c` channels · `f` defaults · `v` ping URL (heartbeat detail) · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
 
 `y` opens the new monitor form filled from the selected monitor, named `<name> copy`. Headers and body stay sealed (`set`, with keep, replace or clear), and history, mute and maintenance windows are not copied. Nothing is saved until `enter`.
 
@@ -273,6 +273,8 @@ Daylight saving: durations are elapsed time. A start that does not exist that da
 ### Tags
 
 A monitor of any kind can have up to 5 tags, made of lowercase letters, digits and `-` (`NAS` is saved as `nas`), kept in the order typed. A mute or a maintenance window can target a tag instead of one monitor: it holds every monitor with that tag, including monitors tagged later. When a monitor and its tag are both muted, alerts are held until the later end. Removing a tag from its last monitor, by editing or deleting it, also deletes that tag's mutes and windows.
+
+In the TUI, tags are typed in the monitor form's `Tags` row, comma-separated (`nas, home`); the row lists the tags in use and names a typed tag no monitor has yet, to catch typos. The list shows them dim after the name (`#nas +1` when narrow) and the detail on a `Tags` line. In the mute popup (`m`) and a new maintenance window (`w`, `a`), `←`/`→` choose between the monitor and its tags; the window list says what each window applies to, and a member can edit or delete a tag's window. The detail says `through #nas` when a mute or window comes from a tag, and `u` on a monitor muted through its tag asks before unmuting the whole tag.
 
 ### Defaults
 
