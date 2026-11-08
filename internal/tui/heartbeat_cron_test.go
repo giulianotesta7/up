@@ -155,6 +155,32 @@ func TestCronHeartbeatInvalidExpressionIsRejectedOnTheCronRow(t *testing.T) {
 	}
 }
 
+// At 80 columns the save error wraps inside the box instead of dropping the
+// box and cutting the message.
+func TestCronHeartbeatSaveErrorWrapsInTheBoxAt80Columns(t *testing.T) {
+	_, _, m := cronModel(t, 80, 24)
+	m = openCronForm(t, m)
+	box := boxGeometry(t, m, "New monitor")
+	m, _ = press(t, m, keyShiftTab)
+	m = typeText(t, m, "nightly")
+	m, _ = press(t, m, keyTab, keyTab)
+	m = typeText(t, m, "0 25 * * *")
+	m, _ = press(t, m, keyTab, keyTab)
+	m, cmd := press(t, m, keyEnter)
+	if cmd != nil {
+		t.Fatal("an invalid cron saved")
+	}
+	requireText(t, m, `│ Cannot save monitor: cron "0 25 * * *" is not valid: hour 25 is out of `, "│   range 0-23 ",
+		"Cron: 0 25 * * *│   min hour day month weekday")
+	if first, second := lineWithText(t, m, "Cannot save monitor"), lineWithText(t, m, "range 0-23"); second != first+1 {
+		t.Fatalf("error lines %d and %d are not consecutive:\n%s", first, second, view(m))
+	}
+	if got := boxGeometry(t, m, "New monitor"); got[2] != box[2] || got[3] != box[3] {
+		t.Fatalf("the error moved the box sides: %v, was %v:\n%s", got, box, view(m))
+	}
+	requireWidth(t, m, 80)
+}
+
 func TestCronHeartbeatSaveStoresTheScheduleAndShowsTheURL(t *testing.T) {
 	s, path, m := cronModel(t, 120, 40)
 	m = openCronForm(t, m)

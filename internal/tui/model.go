@@ -710,18 +710,23 @@ func (m Model) View() tea.View {
 		default:
 			// The box keeps one size for every Type, focus and the token
 			// question, so none of them moves it.
+			// A save error too wide for the terminal wraps to the box
+			// instead of widening it.
 			var focusLine, height int
 			for _, f := range formVariants(*m.form) {
-				height = max(height, strings.Count(renderForm(f, m.snap, now, m.err), "\n")+1)
 				for focus := 0; focus < focusCount; focus++ {
 					if f.editing && focus == 0 {
 						continue
 					}
-					f.focus, f.cursor = focus, 0
-					minimum = max(minimum, modalContentWidth(renderForm(f, m.snap, now, m.err)))
+					f.focus, f.cursor, f.err = focus, 0, nil
+					minimum = max(minimum, modalContentWidth(renderForm(f, m.snap, now, m.err, 0)))
 				}
 			}
-			screen, focusLine = renderFormFocus(*m.form, m.snap, now, m.err)
+			wrap := saveErrorWrap(m.form.err, m.width, minimum)
+			for _, f := range formVariants(*m.form) {
+				height = max(height, strings.Count(renderForm(f, m.snap, now, m.err, wrap), "\n")+1)
+			}
+			screen, focusLine = renderFormFocus(*m.form, m.snap, now, m.err, wrap)
 			screen = scrollForm(padFormHeight(screen, height), focusLine, m.height)
 		}
 		title, body := splitModalScreen(screen)
