@@ -64,6 +64,9 @@ func TestCheckRoutesRejectBadConditionsWithoutChangingAnything(t *testing.T) {
 		{"empty header name", `[{"kind":"header","value":"1"}]`, "condition 1: header name is required"},
 		{"time not below timeout", `[{"kind":"response_time","within_ms":1000}]`, "condition 1: max response time (1s) must be lower than timeout (1s)"},
 		{"time out of range", `[{"kind":"response_time","within_ms":9223372036854775807}]`, "conditions[0].within_ms is out of range"},
+		{"json with a pattern", `[{"kind":"json","path":"a","value":"1","pattern":"x"}]`, "condition 1: pattern is not used by JSON value conditions"},
+		{"time with value and path", `[{"kind":"response_time","within_ms":500,"value":"1","path":"a"}]`, "condition 1: path and value are not used by max response time conditions"},
+		{"header with a limit", `[{"kind":"header","name":"X-A","within_ms":500}]`, "condition 1: max response time is not used by response header conditions"},
 		{"unknown field", `[{"kind":"json","path":"a","value":"1","op":"eq"}]`, "invalid request body"},
 	} {
 		rec := send(h, "PUT", "/api/v1/checks/api", `{`+plainCheck+`,"conditions":`+tc.conds+`}`)

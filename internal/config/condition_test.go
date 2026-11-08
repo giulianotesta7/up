@@ -43,6 +43,15 @@ func TestValidateConditions(t *testing.T) {
 		{"time equals timeout", []config.Condition{within(5 * time.Second)}, "condition 1: max response time (5s) must be lower than timeout (5s)"},
 		{"time above timeout", []config.Condition{within(time.Minute)}, "condition 1: max response time (1m) must be lower than timeout (5s)"},
 		{"time below timeout", []config.Condition{within(4999 * time.Millisecond)}, ""},
+		{"time below a millisecond", []config.Condition{within(500 * time.Microsecond)}, "condition 1: max response time must be a whole number of milliseconds"},
+		{"time not whole milliseconds", []config.Condition{within(1500 * time.Microsecond)}, "condition 1: max response time must be a whole number of milliseconds"},
+		{"json with pattern", []config.Condition{{Kind: config.ConditionJSON, Path: "a", Value: "1", Pattern: "x"}}, "condition 1: pattern is not used by JSON value conditions"},
+		{"json with every other field", []config.Condition{{Kind: config.ConditionJSON, Path: "a", Name: "X-A", Pattern: "x", Within: time.Second}}, "condition 1: name, pattern and max response time are not used by JSON value conditions"},
+		{"regex with others", []config.Condition{{Kind: config.ConditionRegex, Pattern: "x", Path: "a", Name: "X-A", Value: "1", Within: time.Second}}, "condition 1: path, name, value and max response time are not used by body regex conditions"},
+		{"time with value and path", []config.Condition{{Kind: config.ConditionResponseTime, Within: time.Second, Path: "a", Value: "1"}}, "condition 1: path and value are not used by max response time conditions"},
+		{"time with name and pattern", []config.Condition{{Kind: config.ConditionResponseTime, Within: time.Second, Name: "X-A", Pattern: "x"}}, "condition 1: name and pattern are not used by max response time conditions"},
+		{"header with others", []config.Condition{{Kind: config.ConditionHeader, Name: "X-A", Path: "a", Pattern: "x", Within: time.Second}}, "condition 1: path, pattern and max response time are not used by response header conditions"},
+		{"second condition with stray field", []config.Condition{header("X-A", ""), {Kind: config.ConditionHeader, Name: "X-B", Path: "a"}}, "condition 2: path is not used by response header conditions"},
 		{"empty header name", []config.Condition{header("", "x")}, "condition 1: header name is required"},
 		{"invalid header name", []config.Condition{header("X A", "x")}, `condition 1: header name "X A" is not valid`},
 		{"header presence", []config.Condition{header("X-A", "")}, ""},
@@ -121,12 +130,6 @@ func TestConditionsAreOrderedDefinition(t *testing.T) {
 	}
 	if !base.SameDefinition(conditionCheck(a, b)) {
 		t.Error("equal conditions are a different definition")
-	}
-	// Fields another kind uses are dropped, so they never make a difference.
-	stray := a
-	stray.Pattern, stray.Name, stray.Within = "x", "X-A", time.Second
-	if !base.SameDefinition(conditionCheck(stray, b)) {
-		t.Error("stray fields of another kind changed the definition")
 	}
 	// Canonical copies the list.
 	c := conditionCheck(a, b)

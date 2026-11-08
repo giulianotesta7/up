@@ -35,7 +35,7 @@ const (
 // Condition is one extra rule an HTTP response must meet once its status is
 // the expected one. All of a check's conditions must pass, in order; the first
 // that fails is the reason the check is down. Each kind uses only its fields
-// (see the kind constants); Canonical drops the others.
+// (see the kind constants); validation rejects the others.
 //
 // Comparisons ignore case: header names and values and JSON values. A JSON
 // value is compared as text: a string without quotes, any other value as its
@@ -53,8 +53,8 @@ type Condition struct {
 	Value string
 	// Pattern is the body regular expression. Regex only.
 	Pattern string
-	// Within is the longest the response may take, lower than the check's
-	// timeout. Response time only.
+	// Within is the longest the response may take, a whole number of
+	// milliseconds lower than the check's timeout. Response time only.
 	Within time.Duration
 }
 
@@ -71,24 +71,6 @@ func ConditionLabel(kind string) string {
 		return "Response header"
 	}
 	return kind
-}
-
-// canonical keeps only the fields c's kind uses.
-func (c Condition) canonical() Condition {
-	out := Condition{Kind: c.Kind}
-	switch c.Kind {
-	case ConditionJSON:
-		out.Path, out.Value = c.Path, c.Value
-	case ConditionRegex:
-		out.Pattern = c.Pattern
-	case ConditionResponseTime:
-		out.Within = c.Within
-	case ConditionHeader:
-		out.Name, out.Value = c.Name, c.Value
-	default:
-		return c
-	}
-	return out
 }
 
 // Summary is a short, one-line form of c for the detail view. The expected
@@ -194,6 +176,8 @@ func validateCondition(c Condition, timeout time.Duration) []error {
 		switch {
 		case c.Within <= 0:
 			errs = append(errs, errors.New("max response time must be greater than 0"))
+		case c.Within%time.Millisecond != 0:
+			errs = append(errs, errors.New("max response time must be a whole number of milliseconds"))
 		case timeout > 0 && c.Within >= timeout:
 			errs = append(errs, fmt.Errorf("max response time (%s) must be lower than timeout (%s)", ShortDuration(c.Within), ShortDuration(timeout)))
 		}
@@ -207,8 +191,58 @@ func validateCondition(c Condition, timeout time.Duration) []error {
 		long("header value", c.Value)
 	default:
 		errs = append(errs, fmt.Errorf("kind %q must be %s", c.Kind, conditionKindList()))
+		return errs
+	}
+	if unused := unusedConditionFields(c); len(unused) > 0 {
+		verb := "is"
+		if len(unused) > 1 {
+			verb = "are"
+		}
+		errs = append(errs, fmt.Errorf("%s %s not used by %s conditions", joinAnd(unused), verb, conditionPhrase(c.Kind)))
 	}
 	return errs
+}
+
+// unusedConditionFields names the fields c sets that its kind does not use,
+// in declaration order.
+func unusedConditionFields(c Condition) []string {
+	used := map[string][]string{
+		ConditionJSON:         {"path", "value"},
+		ConditionRegex:        {"pattern"},
+		ConditionResponseTime: {"max response time"},
+		ConditionHeader:       {"name", "value"},
+	}[c.Kind]
+	var unused []string
+	for _, f := range []struct {
+		name string
+		set  bool
+	}{
+		{"path", c.Path != ""}, {"name", c.Name != ""}, {"value", c.Value != ""},
+		{"pattern", c.Pattern != ""}, {"max response time", c.Within != 0},
+	} {
+		if f.set && !slices.Contains(used, f.name) {
+			unused = append(unused, f.name)
+		}
+	}
+	return unused
+}
+
+// conditionPhrase is a kind's label inside a sentence: "JSON value", "body
+// regex", "max response time" or "response header".
+func conditionPhrase(kind string) string {
+	if kind == ConditionJSON {
+		return ConditionLabel(kind)
+	}
+	return strings.ToLower(ConditionLabel(kind))
+}
+
+// joinAnd is "a", "a and b" or "a, b and c".
+func joinAnd(items []string) string {
+	n := len(items)
+	if n == 1 {
+		return items[0]
+	}
+	return strings.Join(items[:n-1], ", ") + " and " + items[n-1]
 }
 
 // conditionKindList is "json, regex, response_time or header".

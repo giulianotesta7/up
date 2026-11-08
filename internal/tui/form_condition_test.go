@@ -157,6 +157,33 @@ func TestConditionKindChangeKeepsOnlyItsFields(t *testing.T) {
 	}
 }
 
+// Text typed under every kind stays in the row while cycling, but saving sends
+// only the chosen kind's fields, so the save is valid.
+func TestConditionCycledThroughEveryKindSavesOnlyTheChosenOne(t *testing.T) {
+	m := conditionModel(t)
+	m, _ = press(t, m, keySpace, keyTab)
+	m = typeText(t, m, "status")
+	m, _ = press(t, m, keyTab)
+	m = typeText(t, m, "ok")
+	m, _ = press(t, m, keyShiftTab, keyShiftTab, keyRight, keyTab)
+	m = typeText(t, m, "ready")
+	m, _ = press(t, m, keyShiftTab, keyRight, keyTab)
+	m = typeText(t, m, "800ms")
+	m, _ = press(t, m, keyShiftTab, keyRight, keyTab)
+	m = typeText(t, m, "X-Version")
+	m, _ = press(t, m, keyShiftTab, keyLeft, keyLeft)
+	requireText(t, m, "Condition 1: ‹ Body regex ›", "Pattern: ready")
+	m, cmd := press(t, m, keyEnter)
+	if cmd == nil {
+		t.Fatalf("save refused:\n%s", view(m))
+	}
+	m = finishCommand(t, m, cmd)
+	want := []config.Condition{{Kind: config.ConditionRegex, Pattern: "ready"}}
+	if checks := storedChecks(t, m); len(checks) != 1 || !reflect.DeepEqual(checks[0].Conditions, want) {
+		t.Fatalf("stored %+v", checks)
+	}
+}
+
 func TestConditionSaveErrorFocusesItsRow(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -182,6 +209,10 @@ func TestConditionSaveErrorFocusesItsRow(t *testing.T) {
 			m, _ = press(t, m, keySpace, keyRight, keyRight, keyTab)
 			return typeText(t, m, "5s")
 		}, "Cannot save monitor: condition 2: max response time (5s) must be lower than timeout (5s)", "At most: 5s"},
+		{"limit not whole milliseconds", func(t *testing.T, m Model) Model {
+			m, _ = press(t, m, keySpace, keyRight, keyRight, keyTab)
+			return typeText(t, m, "1500us")
+		}, "Cannot save monitor: condition 2: max response time must be a whole number of milliseconds", "At most: 1500us"},
 		{"missing header name", func(t *testing.T, m Model) Model {
 			m, _ = press(t, m, keySpace, keyLeft, keyTab, keyTab)
 			return typeText(t, m, "3")

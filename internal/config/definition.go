@@ -94,8 +94,8 @@ type Header struct {
 
 // Canonical returns c in its one stored form, without changing c:
 // kind "http" becomes "", method "GET" becomes "", an empty header or
-// condition list becomes nil and each condition keeps only its kind's fields.
-// Edit intents are kept. Copies the header and condition slices.
+// condition list becomes nil. Edit intents are kept. Copies the header and
+// condition slices.
 func (c Check) Canonical() Check {
 	if c.Kind == CheckHTTP {
 		c.Kind = ""
@@ -111,11 +111,7 @@ func (c Check) Canonical() Check {
 	if len(c.Conditions) == 0 {
 		c.Conditions = nil
 	} else {
-		conds := make([]Condition, len(c.Conditions))
-		for i, cond := range c.Conditions {
-			conds[i] = cond.canonical()
-		}
-		c.Conditions = conds
+		c.Conditions = slices.Clone(c.Conditions)
 	}
 	return c
 }
