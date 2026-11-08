@@ -327,6 +327,90 @@ func TestDNSEmptyResolverUsesTheSystemNameservers(t *testing.T) {
 	}
 }
 
+func TestDNSSystemResolverTriesTheNextServerWhenOneRefuses(t *testing.T) {
+	stub := startDNSStub(t, "127.0.0.1", func(q dnsmessage.Message) dnsmessage.Message {
+		return reply(q, dnsmessage.RCodeSuccess, rr(q, a("203.0.113.10")))
+	})
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := pc.LocalAddr().String()
+	pc.Close()
+	ch := dnsChecker()
+	ch.Nameservers = func() []string { return []string{closed, stub.addr} }
+	if res := ch.Run(context.Background(), dnsCheck("nas.home.arpa", "A", "", "")); res.Status != StatusUp || res.Answer != "203.0.113.10" {
+		t.Fatalf("result = %+v, want up from the second nameserver", res)
+	}
+}
+
+// silentStub reads queries and never answers them.
+func silentStub(t *testing.T) *dnsStub {
+	return startDNSStubUDP(t, "127.0.0.1", func(q dnsmessage.Message) dnsmessage.Message { return reply(q, dnsmessage.RCodeSuccess) },
+		func(dnsmessage.Message) (dnsmessage.Message, bool) { return dnsmessage.Message{}, false })
+}
+
+func TestDNSSystemResolverTriesTheNextServerWhenOneIsSilent(t *testing.T) {
+	silent := silentStub(t)
+	stub := startDNSStub(t, "127.0.0.1", func(q dnsmessage.Message) dnsmessage.Message {
+		return reply(q, dnsmessage.RCodeSuccess, rr(q, a("203.0.113.10")))
+	})
+	ch := dnsChecker()
+	ch.Nameservers = func() []string { return []string{silent.addr, stub.addr} }
+	c := dnsCheck("nas.home.arpa", "A", "", "")
+	c.Timeout = 400 * time.Millisecond
+	start := time.Now()
+	res := ch.Run(context.Background(), c)
+	if res.Status != StatusUp || res.Answer != "203.0.113.10" || res.Error != "" {
+		t.Fatalf("result = %+v, want up from the second nameserver", res)
+	}
+	if elapsed := time.Since(start); elapsed > c.Timeout {
+		t.Fatalf("took %s, want within the %s timeout", elapsed, c.Timeout)
+	}
+	if silent.udpCount.Load() != 1 || stub.udpCount.Load() != 1 {
+		t.Fatalf("queries: silent %d, second %d, want one each", silent.udpCount.Load(), stub.udpCount.Load())
+	}
+}
+
+func TestDNSSystemResolverAnswerFromTheFirstServerIsFinal(t *testing.T) {
+	first := startDNSStub(t, "127.0.0.1", func(q dnsmessage.Message) dnsmessage.Message {
+		return reply(q, dnsmessage.RCodeServerFailure)
+	})
+	second := startDNSStub(t, "127.0.0.1", func(q dnsmessage.Message) dnsmessage.Message {
+		return reply(q, dnsmessage.RCodeSuccess, rr(q, a("203.0.113.10")))
+	})
+	ch := dnsChecker()
+	ch.Nameservers = func() []string { return []string{first.addr, second.addr} }
+	res := ch.Run(context.Background(), dnsCheck("nas.home.arpa", "A", "", ""))
+	if res.Status != StatusDown || res.Error != "SERVFAIL for nas.home.arpa" {
+		t.Fatalf("result = %+v, want down, SERVFAIL for nas.home.arpa", res)
+	}
+	if n := second.udpCount.Load() + second.tcpCount.Load(); n != 0 {
+		t.Fatalf("second nameserver asked %d times, want never", n)
+	}
+}
+
+func TestDNSSystemResolverAllSilentIsDownWithinTheTimeout(t *testing.T) {
+	first, second := silentStub(t), silentStub(t)
+	ch := dnsChecker()
+	ch.Nameservers = func() []string { return []string{first.addr, second.addr} }
+	c := dnsCheck("nas.home.arpa", "A", "", "")
+	c.Timeout = 200 * time.Millisecond
+	start := time.Now()
+	res := ch.Run(context.Background(), c)
+	elapsed := time.Since(start)
+	want := "no reply from " + first.addr + ", " + second.addr + " in 200ms"
+	if res.Status != StatusDown || res.Error != want {
+		t.Fatalf("result = %+v, want down, %s", res, want)
+	}
+	if elapsed > c.Timeout+100*time.Millisecond {
+		t.Fatalf("took %s, want about the %s timeout", elapsed, c.Timeout)
+	}
+	if first.udpCount.Load() != 1 || second.udpCount.Load() != 1 {
+		t.Fatalf("queries: first %d, second %d, want one each", first.udpCount.Load(), second.udpCount.Load())
+	}
+}
+
 func TestDNSCancellationIsNotAResult(t *testing.T) {
 	stub := startDNSStubUDP(t, "127.0.0.1", func(q dnsmessage.Message) dnsmessage.Message { return reply(q, dnsmessage.RCodeSuccess) },
 		func(dnsmessage.Message) (dnsmessage.Message, bool) { return dnsmessage.Message{}, false })

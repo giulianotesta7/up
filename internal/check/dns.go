@@ -33,7 +33,8 @@ var dnsTypes = map[string]dnsmessage.Type{
 // runDNS asks the resolver (the system's servers in order when empty) for
 // Domain's Record over UDP, again over TCP when the answer is truncated. It
 // is up when the reply has an answer of that type and, with Expected, one
-// of them has that value (CNAME: the first). Latency is the query time.
+// of them has that value (CNAME: the first). Latency is the query time of
+// the server that answered.
 func (ch *Checker) runDNS(ctx context.Context, c config.Check) Result {
 	res := Result{CheckName: c.Name, At: ch.Now()}
 
@@ -54,12 +55,23 @@ func (ch *Checker) runDNS(ctx context.Context, c config.Check) Result {
 		res.Status, res.Error = StatusDown, fmt.Sprintf("domain %q cannot be queried", c.Domain)
 		return res
 	}
-	start := time.Now()
+	var start time.Time
 	var reply *dnsmessage.Message
 	var server string
-	// The next server is only tried when one does not answer at all.
-	for _, server = range servers {
-		if reply, err = ch.exchange(queryCtx, server, name, typ); err == nil || queryCtx.Err() != nil {
+	var silent []string
+	// The next server is only tried when one does not answer at all. Each
+	// gets an even share of the time left, so a silent one leaves time for
+	// the rest and the check still ends within its timeout.
+	deadline, _ := queryCtx.Deadline()
+	for i := range servers {
+		server, start = servers[i], time.Now()
+		serverCtx, cancelServer := context.WithTimeout(queryCtx, time.Until(deadline)/time.Duration(len(servers)-i))
+		reply, err = ch.exchange(serverCtx, server, name, typ)
+		cancelServer()
+		if err != nil && (errors.Is(err, context.DeadlineExceeded) || isNetTimeout(err)) {
+			silent = append(silent, server)
+		}
+		if err == nil || queryCtx.Err() != nil {
 			break
 		}
 	}
@@ -68,7 +80,7 @@ func (ch *Checker) runDNS(ctx context.Context, c config.Check) Result {
 		res.Status = StatusCanceled
 		return res
 	case err != nil && (errors.Is(err, context.DeadlineExceeded) || isNetTimeout(err)):
-		res.Status, res.Error = StatusDown, fmt.Sprintf("no reply from %s in %s", server, config.ShortDuration(c.Timeout))
+		res.Status, res.Error = StatusDown, fmt.Sprintf("no reply from %s in %s", strings.Join(silent, ", "), config.ShortDuration(c.Timeout))
 		return res
 	case err != nil:
 		res.Status, res.Error = StatusDown, fmt.Sprintf("cannot query %s: %s", server, dialCause(err))

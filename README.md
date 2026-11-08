@@ -178,9 +178,9 @@ In the TUI a dim `ping` tag follows the name and the detail's `Type` is `ICMP ec
 
 Set `Type` to `DNS` and enter a **domain**, a **record** type (`A`, `AAAA`, `CNAME`, `MX` or `TXT`), an optional **resolver** and an optional **expected** value. The query goes over UDP, again over TCP when the answer is truncated. DNS monitors need no permission.
 
-- **Resolver**: `host` or `host:port` (port 53 by default), an IPv6 address in brackets (`[fd00::53]:53`). Empty uses the system resolver: the `nameserver` lines of `/etc/resolv.conf`, in order.
+- **Resolver**: `host` or `host:port` (port 53 by default), an IPv6 address in brackets (`[fd00::53]:53`). Empty uses the system resolver: the `nameserver` lines of `/etc/resolv.conf`, in order. The next one is asked only when a server gives no reply at all (silent or refusing the connection); each gets an even share of the time left, so the check still ends within its timeout. An answer such as `NXDOMAIN` or `SERVFAIL` is final.
 - **Expected**: the monitor is up when any answer matches. `A` and `AAAA` compare addresses, `MX` the mail host (the priority is ignored), `CNAME` the first target (case and a final dot do not matter for host names) and `TXT` the whole text of a record, its strings joined. Empty: any answer is up.
-- **Down** on `NXDOMAIN for nas.home.arpa`, `SERVFAIL`, `REFUSED`, an answer without a record of the type (`no A record for nas.home.arpa`), no reply in the timeout (`no reply from 192.0.2.53:53 in 2s`) or a mismatch: `A = 203.0.113.9, want 203.0.113.10` (`+1` after the value when there were more answers).
+- **Down** on `NXDOMAIN for nas.home.arpa`, `SERVFAIL`, `REFUSED`, an answer without a record of the type (`no A record for nas.home.arpa`), no reply in the timeout (`no reply from 192.0.2.53:53 in 2s`, listing every system nameserver that stayed silent: `no reply from 192.0.2.53:53, 192.0.2.54:53 in 2s`) or a mismatch: `A = 203.0.113.9, want 203.0.113.10` (`+1` after the value when there were more answers).
 
 Latency is the query time. Each result keeps the answer shown (the one that matched, otherwise the first) and how many there were. DNSSEC is not validated.
 
