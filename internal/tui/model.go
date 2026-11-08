@@ -421,6 +421,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			f := *m.channelForm
 			f.saving, f.err = false, msg.err
+			f.focusError(msg.err)
 			m.channelForm = &f
 		} else {
 			m.channelForm = nil
@@ -639,13 +640,22 @@ func (m Model) notifyChild(now time.Time) (string, int) {
 	case m.smtpDelete != nil:
 		return renderSMTPDelete(*m.smtpDelete, m.snap, now, m.err), 0
 	case m.channelForm != nil:
+		// One width for every kind and focus, so cycling Kind never moves
+		// the box (the rows pad to the longest kind for the height).
 		f := *m.channelForm
-		for focus := 0; focus < f.fieldCount(); focus++ {
-			if f.editing && focus == 0 {
-				continue
+		kinds := config.ChannelKinds
+		if f.editing {
+			kinds = []string{f.kind()}
+		}
+		for _, kind := range kinds {
+			f.values[1] = kind
+			for focus := 0; focus < f.fieldCount(); focus++ {
+				if f.editing && focus == 0 {
+					continue
+				}
+				f.focus, f.cursor = focus, 0
+				minimum = max(minimum, modalContentWidth(renderChannelForm(f, m.snap, now, m.err)))
 			}
-			f.focus, f.cursor = focus, 0
-			minimum = max(minimum, modalContentWidth(renderChannelForm(f, m.snap, now, m.err)))
 		}
 		return renderChannelForm(*m.channelForm, m.snap, now, m.err), minimum
 	case m.channelDelete != nil:

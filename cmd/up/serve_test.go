@@ -200,7 +200,8 @@ func TestServeHelpDescribesSQLite(t *testing.T) {
 	if code != 0 || errOut != "" {
 		t.Fatalf("got %d, %q", code, errOut)
 	}
-	for _, text := range []string{"SQLite", "without restarting", "up tui"} {
+	for _, text := range []string{"SQLite", "without restarting", "up tui",
+		"ntfy, telegram, discord, slack and gotify channels send the alert text to their\nservice; a 2xx answer is delivered, with no redirects and no retries."} {
 		if !strings.Contains(out, text) {
 			t.Errorf("help missing %q: %s", text, out)
 		}

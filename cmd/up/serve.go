@@ -37,6 +37,8 @@ Channel tests requested from the TUI or the API are sent by the daemon within
 about 2 seconds; they change no monitor data.
 A webhook channel POSTs a versioned JSON body; a 2xx answer is delivered, anything
 else is an error, redirects are not followed and there are no retries.
+ntfy, telegram, discord, slack and gotify channels send the alert text to their
+service; a 2xx answer is delivered, with no redirects and no retries.
 SMTP servers and channels are managed in up tui. SMTP passwords are encrypted
 with a key kept in <db>.key (mode 0600) next to the database; back it up with
 the database. Without it stored passwords must be entered again. up serve refuses

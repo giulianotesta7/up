@@ -39,6 +39,9 @@ type Options struct {
 	Attempts AttemptRecorder
 	// Now stamps recorded attempts; nil is time.Now.
 	Now func() time.Time
+	// TelegramAPI is the Telegram Bot API base URL; empty is
+	// DefaultTelegramAPI. Tests point it at a local server.
+	TelegramAPI string
 }
 type event struct {
 	check     config.Check
@@ -146,11 +149,16 @@ func (n *Notifier) transport(ctx context.Context, e event) error {
 		return fmt.Errorf("alert channel %q not found", c.Channel)
 	}
 	e.trace.kind, e.trace.origin = ch.Kind, ch.WebhookOrigin
+	if ch.Kind == config.KindNtfy || ch.Kind == config.KindGotify {
+		e.trace.origin, _ = config.WebhookOrigin(ch.ServerURL)
+	}
 	switch ch.Kind {
 	case config.KindEmail:
 		return n.deliverEmail(ctx, ch, e)
 	case config.KindWebhook:
 		return n.deliverWebhook(ctx, ch, e)
+	case config.KindNtfy, config.KindTelegram, config.KindDiscord, config.KindSlack, config.KindGotify:
+		return n.deliverPush(ctx, ch, e)
 	}
 	n.opts.Logger.Error("unsupported alert channel kind", "channel", c.Channel, "kind", ch.Kind)
 	return fmt.Errorf("unsupported alert channel kind %q", ch.Kind)

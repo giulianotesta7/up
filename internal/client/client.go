@@ -447,11 +447,17 @@ type channelWrite struct {
 	WebhookURL      *protectedWrite `json:"webhook_url,omitempty"`
 	WebhookAuthName string          `json:"webhook_auth_name,omitempty"`
 	WebhookAuth     *protectedWrite `json:"webhook_auth,omitempty"`
+	ServerURL       string          `json:"server_url,omitempty"`
+	Topic           string          `json:"topic,omitempty"`
+	ChatID          string          `json:"chat_id,omitempty"`
+	Token           *protectedWrite `json:"token,omitempty"`
+	Priority        string          `json:"priority,omitempty"`
 }
 
 func channelDTO(v config.Channel) channelWrite {
 	return channelWrite{Name: v.Name, Kind: v.Kind, SMTPServer: v.SMTPServer, Recipients: v.Recipients, WebhookOrigin: v.WebhookOrigin,
-		WebhookURL: protectedFor(v.WebhookURLEdit, v.WebhookURL), WebhookAuthName: v.WebhookAuthName, WebhookAuth: protectedFor(v.WebhookAuthEdit, v.WebhookAuth)}
+		WebhookURL: protectedFor(v.WebhookURLEdit, v.WebhookURL), WebhookAuthName: v.WebhookAuthName, WebhookAuth: protectedFor(v.WebhookAuthEdit, v.WebhookAuth),
+		ServerURL: v.ServerURL, Topic: v.Topic, ChatID: v.ChatID, Token: protectedFor(v.TokenEdit, v.Token), Priority: v.Priority}
 }
 func (c *Client) AddChannel(ctx context.Context, v config.Channel) error {
 	if err := addressable(v.Name); err != nil {

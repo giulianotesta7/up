@@ -25,12 +25,17 @@ var TLSModes = []TLSMode{TLSStartTLS, TLSImplicit, TLSNone}
 
 // Channel kinds.
 const (
-	KindEmail   = "email"
-	KindWebhook = "webhook"
+	KindEmail    = "email"
+	KindWebhook  = "webhook"
+	KindNtfy     = "ntfy"
+	KindTelegram = "telegram"
+	KindDiscord  = "discord"
+	KindSlack    = "slack"
+	KindGotify   = "gotify"
 )
 
 // ChannelKinds lists the kinds the TUI offers, in display order.
-var ChannelKinds = []string{KindEmail, KindWebhook}
+var ChannelKinds = []string{KindEmail, KindWebhook, KindNtfy, KindTelegram, KindDiscord, KindSlack, KindGotify}
 
 // SMTPServer is an SMTP server that email channels send through.
 type SMTPServer struct {
@@ -47,14 +52,23 @@ type SMTPServer struct {
 
 // Channel is where a monitor's alerts go. An email channel sends through
 // one SMTP server to one or more recipients. A webhook channel posts to one
-// URL.
+// URL. Discord and slack channels post to their webhook URL, ntfy to a topic
+// on a server, telegram to a chat through a bot and gotify to a server's
+// application.
 //
 // Webhook fields follow the protected-value rules of Edit: WebhookURL and
 // WebhookAuth are sealed and never leave the store in snapshots or the API.
 // WebhookOrigin ("scheme://host[:port]", see WebhookOrigin) is the only part
 // of the URL shown; whoever seals the URL derives it from the same text.
 // WebhookAuthName is the plain header name ("Authorization"); the optional
-// WebhookAuth value is sent in that header.
+// WebhookAuth value is sent in that header. Discord and slack use WebhookURL
+// and WebhookOrigin the same way, without the auth header.
+//
+// ServerURL (ntfy, gotify; see ServerURL) and Topic (ntfy), ChatID
+// (telegram) and Priority (ntfy: one of NtfyPriorities; gotify: "0" to "10";
+// empty is the kind's default) are plain. Token is the ntfy access token
+// (optional), the telegram bot token or the gotify app token, sealed and
+// edited like WebhookURL; only the ntfy access token can be cleared.
 type Channel struct {
 	Name       string
 	Kind       string
@@ -67,6 +81,13 @@ type Channel struct {
 	WebhookAuthName string
 	WebhookAuth     secret.Sealed
 	WebhookAuthEdit Edit
+
+	ServerURL string
+	Topic     string
+	ChatID    string
+	Token     secret.Sealed
+	TokenEdit Edit
+	Priority  string
 }
 
 // WebhookOrigin returns the scheme and host (with port, if any) of a webhook
@@ -139,8 +160,10 @@ func ValidateChannel(c Channel) error {
 		errs = append(errs, validateEmailChannel(c)...)
 	case KindWebhook:
 		errs = append(errs, validateWebhookChannel(c)...)
+	case KindNtfy, KindTelegram, KindDiscord, KindSlack, KindGotify:
+		errs = append(errs, validatePushChannel(c)...)
 	default:
-		errs = append(errs, fmt.Errorf("kind %q is not supported (use email or webhook)", c.Kind))
+		errs = append(errs, fmt.Errorf("kind %q is not supported (use email, webhook, ntfy, telegram, discord, slack or gotify)", c.Kind))
 	}
 	return errors.Join(errs...)
 }
@@ -161,24 +184,14 @@ func validateEmailChannel(c Channel) []error {
 	if c.WebhookOrigin != "" || !c.WebhookURL.Empty() || c.WebhookURLEdit != EditKeep || c.WebhookAuthName != "" || !c.WebhookAuth.Empty() || c.WebhookAuthEdit != EditKeep {
 		errs = append(errs, errors.New("webhook fields are only for webhook channels"))
 	}
-	return errs
+	return append(errs, pushFieldErrors(c)...)
 }
 
 // validateWebhookChannel checks a webhook channel. The URL cannot be cleared
 // (a webhook without one is meaningless); whether a "keep" has a stored URL
 // behind it is checked by the store.
 func validateWebhookChannel(c Channel) []error {
-	var errs []error
-	switch {
-	case c.WebhookOrigin == "":
-		errs = append(errs, errors.New("webhook origin is required"))
-	case !validWebhookOrigin(c.WebhookOrigin):
-		errs = append(errs, fmt.Errorf("webhook origin %q must be http or https with a host", c.WebhookOrigin))
-	}
-	errs = append(errs, validateEdit("webhook URL", c.WebhookURLEdit, c.WebhookURL, MaxSealedHeaderValue)...)
-	if c.WebhookURLEdit == EditClear {
-		errs = append(errs, errors.New("webhook URL cannot be cleared"))
-	}
+	errs := validateWebhookURL("webhook", c)
 	if c.WebhookAuthName != "" && !ValidHeaderName(c.WebhookAuthName) {
 		errs = append(errs, fmt.Errorf("webhook auth header name %q is not valid", c.WebhookAuthName))
 	}
@@ -188,6 +201,24 @@ func validateWebhookChannel(c Channel) []error {
 	}
 	if c.SMTPServer != "" || len(c.Recipients) > 0 {
 		errs = append(errs, errors.New("SMTP server and recipients are only for email channels"))
+	}
+	return append(errs, pushFieldErrors(c)...)
+}
+
+// validateWebhookURL checks the origin and the sealed URL of a webhook,
+// discord or slack channel; what names them in messages ("webhook",
+// "discord webhook").
+func validateWebhookURL(what string, c Channel) []error {
+	var errs []error
+	switch {
+	case c.WebhookOrigin == "":
+		errs = append(errs, fmt.Errorf("%s origin is required", what))
+	case !validWebhookOrigin(c.WebhookOrigin):
+		errs = append(errs, fmt.Errorf("%s origin %q must be http or https with a host", what, c.WebhookOrigin))
+	}
+	errs = append(errs, validateEdit(what+" URL", c.WebhookURLEdit, c.WebhookURL, MaxSealedHeaderValue)...)
+	if c.WebhookURLEdit == EditClear {
+		errs = append(errs, fmt.Errorf("%s URL cannot be cleared", what))
 	}
 	return errs
 }
