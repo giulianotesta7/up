@@ -8,9 +8,9 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/store"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/store"
+	"github.com/heohlee/up/internal/tui"
 )
 
 // detailFrom opens the first monitor's detail and returns the screen from the

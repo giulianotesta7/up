@@ -19,7 +19,7 @@ Body:
 
 **Full changelog:** `v0.1.0...v0.1.1`
 
-[Documentation](https://github.com/giulianotesta7/up#readme)
+[Documentation](https://github.com/heohlee/up#readme)
 ```
 
 ## Features and fixes
@@ -40,7 +40,7 @@ Body:
 
 **Full changelog:** `v0.1.0...v0.2.0`
 
-[Documentation](https://github.com/giulianotesta7/up#readme)
+[Documentation](https://github.com/heohlee/up#readme)
 ```
 
 For a first release, introduce verified product capabilities and include Getting started.

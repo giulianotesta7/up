@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/store"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/store"
+	"github.com/heohlee/up/internal/tui"
 )
 
 type WriteStore interface {

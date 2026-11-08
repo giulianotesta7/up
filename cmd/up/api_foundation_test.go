@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/giulianotesta7/up/internal/remote"
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/remote"
+	"github.com/heohlee/up/internal/secret"
 )
 
 // The serve command mounts the foundation routes next to the existing ones.

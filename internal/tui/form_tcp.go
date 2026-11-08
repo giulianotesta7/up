@@ -9,7 +9,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // kindTCP is the form's type for a TCP monitor; the zero value is HTTP.

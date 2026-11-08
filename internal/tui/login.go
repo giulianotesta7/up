@@ -9,7 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/giulianotesta7/up/internal/connection"
+	"github.com/heohlee/up/internal/connection"
 )
 
 // LoginValidator checks the token against the server. It must wrap the

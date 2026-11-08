@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/remote"
+	"github.com/heohlee/up/internal/remote"
 )
 
 // startTestAPI runs `up serve` with the API on a loopback port and returns a

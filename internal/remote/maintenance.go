@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // MaintenanceStore is what the maintenance window routes need.

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/giulianotesta7/up/internal/check"
+	"github.com/heohlee/up/internal/check"
 )
 
 func TestUptimeTodayLocalMidnightDST(t *testing.T) {

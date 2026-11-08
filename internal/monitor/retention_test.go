@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/store"
 )
 
 type pruneStore struct {

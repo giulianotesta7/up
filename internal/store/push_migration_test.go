@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // v9Database writes a database as the previous release left it (migrations 0

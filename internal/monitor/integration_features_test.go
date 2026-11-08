@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/alert"
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/alert"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
 )
 
 // hookPayload is the part of a webhook body these tests read.

@@ -5,10 +5,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
+	"github.com/heohlee/up/internal/store"
 )
 
 func smtp(name string) config.SMTPServer {

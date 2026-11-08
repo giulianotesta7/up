@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
-	"github.com/giulianotesta7/up/internal/check"
+	"github.com/heohlee/up/internal/check"
 )
 
 const graphLabelWidth = 10

@@ -10,8 +10,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/store"
 )
 
 // Copy shown by the channel test popup.

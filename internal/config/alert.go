@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/secret"
 )
 
 // TLSMode is how the connection to an SMTP server is protected.

@@ -181,7 +181,7 @@ func TestInstallSystemService(t *testing.T) {
 				t.Fatal(err)
 			}
 			warning := "! The existing unit does not set UMask=0007, so group members cannot write the shared database. To replace it, run:\n"
-			replace := "  sudo rm " + unit + " && curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh -s -- --system\n"
+			replace := "  sudo rm " + unit + " && curl -fsSL https://raw.githubusercontent.com/heohlee/up/main/install.sh | sh -s -- --system\n"
 			if scenario == "existing unit" {
 				if !strings.Contains(out, warning+replace) {
 					t.Errorf("missing exact warning and replacement command: %s", out)

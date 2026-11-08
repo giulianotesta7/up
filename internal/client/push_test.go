@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // Every push kind travels client -> API -> store -> snapshot -> client, its

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/store"
 )
 
 // DeliveryReader reads alert delivery attempts. *store.Store implements it.

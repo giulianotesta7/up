@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
 )
 
 // checkColumns lists the checks columns in the order checkFields.values and

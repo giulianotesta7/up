@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/config"
 )
 
 var heartbeatCheck = config.Check{Name: "backup", Kind: config.CheckHeartbeat, Period: 24 * time.Hour, Grace: 30 * time.Minute, Channel: "mail"}

@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/store"
 )
 
 // minuteLayout is the time format of the incident and alert lists: no

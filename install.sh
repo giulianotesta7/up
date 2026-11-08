@@ -1,8 +1,8 @@
 #!/bin/sh
 # Installs the up binary from a GitHub release (linux amd64/arm64).
 #
-#   curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh -s -- --service
+#   curl -fsSL https://raw.githubusercontent.com/heohlee/up/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/heohlee/up/main/install.sh | sh -s -- --service
 #
 # Options:
 #   --service         install, enable and start a systemd user service
@@ -19,7 +19,7 @@
 #   UP_STATE_DIR      shared database directory for permission repair (default /var/lib/up)
 set -eu
 
-REPO="giulianotesta7/up"
+REPO="heohlee/up"
 INSTALL_DIR="${UP_INSTALL_DIR:-/usr/local/bin}"
 UNIT_PATH="${UP_UNIT_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/up.service}"
 SYSTEM_UNIT_PATH="${UP_SYSTEM_UNIT_PATH:-${UP_LEGACY_UNIT_PATH:-/etc/systemd/system/up.service}}"
@@ -241,7 +241,7 @@ elif [ "$SYSTEM" -eq 1 ]; then
 		warn "Kept existing $SYSTEM_UNIT_PATH (delete it and rerun to replace it)"
 		if ! grep -q '^UMask=0007' "$SYSTEM_UNIT_PATH"; then
 			warn "The existing unit does not set UMask=0007, so group members cannot write the shared database. To replace it, run:"
-			cmd "  sudo rm $SYSTEM_UNIT_PATH && curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh -s -- --system"
+			cmd "  sudo rm $SYSTEM_UNIT_PATH && curl -fsSL https://raw.githubusercontent.com/heohlee/up/main/install.sh | sh -s -- --system"
 		fi
 	else
 		curl -fsSL "$BASE_URL/up-system.service" -o "$TMP/up-system.service" 2>/dev/null || die "could not download $BASE_URL/up-system.service"

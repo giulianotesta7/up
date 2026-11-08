@@ -10,8 +10,8 @@
 
 Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file: no database server, no agents, no YAML.
 
-[![Go quality](https://github.com/giulianotesta7/up/actions/workflows/quality.yml/badge.svg)](https://github.com/giulianotesta7/up/actions/workflows/quality.yml)
-[![Go security](https://github.com/giulianotesta7/up/actions/workflows/security.yml/badge.svg)](https://github.com/giulianotesta7/up/actions/workflows/security.yml)
+[![Go quality](https://github.com/heohlee/up/actions/workflows/quality.yml/badge.svg)](https://github.com/heohlee/up/actions/workflows/quality.yml)
+[![Go security](https://github.com/heohlee/up/actions/workflows/security.yml/badge.svg)](https://github.com/heohlee/up/actions/workflows/security.yml)
 
 </div>
 
@@ -37,7 +37,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 1. Start the daemon:
 
    ```sh
-   git clone https://github.com/giulianotesta7/up.git && cd up
+   git clone https://github.com/heohlee/up.git && cd up
    docker compose up -d
    docker compose logs up | grep 'access token'
    ```
@@ -58,7 +58,7 @@ The `up-data` volume holds `up.db`, the SMTP encryption key (`up.db.key`) and th
 Linux (amd64/arm64):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/heohlee/up/main/install.sh | sh
 ```
 
 Run `up serve` and `up tui` in separate terminals, or install a service below.
@@ -70,13 +70,13 @@ Run `up serve` and `up tui` in separate terminals, or install a service below.
    **User service** — linger enabled; database at `~/.config/up/up.db`:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh -s -- --service
+   curl -fsSL https://raw.githubusercontent.com/heohlee/up/main/install.sh | sh -s -- --service
    ```
 
    **System service** — runs as the `up` user; shared database at `/var/lib/up/up.db`:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh -s -- --system
+   curl -fsSL https://raw.githubusercontent.com/heohlee/up/main/install.sh | sh -s -- --system
    ```
 
 2. With `--system`, run `newgrp up` or log in again for group access.
@@ -94,8 +94,8 @@ Existing databases are not moved automatically. To manage the service from anoth
 Pin a version or uninstall (databases, user and group are kept):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh -s -- --version vX.Y.Z
-curl -fsSL https://raw.githubusercontent.com/giulianotesta7/up/main/install.sh | sh -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/heohlee/up/main/install.sh | sh -s -- --version vX.Y.Z
+curl -fsSL https://raw.githubusercontent.com/heohlee/up/main/install.sh | sh -s -- --uninstall
 ```
 
 ### From source

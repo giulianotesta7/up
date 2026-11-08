@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // SMTPSender delivers messages over SMTP.

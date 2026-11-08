@@ -10,10 +10,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
-	"github.com/giulianotesta7/up/internal/store"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
+	"github.com/heohlee/up/internal/store"
+	"github.com/heohlee/up/internal/tui"
 )
 
 // formDriver presses keys on a real tui.Model.

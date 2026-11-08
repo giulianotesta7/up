@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 var fixedNow = time.Date(2026, 10, 25, 3, 12, 0, 0, time.UTC)

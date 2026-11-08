@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/secret"
 )
 
 // Check kinds; CheckHeartbeat is in heartbeat.go.

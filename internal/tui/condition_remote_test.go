@@ -9,9 +9,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/giulianotesta7/up/internal/client"
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/client"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/tui"
 )
 
 // TestRemoteFormAddsConditions adds a monitor with a condition through the

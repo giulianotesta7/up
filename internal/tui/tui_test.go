@@ -11,9 +11,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/store"
 )
 
 var now = time.Date(2026, 10, 25, 3, 45, 0, 0, time.UTC)

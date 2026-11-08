@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/secret"
 )
 
 // Cert is the last observed TLS certificate and its notification state.

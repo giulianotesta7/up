@@ -9,7 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/store"
 )
 
 func TestTrendViews(t *testing.T) {

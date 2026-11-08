@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/store"
 )
 
 func TestLoadCarriesBoundedDeliveryAttempts(t *testing.T) {

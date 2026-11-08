@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
-	"github.com/giulianotesta7/up/internal/store"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
+	"github.com/heohlee/up/internal/store"
+	"github.com/heohlee/up/internal/tui"
 )
 
 // SnapshotDTO is the secret-free wire representation of a TUI snapshot.

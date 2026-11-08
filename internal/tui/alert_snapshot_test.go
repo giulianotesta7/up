@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 func TestLoadAlertConfiguration(t *testing.T) {

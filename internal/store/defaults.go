@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // Defaults returns the stored defaults, or config.BuiltinDefaults when none
