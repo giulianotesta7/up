@@ -55,6 +55,8 @@ type Result struct {
 	Error string
 	// Cert is the final response's TLS leaf certificate, if any.
 	Cert *CertInfo
+	// Run is the cron run a missed result was recorded for; zero otherwise.
+	Run time.Time
 }
 
 // Checker runs HTTP checks.

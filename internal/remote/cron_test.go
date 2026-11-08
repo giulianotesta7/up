@@ -117,4 +117,24 @@ func TestCronHeartbeatThroughTheAPIAndSnapshot(t *testing.T) {
 	if len(cells) != 1 || !cells[0].At.Equal(monday.Add(time.Minute)) {
 		t.Fatalf("cells per run = %+v, want the newest of Monday's two pings", cells)
 	}
+
+	// A recorded miss keeps its run across the wire.
+	run := wantRuns[0]
+	miss := check.Result{CheckName: "nightly", At: run.Add(30 * time.Minute), Status: check.StatusDown, Error: "no ping for the 02:00 -03 run", Run: run}
+	if stored, err := s.RecordMissed(ctx, want, monday.Add(time.Minute), miss); err != nil || !stored {
+		t.Fatal(stored, err)
+	}
+	if snap, err = tui.Load(ctx, s, run.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if b, err = json.Marshal(NewSnapshotDTO(snap, run.Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	dto = SnapshotDTO{}
+	if err := json.Unmarshal(b, &dto); err != nil || strings.Count(string(b), `"run":"2030-01-08T05:00:00Z"`) != 2 {
+		t.Fatalf("snapshot JSON lacks the miss's run (%v):\n%s", err, b)
+	}
+	if got := dto.Snapshot().Services[2].Recent; len(got) != 3 || !got[0].Run.Equal(run) || !got[1].Run.IsZero() {
+		t.Fatalf("recent after the round trip = %+v, want the miss's run and none for the pings", got)
+	}
 }

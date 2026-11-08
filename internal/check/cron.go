@@ -17,8 +17,9 @@ import (
 //     counts for a later run. One that arrives while an older run still owed
 //     a ping has started and is within its grace counts for that run, so a
 //     grace longer than the time between runs does not skip it;
-//   - a missed result counts for the run it was recorded for: it is stored
-//     at that run + Grace.
+//   - a missed result counts for the run it was recorded for (its Run, kept
+//     when the grace or the zone changes later; one without a Run is at that
+//     run + Grace).
 //
 // The results replayed are the ones given (newest first, as stored), so the
 // state survives restarts and follows edits like a period heartbeat's.
@@ -50,8 +51,8 @@ func Deadline(c config.Check, recent []Result, loc *time.Location) time.Time {
 // Due returns the missed results due at now given the newest-first results
 // recent, with runs and reasons in loc (nil is UTC). A period heartbeat's are
 // Overdue's, naming the last ping or reported failure. A cron heartbeat's are
-// stored at each missed run + Grace with the reason `no ping for the 02:00
-// -03 run` (the run's date too when it is not on its deadline's day). When
+// stored at each missed run + Grace, with the run as Run and the reason `no
+// ping for the 02:00 -03 run` (the run's date too when it is not on its deadline's day). When
 // several runs were missed (the daemon was stopped) it returns only the first,
 // where the outage starts, and the latest, as a period heartbeat does.
 func Due(c config.Check, recent []Result, now time.Time, loc *time.Location) []Result {
@@ -86,7 +87,7 @@ func Due(c config.Check, recent []Result, now time.Time, loc *time.Location) []R
 	out := make([]Result, len(runs))
 	for i, run := range runs {
 		at := run.Add(c.Grace).In(recent[0].At.Location())
-		out[i] = Result{CheckName: c.Name, At: at, Status: StatusDown, Error: missedRunReason(run, at, loc)}
+		out[i] = Result{CheckName: c.Name, At: at, Status: StatusDown, Error: missedRunReason(run, at, loc), Run: run}
 	}
 	return out
 }
@@ -139,7 +140,11 @@ func replayRuns(cron config.Cron, grace time.Duration, recent []Result, loc *tim
 		r := recent[i]
 		run := covered
 		if Missed(r) {
-			if t := cron.Prev(r.At.Add(-grace), loc); t.After(covered) {
+			t := r.Run
+			if t.IsZero() {
+				t = cron.Prev(r.At.Add(-grace), loc)
+			}
+			if t.After(covered) {
 				run = t
 			}
 		} else if t := pingRun(cron, grace, covered, r.At, loc); t.After(covered) {

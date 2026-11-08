@@ -29,7 +29,8 @@ func newestFirst(oldest ...Result) []Result {
 	return out
 }
 
-// sameResults compares results with times as instants, whatever their zone.
+// sameResults compares results with times as instants, whatever their zone,
+// and a Run only when b names one.
 func sameResults(a, b []Result) bool {
 	if len(a) != len(b) {
 		return false
@@ -39,7 +40,10 @@ func sameResults(a, b []Result) bool {
 		if !x.At.Equal(y.At) {
 			return false
 		}
-		x.At, y.At = time.Time{}, time.Time{}
+		if !y.Run.IsZero() && !x.Run.Equal(y.Run) {
+			return false
+		}
+		x.At, y.At, x.Run, y.Run = time.Time{}, time.Time{}, time.Time{}, time.Time{}
 		if x != y {
 			return false
 		}
@@ -304,5 +308,43 @@ func TestCronLatePingForAnOwedRun(t *testing.T) {
 	}
 	if got := Due(hourly, results, at(14, 0), time.UTC); got != nil {
 		t.Fatalf("Due() = %+v", got)
+	}
+}
+
+// A recorded miss keeps counting for its own run after the grace or the
+// Defaults zone changes: no second miss for it, and the trend keeps
+// Monday's ping cell and Tuesday's miss cell.
+func TestCronMissKeepsItsRunAfterAnEdit(t *testing.T) {
+	ba := zone(t, "America/Argentina/Buenos_Aires")
+	at := func(day, hour, min int) time.Time { return time.Date(2026, 11, day, hour, min, 0, 0, ba) }
+	daily := weekdays
+	daily.Cron = "0 2 * * *"
+	mon := Ping("backup", at(9, 2, 5))
+	due := Due(daily, []Result{mon}, at(10, 2, 31), ba)
+	if len(due) != 1 || !due[0].Run.Equal(at(10, 2, 0)) {
+		t.Fatalf("Due() = %+v, want Tuesday's miss with its run", due)
+	}
+	results := newestFirst(mon, due[0])
+	raised := daily
+	raised.Grace = 2 * time.Hour
+	la := zone(t, "America/Los_Angeles")
+	for name, tt := range map[string]struct {
+		c        config.Check
+		loc      *time.Location
+		deadline time.Time
+	}{
+		"grace raised": {raised, ba, at(11, 4, 0)},                            // Wednesday's run
+		"zone changed": {daily, la, time.Date(2026, 11, 10, 2, 30, 0, 0, la)}, // the next 02:00 in the new zone
+		"both":         {raised, la, time.Date(2026, 11, 10, 4, 0, 0, 0, la)},
+	} {
+		if got := Deadline(tt.c, results, tt.loc); !got.Equal(tt.deadline) {
+			t.Errorf("%s: Deadline() = %v, want %v", name, got, tt.deadline)
+		}
+		if got := Due(tt.c, results, at(10, 4, 1), tt.loc); got != nil {
+			t.Errorf("%s: Due() = %+v, want no second miss for Tuesday", name, got)
+		}
+		if got := RunResults(tt.c, results, tt.loc); !reflect.DeepEqual(got, results) {
+			t.Errorf("%s: RunResults() = %+v, want %+v", name, got, results)
+		}
 	}
 }

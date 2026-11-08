@@ -199,12 +199,16 @@ func (s *Store) RecordMissed(ctx context.Context, c config.Check, newest time.Ti
 		return false, fmt.Errorf("store: refusing to record a missed deadline %+v for %s", r, c.Name)
 	}
 	c = c.Canonical()
+	var run int64
+	if !r.Run.IsZero() {
+		run = r.Run.UnixNano()
+	}
 	res, err := s.db.ExecContext(ctx, `
-INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error)
-SELECT ?1, ?2, 'down', 0, 0, ?3
+INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error, run_ns)
+SELECT ?1, ?2, 'down', 0, 0, ?3, ?10
  WHERE EXISTS (SELECT 1 FROM checks WHERE name = ?1 AND kind = ?4 AND period_ns = ?5 AND grace_ns = ?6 AND schedule = ?8 AND cron = ?9)
    AND NOT EXISTS (SELECT 1 FROM results WHERE check_name = ?1 AND at_ns > ?7)`,
-		c.Name, r.At.UnixNano(), r.Error, config.CheckHeartbeat, int64(c.Period), int64(c.Grace), newest.UnixNano(), c.Schedule, c.Cron)
+		c.Name, r.At.UnixNano(), r.Error, config.CheckHeartbeat, int64(c.Period), int64(c.Grace), newest.UnixNano(), c.Schedule, c.Cron, run)
 	if err != nil {
 		return false, fmt.Errorf("store: record %s: %w", c.Name, err)
 	}

@@ -22,7 +22,7 @@ func TestProbeCronManualPingDoesNotHideTheNextMiss(t *testing.T) {
 	}
 	r.clock.setAt(day(2, 9, 10, 1))
 	got := r.waitResults(4)
-	if want := missedAt(day(2, 9, 10, 0), "no ping for the 06:00 -03 run"); got[0] != want {
+	if want := missedRun(day(2, 9, 10, 0), day(2, 9, 0, 0), "no ping for the 06:00 -03 run"); got[0] != want {
 		t.Fatalf("Wednesday = %+v, want %+v", got[0], want)
 	}
 	r.waitAlerts(down)
@@ -32,7 +32,7 @@ func TestProbeCronManualPingDoesNotHideTheNextMiss(t *testing.T) {
 	r.waitAlerts(down, up)
 	r.clock.setAt(day(3, 9, 10, 1))
 	got = r.waitResults(6)
-	if want := missedAt(day(3, 9, 10, 0), "no ping for the 06:00 -03 run"); got[0] != want {
+	if want := missedRun(day(3, 9, 10, 0), day(3, 9, 0, 0), "no ping for the 06:00 -03 run"); got[0] != want {
 		t.Fatalf("Thursday = %+v, want %+v", got[0], want)
 	}
 	r.waitAlerts(down, up, down)

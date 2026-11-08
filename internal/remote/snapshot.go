@@ -160,6 +160,8 @@ type ResultDTO struct {
 	LatencyMS  int64        `json:"latency_ms"`
 	StatusCode int          `json:"status_code"`
 	Error      string       `json:"error"`
+	// Run is a missed cron run's (check.Result.Run); absent otherwise.
+	Run time.Time `json:"run,omitzero"`
 }
 type OutageDTO struct {
 	Start   time.Time `json:"start"`
@@ -346,10 +348,10 @@ func (d ChannelTestDTO) ChannelTest() config.ChannelTest {
 func (d MaintenanceDTO) Window(check string) config.MaintenanceWindow { return d.window(check) }
 
 func resultDTO(r check.Result) ResultDTO {
-	return ResultDTO{r.At.UTC(), r.Status, r.Latency.Milliseconds(), r.StatusCode, r.Error}
+	return ResultDTO{r.At.UTC(), r.Status, r.Latency.Milliseconds(), r.StatusCode, r.Error, r.Run.UTC()}
 }
 func (r ResultDTO) result(name string) check.Result {
-	return check.Result{CheckName: name, At: r.At, Status: r.Status, Latency: time.Duration(r.LatencyMS) * time.Millisecond, StatusCode: r.StatusCode, Error: r.Error}
+	return check.Result{CheckName: name, At: r.At, Status: r.Status, Latency: time.Duration(r.LatencyMS) * time.Millisecond, StatusCode: r.StatusCode, Error: r.Error, Run: r.Run}
 }
 
 // NewSnapshotDTO converts field by field without exposing sealed credentials.

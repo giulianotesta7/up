@@ -107,7 +107,7 @@ func TestRecordMissedRefusesAChangedSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 	ping(t, s, token(t, s, key, "nightly"), false, t0)
-	r := check.Result{CheckName: "nightly", At: t0.Add(24 * time.Hour), Status: check.StatusDown, Error: "no ping for the 02:00 UTC run"}
+	r := check.Result{CheckName: "nightly", At: t0.Add(24 * time.Hour), Status: check.StatusDown, Error: "no ping for the 02:00 UTC run", Run: t0.Add(23*time.Hour + 30*time.Minute)}
 	for name, stale := range map[string]config.Check{
 		"cron":     {Name: "nightly", Kind: config.CheckHeartbeat, Schedule: config.ScheduleCron, Cron: "0 3 * * 1-5", Grace: 30 * time.Minute},
 		"schedule": {Name: "nightly", Kind: config.CheckHeartbeat, Period: 0, Grace: 30 * time.Minute},
@@ -118,6 +118,9 @@ func TestRecordMissedRefusesAChangedSchedule(t *testing.T) {
 	}
 	if stored, err := s.RecordMissed(ctx, cronCheck, t0, r); err != nil || !stored {
 		t.Fatalf("RecordMissed() = %v, %v, want stored", stored, err)
+	}
+	if got, err := s.Recent(ctx, "nightly", 2); err != nil || len(got) != 2 || !got[0].Run.Equal(r.Run) || !got[1].Run.IsZero() {
+		t.Fatalf("Recent() = %+v, %v, want the miss's run and none for the ping", got, err)
 	}
 }
 
@@ -193,6 +196,10 @@ func TestOpenMigratesV11AddingOnlyTheSchedule(t *testing.T) {
 		t.Fatalf("migration changed existing checks:\nbefore %v\nafter  %v", beforeChecks, after)
 	}
 	ctx := context.Background()
+	var runs string
+	if err := s.db.QueryRowContext(ctx, "SELECT group_concat(DISTINCT run_ns) FROM results").Scan(&runs); err != nil || runs != "0" {
+		t.Fatalf("results run_ns after migration = %q, %v, want 0", runs, err)
+	}
 	checks, err := s.Checks(ctx)
 	if err != nil || len(checks) != 4 {
 		t.Fatalf("Checks() after migration = %+v, %v", checks, err)

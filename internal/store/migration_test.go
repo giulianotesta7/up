@@ -346,7 +346,11 @@ func dumpTables(t *testing.T, path string, tables ...string) map[string][]string
 	defer db.Close()
 	out := map[string][]string{}
 	for _, table := range tables {
-		rows, err := db.Query("SELECT * FROM " + table + " ORDER BY 1, 2")
+		list := "*"
+		if table == "results" { // run_ns (v12) reads 0 on older rows
+			list = "id, check_name, at_ns, status, latency_ns, status_code, error"
+		}
+		rows, err := db.Query("SELECT " + list + " FROM " + table + " ORDER BY 1, 2")
 		if err != nil {
 			t.Fatal(err)
 		}

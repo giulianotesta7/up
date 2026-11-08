@@ -29,6 +29,13 @@ func cronRig(t *testing.T, alertAfter int) *beatRig {
 	return r
 }
 
+// missedRun is a cron miss stored at at for its run.
+func missedRun(at, run time.Time, reason string) check.Result {
+	r := missedAt(at, reason)
+	r.Run = run
+	return r
+}
+
 func day(n int, hour, min, sec int) time.Time {
 	return time.Date(2030, 1, 7+n, hour, min, sec, 0, time.UTC)
 }
@@ -49,7 +56,7 @@ func TestCronHeartbeatMissesARunAfterItsGrace(t *testing.T) {
 	}
 	r.clock.setAt(day(1, 9, 10, 1))
 	got := r.waitResults(3)
-	if want := missedAt(day(1, 9, 10, 0), "no ping for the 06:00 -03 run"); got[0] != want {
+	if want := missedRun(day(1, 9, 10, 0), day(1, 9, 0, 0), "no ping for the 06:00 -03 run"); got[0] != want {
 		t.Fatalf("missed = %+v, want %+v", got[0], want)
 	}
 	r.waitAlerts(down)
@@ -77,7 +84,7 @@ func TestCronHeartbeatMissesARunAfterItsGrace(t *testing.T) {
 	r.waitAlerts(down, up)
 	r.clock.setAt(day(7, 9, 10, 1))
 	got = r.waitResults(8)
-	if want := missedAt(day(7, 9, 10, 0), "no ping for the 06:00 -03 run"); got[0] != want {
+	if want := missedRun(day(7, 9, 10, 0), day(7, 9, 0, 0), "no ping for the 06:00 -03 run"); got[0] != want {
 		t.Fatalf("Monday's miss = %+v, want %+v", got[0], want)
 	}
 	r.waitAlerts(down, up, down)
@@ -95,8 +102,8 @@ func TestCronHeartbeatDownAcrossRunsRecordsOneOutage(t *testing.T) {
 	r.start()
 	got := r.waitResults(3)
 	want := []check.Result{
-		missedAt(day(3, 9, 10, 0), "no ping for the 06:00 -03 run"),
-		missedAt(day(1, 9, 10, 0), "no ping for the 06:00 -03 run"),
+		missedRun(day(3, 9, 10, 0), day(3, 9, 0, 0), "no ping for the 06:00 -03 run"),
+		missedRun(day(1, 9, 10, 0), day(1, 9, 0, 0), "no ping for the 06:00 -03 run"),
 		check.Ping("backup", day(0, 9, 0, 30)),
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -137,7 +144,7 @@ func TestCronHeartbeatAcrossTheSpringJump(t *testing.T) {
 	// Not hidden either: without a ping the run is missed once.
 	r.clock.setAt(time.Date(2030, 3, 10, 7, 15, 1, 0, time.UTC))
 	got := r.waitResults(2)
-	if want := missedAt(time.Date(2030, 3, 10, 7, 15, 0, 0, time.UTC), "no ping for the 03:00 EDT run"); got[0] != want {
+	if want := missedRun(time.Date(2030, 3, 10, 7, 15, 0, 0, time.UTC), time.Date(2030, 3, 10, 7, 0, 0, 0, time.UTC), "no ping for the 03:00 EDT run"); got[0] != want {
 		t.Fatalf("missed = %+v, want %+v", got[0], want)
 	}
 	r.waitAlerts(down)

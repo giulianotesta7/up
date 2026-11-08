@@ -206,10 +206,12 @@ ALTER TABLE channels ADD COLUMN priority   TEXT NOT NULL DEFAULT '';
 	// v11 -> v12: heartbeat cron schedules. Additive: existing rows read an
 	// empty schedule (period) and no cron expression, so existing heartbeats
 	// keep their period. schedule is '' or 'cron'; cron is the expression
-	// with its fields separated by one space.
+	// with its fields separated by one space. run_ns is the cron run a missed
+	// result was recorded for, 0 for every other result.
 	`
 ALTER TABLE checks ADD COLUMN schedule TEXT NOT NULL DEFAULT '';
 ALTER TABLE checks ADD COLUMN cron     TEXT NOT NULL DEFAULT '';
+ALTER TABLE results ADD COLUMN run_ns  INTEGER NOT NULL DEFAULT 0;
 `,
 }
 
@@ -515,7 +517,7 @@ func (s *Store) Latest(ctx context.Context, name string) (r check.Result, ok boo
 // Recent returns up to limit results of a check, newest first.
 func (s *Store) Recent(ctx context.Context, name string, limit int) ([]check.Result, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT at_ns, status, latency_ns, status_code, error FROM results WHERE check_name = ? ORDER BY at_ns DESC, id DESC LIMIT ?",
+		"SELECT at_ns, status, latency_ns, status_code, error, run_ns FROM results WHERE check_name = ? ORDER BY at_ns DESC, id DESC LIMIT ?",
 		name, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: recent %s: %w", name, err)
@@ -524,12 +526,15 @@ func (s *Store) Recent(ctx context.Context, name string, limit int) ([]check.Res
 	var results []check.Result
 	for rows.Next() {
 		r := check.Result{CheckName: name}
-		var at, latency int64
+		var at, latency, run int64
 		var status string
-		if err := rows.Scan(&at, &status, &latency, &r.StatusCode, &r.Error); err != nil {
+		if err := rows.Scan(&at, &status, &latency, &r.StatusCode, &r.Error, &run); err != nil {
 			return nil, fmt.Errorf("store: recent %s: %w", name, err)
 		}
 		r.At, r.Status, r.Latency = fromNanos(at), check.Status(status), time.Duration(latency)
+		if run != 0 {
+			r.Run = fromNanos(run)
+		}
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {
