@@ -10,10 +10,13 @@ import (
 // cron expression in the Defaults zone and is missed Grace after a run
 // without one. Every result counts for one run:
 //
-//   - a ping or a reported failure counts for its nearest run, so an early
-//     ping counts for the run it precedes and several pings in one run count
-//     once; one that arrives while the oldest run still owed a ping is within
-//     its grace counts for that run, even when it is nearer the next one;
+//   - a ping or a reported failure counts for the latest run that has
+//     already started, or for a run starting within CronEarlyTolerance (the
+//     sender's clock may be ahead), so several pings in one run count once
+//     and a ping after its run already has one changes nothing: it never
+//     counts for a later run. One that arrives while an older run still owed
+//     a ping has started and is within its grace counts for that run, so a
+//     grace longer than the time between runs does not skip it;
 //   - a missed result counts for the run it was recorded for: it is stored
 //     at that run + Grace.
 //
@@ -135,25 +138,12 @@ func replayRuns(cron config.Cron, grace time.Duration, recent []Result, loc *tim
 	for i := len(recent) - 1; i >= 0; i-- {
 		r := recent[i]
 		run := covered
-		switch {
-		case Missed(r):
+		if Missed(r) {
 			if t := cron.Prev(r.At.Add(-grace), loc); t.After(covered) {
 				run = t
 			}
-		default:
-			near := nearestRun(cron, r.At, loc)
-			switch {
-			case covered.IsZero():
-				run = near
-			case !near.After(covered):
-			default:
-				// The oldest run still owed a ping takes a ping within its grace.
-				if owed := cron.Next(covered, loc); !r.At.After(owed.Add(grace)) {
-					run = owed
-				} else {
-					run = near
-				}
-			}
+		} else if t := pingRun(cron, grace, covered, r.At, loc); t.After(covered) {
+			run = t
 		}
 		if run.IsZero() {
 			continue
@@ -163,16 +153,30 @@ func replayRuns(cron config.Cron, grace time.Duration, recent []Result, loc *tim
 	}
 }
 
-// nearestRun is the run nearest at; the earlier one on a tie.
-func nearestRun(cron config.Cron, at time.Time, loc *time.Location) time.Time {
-	prev, next := cron.Prev(at, loc), cron.Next(at, loc)
-	switch {
-	case prev.IsZero():
-		return next
-	case next.IsZero() || at.Sub(prev) <= next.Sub(at):
-		return prev
+// CronEarlyTolerance is how long before a run a ping still counts for it, for
+// a sender whose clock is slightly ahead.
+const CronEarlyTolerance = 5 * time.Minute
+
+// pingRun is the run a ping at at counts for when covered is the newest run
+// with a result (zero before the first): the oldest run owed a ping that has
+// started and is still within its grace, else a run starting within
+// CronEarlyTolerance when it is nearer than the one already started, else the
+// latest run that has started. The caller ignores a run not after covered.
+func pingRun(cron config.Cron, grace time.Duration, covered, at time.Time, loc *time.Location) time.Time {
+	prev := cron.Prev(at, loc)
+	owed := prev
+	if !covered.IsZero() {
+		owed = cron.Next(covered, loc)
 	}
-	return next
+	if !owed.IsZero() && !owed.After(at) && !at.After(owed.Add(grace)) {
+		return owed
+	}
+	if next := cron.Next(at, loc); !next.IsZero() {
+		if early := next.Sub(at); early <= CronEarlyTolerance && (prev.IsZero() || early < at.Sub(prev)) {
+			return next
+		}
+	}
+	return prev
 }
 
 // missedRunReason names the missed run in loc with the zone's abbreviation,

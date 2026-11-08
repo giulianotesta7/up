@@ -70,7 +70,9 @@ func TestCronDeadlineAndDue(t *testing.T) {
 		{"just after the deadline", newestFirst(mon), tuesday.Add(time.Nanosecond), tuesday,
 			[]Result{miss(tuesday, "no ping for the 02:00 -03 run")}},
 		{"a late ping within grace counts", newestFirst(mon, Ping("backup", at(10, 2, 29))), at(10, 23, 0), at(11, 2, 30), nil},
-		{"an early ping counts for its nearest run", newestFirst(mon, Ping("backup", at(10, 1, 50))), at(10, 23, 0), at(11, 2, 30), nil},
+		{"a ping up to five minutes early counts for its run", newestFirst(mon, Ping("backup", at(10, 1, 55))), at(10, 23, 0), at(11, 2, 30), nil},
+		{"an earlier ping does not", newestFirst(mon, Ping("backup", at(10, 1, 50))), tuesday.Add(time.Second), tuesday,
+			[]Result{miss(tuesday, "no ping for the 02:00 -03 run")}},
 		{"several pings in one run count once", newestFirst(mon, Ping("backup", at(9, 2, 10)), Ping("backup", at(9, 2, 20))), tuesday.Add(time.Second), tuesday,
 			[]Result{miss(tuesday, "no ping for the 02:00 -03 run")}},
 		{"a reported failure counts for its run", newestFirst(mon, Fail("backup", at(10, 2, 3))), at(10, 23, 0), at(11, 2, 30), nil},
@@ -229,5 +231,78 @@ func TestPeriodThroughDeadlineAndDue(t *testing.T) {
 	}
 	if Deadline(beat, nil, time.UTC) != (time.Time{}) || Due(beat, nil, now, time.UTC) != nil {
 		t.Fatal("a waiting period heartbeat has a deadline")
+	}
+}
+
+// A ping counts for the latest run that has already started, or for one
+// starting within CronEarlyTolerance; once a run has its ping, later pings
+// change nothing until the next run (or its tolerance) begins.
+func TestCronPingAttribution(t *testing.T) {
+	ba := zone(t, "America/Argentina/Buenos_Aires")
+	at := func(day, hour, min, sec int) time.Time { return time.Date(2026, 11, day, hour, min, sec, 0, ba) }
+	daily := weekdays
+	daily.Cron, daily.Grace = "0 2 * * *", time.Hour
+	ping := func(day, hour, min, sec int) Result { return Ping("backup", at(day, hour, min, sec)) }
+	mon := ping(9, 2, 5, 0) // Monday Nov 9 2026
+	tue, wed, thu := at(10, 3, 0, 0), at(11, 3, 0, 0), at(12, 3, 0, 0)
+	wedMiss := miss(wed, "no ping for the 02:00 -03 run")
+	tests := []struct {
+		name     string
+		results  []Result
+		now      time.Time
+		deadline time.Time
+		due      []Result
+	}{
+		{"a ping after the run satisfies it", newestFirst(mon, ping(10, 2, 15, 0)), tue.Add(time.Second), wed, nil},
+		{"a manual ping later that day does not cover the next run", newestFirst(mon, ping(10, 2, 15, 0), ping(10, 14, 1, 0)), wed.Add(time.Second), wed,
+			[]Result{wedMiss}},
+		{"a manual ping after a miss does not cover the next run", newestFirst(mon, miss(tue, "no ping for the 02:00 -03 run"), ping(10, 14, 1, 0)), wed.Add(time.Second), wed,
+			[]Result{wedMiss}},
+		{"a ping two minutes early counts for the run", newestFirst(mon, ping(10, 2, 15, 0), ping(11, 1, 58, 0)), wed.Add(time.Second), thu, nil},
+		{"a ping five minutes early counts for the run", newestFirst(mon, ping(10, 2, 15, 0), ping(11, 1, 55, 0)), wed.Add(time.Second), thu, nil},
+		{"a ping more than five minutes early does not", newestFirst(mon, ping(10, 2, 15, 0), ping(11, 1, 54, 59)), wed.Add(time.Second), wed,
+			[]Result{wedMiss}},
+		{"a ping ten minutes early does not", newestFirst(mon, ping(10, 2, 15, 0), ping(11, 1, 50, 0)), wed.Add(time.Second), wed,
+			[]Result{wedMiss}},
+		{"two pings in one run count once", newestFirst(mon, ping(10, 2, 10, 0), ping(10, 2, 20, 0)), wed.Add(time.Second), wed,
+			[]Result{wedMiss}},
+		{"a first ping early counts for the coming run", newestFirst(ping(11, 1, 58, 0)), wed.Add(time.Second), thu, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Deadline(daily, tt.results, ba); !got.Equal(tt.deadline) {
+				t.Fatalf("Deadline() = %v, want %v", got, tt.deadline)
+			}
+			if got := Due(daily, tt.results, tt.now, ba); !sameResults(got, tt.due) {
+				t.Fatalf("Due() = %+v, want %+v", got, tt.due)
+			}
+		})
+	}
+
+	// One trend cell per run, the run's newest result: the pings at 02:10,
+	// 02:20, 14:01 and Wednesday 01:50 all count for Tuesday's run, Wednesday
+	// is missed, and Thursday's early ping is Thursday's.
+	results := newestFirst(mon, ping(10, 2, 10, 0), ping(10, 2, 20, 0), ping(10, 14, 1, 0), ping(11, 1, 50, 0), wedMiss, ping(12, 1, 58, 0))
+	want := newestFirst(mon, ping(11, 1, 50, 0), wedMiss, ping(12, 1, 58, 0))
+	if got := RunResults(daily, results, ba); !reflect.DeepEqual(got, want) {
+		t.Fatalf("RunResults() =\n%+v\nwant\n%+v", got, want)
+	}
+	if got := Deadline(daily, results, ba); !got.Equal(at(13, 3, 0, 0)) {
+		t.Fatalf("Deadline() after Thursday = %v", got)
+	}
+}
+
+// When the grace is longer than the time between runs, a late ping still
+// counts for the oldest run owed one rather than skipping it.
+func TestCronLatePingForAnOwedRun(t *testing.T) {
+	hourly := weekdays
+	hourly.Cron, hourly.Grace = "0 * * * *", 2*time.Hour
+	at := func(hour, min int) time.Time { return time.Date(2026, 11, 9, hour, min, 0, 0, time.UTC) }
+	results := newestFirst(Ping("backup", at(10, 5)), Ping("backup", at(12, 10)))
+	if got := Deadline(hourly, results, time.UTC); !got.Equal(at(14, 0)) {
+		t.Fatalf("Deadline() = %v, want the 12:00 run's %v", got, at(14, 0))
+	}
+	if got := Due(hourly, results, at(14, 0), time.UTC); got != nil {
+		t.Fatalf("Due() = %+v", got)
 	}
 }
