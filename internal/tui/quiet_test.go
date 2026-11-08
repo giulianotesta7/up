@@ -122,5 +122,5 @@ func TestEditFormLoadsThresholds(t *testing.T) {
 	next, _ := m.Update(m.Init()())
 	m = next.(Model)
 	m, _ = press(t, m, keyE)
-	requireText(t, m, "Alert after: ‹ 5 › failures in a row", "Recover after: ‹ 1 › successes in a row", "Detection time ≈ 5 × 1m0s = 5m0s")
+	requireText(t, m, "Alert after: ‹ 5 › failures in a row", "Recover after: ‹ 1 › successes in a row", "Detection time ≈ 5 × 1m = 5m")
 }

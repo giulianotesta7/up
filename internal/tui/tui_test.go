@@ -239,7 +239,7 @@ func TestDetailView(t *testing.T) {
 
 	for _, want := range []string{
 		"payments", "https://pay.example.com",
-		"Interval     1m0s", "Timeout      10s", "Expected     204",
+		"Interval     1m", "Timeout      10s", "Expected     204",
 		"Status       DOWN", "Last error   " + reason, "Down since   Oct 25 03:44:00 (1m ago)",
 		"84ms", "older", "AVG      P95      MAX      FAILED", "84ms     84ms     84ms     3 of 5",
 		"Oct 25 03:44  ongoing 1m  unexpected status 503 (expect…  — none",

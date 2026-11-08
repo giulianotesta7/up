@@ -264,12 +264,12 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 			field("Period", shortDuration(s.Check.Period))
 			field("Grace", shortDuration(s.Check.Grace))
 		case kindTCP:
-			field("Interval", s.Check.Interval.String())
-			field("Timeout", s.Check.Timeout.String())
+			field("Interval", shortDuration(s.Check.Interval))
+			field("Timeout", shortDuration(s.Check.Timeout))
 			field("Type", "TCP connect")
 		default:
-			field("Interval", s.Check.Interval.String())
-			field("Timeout", s.Check.Timeout.String())
+			field("Interval", shortDuration(s.Check.Interval))
+			field("Timeout", shortDuration(s.Check.Timeout))
 			field("Expected", fmt.Sprint(s.Check.ExpectedStatus))
 			renderRequestFields(field, s.Check)
 		}

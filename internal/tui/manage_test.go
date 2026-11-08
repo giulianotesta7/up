@@ -111,7 +111,7 @@ func TestEditPrefillSaveOriginAndFixedName(t *testing.T) {
 			if !detail {
 				m, _ = press(t, m, keyEnter)
 			}
-			requireText(t, m, want.URL, "Interval     1m0s", "Timeout      10s", "Expected     204", "e edit", "d delete")
+			requireText(t, m, want.URL, "Interval     1m", "Timeout      10s", "Expected     204", "e edit", "d delete")
 		})
 	}
 }

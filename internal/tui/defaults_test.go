@@ -159,8 +159,8 @@ func TestDefaultsPopupStartsFromStoredValues(t *testing.T) {
 	}
 	next, _ := m.Update(m.Init()())
 	m, _ = press(t, next.(Model), keyF)
-	requireText(t, m, "IANA zone: Europe/Madrid", "Channel: ‹ ops ›", "Interval: 1m0s", "Timeout: 10s", "Expected status: 204",
-		"Alert after: ‹ 3 ›", "Recover after: ‹ 2 ›", "Detection time ≈ 3 × 1m0s = 3m0s before the first alert")
+	requireText(t, m, "IANA zone: Europe/Madrid", "Channel: ‹ ops ›", "Interval: 1m", "Timeout: 10s", "Expected status: 204",
+		"Alert after: ‹ 3 ›", "Recover after: ‹ 2 ›", "Detection time ≈ 3 × 1m = 3m before the first alert")
 }
 
 func TestDefaultsFitEightyByTwentyFour(t *testing.T) {
@@ -213,7 +213,7 @@ func TestNewMonitorFormStartsFromDefaults(t *testing.T) {
 
 	// HTTP: every default is prefilled and saved with the monitor.
 	m, _ = press(t, m, keyN)
-	requireText(t, m, "Interval: 1m0s", "Timeout: 10s", "Expected status: 204", "Channel: ‹ ops ›", "Alert after: ‹ 3 ›", "Recover after: ‹ 2 ›")
+	requireText(t, m, "Interval: 1m", "Timeout: 10s", "Expected status: 204", "Channel: ‹ ops ›", "Alert after: ‹ 3 ›", "Recover after: ‹ 2 ›")
 	m = typeText(t, m, "web")
 	m, _ = press(t, m, keyTab)
 	m = typeText(t, m, "https://example.com")
@@ -226,7 +226,7 @@ func TestNewMonitorFormStartsFromDefaults(t *testing.T) {
 
 	// TCP: the shared fields start from the defaults too; the status is HTTP only.
 	m, _ = press(t, next.(Model), keyN, keyShiftTab, keyRight)
-	requireText(t, m, "Type: ‹ TCP ›", "Interval: 1m0s", "Timeout: 10s", "Channel: ‹ ops ›", "Alert after: ‹ 3 ›", "Recover after: ‹ 2 ›")
+	requireText(t, m, "Type: ‹ TCP ›", "Interval: 1m", "Timeout: 10s", "Channel: ‹ ops ›", "Alert after: ‹ 3 ›", "Recover after: ‹ 2 ›")
 	// Switching back to HTTP restores the default status, not a hard-coded 200.
 	m, _ = press(t, next.(Model), keyN, keyShiftTab, keyRight, keyLeft)
 	requireText(t, m, "Type: ‹ HTTP ›", "Expected status: 204")
@@ -235,7 +235,7 @@ func TestNewMonitorFormStartsFromDefaults(t *testing.T) {
 func TestNewMonitorFormIgnoresADeletedDefaultChannel(t *testing.T) {
 	snap := Snapshot{Channels: []config.Channel{{Name: "other"}}, Defaults: config.Defaults{Zone: "UTC", Channel: "gone", Interval: time.Minute, Timeout: 5 * time.Second, ExpectedStatus: 200, AlertAfter: 1, RecoverAfter: 1}}
 	m, _ := press(t, modelWith(snap), keyN)
-	requireText(t, m, "Channel: ‹ none ›", "Interval: 1m0s")
+	requireText(t, m, "Channel: ‹ none ›", "Interval: 1m")
 }
 
 func TestNewMonitorFormWithoutStoredDefaultsKeepsToday(t *testing.T) {
@@ -259,7 +259,7 @@ func TestEditingAMonitorIgnoresDefaults(t *testing.T) {
 	}
 	next, _ := m.Update(m.Init()())
 	m, _ = press(t, next.(Model), keyE)
-	requireText(t, m, "Edit monitor", "Interval: 1m0s", "Timeout: 10s", "Expected status: 204", "Channel: ‹ none ›", "Alert after: ‹ 1 ›", "Recover after: ‹ 1 ›")
+	requireText(t, m, "Edit monitor", "Interval: 1m", "Timeout: 10s", "Expected status: 204", "Channel: ‹ none ›", "Alert after: ‹ 1 ›", "Recover after: ‹ 1 ›")
 }
 
 func TestNewMaintenanceWindowStartsWithTheDefaultZone(t *testing.T) {

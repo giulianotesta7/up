@@ -100,7 +100,7 @@ func (f *monitorForm) setKind(kind string) {
 func editTCPForm(c config.Check, detail bool) *monitorForm {
 	return &monitorForm{
 		kind:   kindTCP,
-		values: [5]string{c.Name, c.Host, c.Interval.String(), c.Timeout.String(), ""}, port: strconv.Itoa(c.Port),
+		values: [5]string{c.Name, c.Host, shortDuration(c.Interval), shortDuration(c.Timeout), ""}, port: strconv.Itoa(c.Port),
 		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: "on",
 		focus: 1, cursor: len([]rune(c.Host)), editing: true, returnDetail: detail, base: c,
 	}

@@ -155,7 +155,7 @@ func TestHeartbeatFormRejectsBadPeriodAndKeepsStore(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("an invalid period saved")
 	}
-	requireText(t, m, "Cannot save monitor: period must be between 1m0s and 744h0m0s")
+	requireText(t, m, "Cannot save monitor: period must be between 1m and 744h")
 	if got, _ := s.Checks(context.Background()); len(got) != 1 {
 		t.Fatalf("checks = %+v", got)
 	}
