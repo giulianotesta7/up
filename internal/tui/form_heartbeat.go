@@ -40,6 +40,7 @@ func editHeartbeatForm(c config.Check, detail bool) *monitorForm {
 	return &monitorForm{
 		kind:   kindHeartbeat,
 		values: [5]string{c.Name, "", shortDuration(d.Interval), shortDuration(d.Timeout)}, period: shortDuration(c.Period), grace: shortDuration(c.Grace),
+		record:  config.DNSRecords[0],
 		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: "on",
 		focus: focusPeriod, cursor: len([]rune(shortDuration(c.Period))), editing: true, returnDetail: detail, base: c, hadToken: true,
 	}
@@ -96,7 +97,7 @@ func renderTokenConfirm(b *strings.Builder) {
 // question, so the box can keep one size whichever is on screen.
 func formVariants(f monitorForm) []monitorForm {
 	var out []monitorForm
-	for _, kind := range []string{"", kindTCP, kindHeartbeat} {
+	for _, kind := range []string{"", kindTCP, kindHeartbeat, kindPing, kindDNS} {
 		v := f
 		v.confirm, v.cursor = false, 0
 		v.setKind(kind)

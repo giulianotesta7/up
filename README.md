@@ -172,6 +172,8 @@ Set `Type` to `Ping` and enter a host (name or IP; IPv6 without brackets). Each 
 
 The daemon checks this when it starts and logs `cannot send pings` when it cannot. Then ping monitors are not run: they stay pending with `cannot send pings`, record nothing and send no alerts, locally and with `--remote`. Restart `up serve` after changing the setting.
 
+In the TUI a dim `ping` tag follows the name and the detail's `Type` is `ICMP echo`. While the daemon cannot send pings, the form shows an amber line when `Type` is `Ping` (saving is still allowed) and ping monitors read `PENDING` with an amber `cannot send pings`, in the list and in the detail's `Last error`.
+
 ### DNS monitors
 
 Set `Type` to `DNS` and enter a **domain**, a **record** type (`A`, `AAAA`, `CNAME`, `MX` or `TXT`), an optional **resolver** and an optional **expected** value. The query goes over UDP, again over TCP when the answer is truncated. DNS monitors need no permission.
@@ -181,6 +183,8 @@ Set `Type` to `DNS` and enter a **domain**, a **record** type (`A`, `AAAA`, `CNA
 - **Down** on `NXDOMAIN for nas.home.arpa`, `SERVFAIL`, `REFUSED`, an answer without a record of the type (`no A record for nas.home.arpa`), no reply in the timeout (`no reply from 192.0.2.53:53 in 2s`) or a mismatch: `A = 203.0.113.9, want 203.0.113.10` (`+1` after the value when there were more answers).
 
 Latency is the query time. Each result keeps the answer shown (the one that matched, otherwise the first) and how many there were. DNSSEC is not validated.
+
+In the TUI the form rows are Domain, Record (`←`/`→`), Resolver (dim `system resolver` while empty) and Expected (dim `any answer` while empty). The list shows a dim `dns` tag and the answer in the last column (`A 203.0.113.10 +1`); the detail title adds `@resolver` when one is set, and its Status line ends with the answer (`· 203.0.113.10 +1`). A mismatch shows the answer once, in the reason.
 
 ### Heartbeat monitors
 

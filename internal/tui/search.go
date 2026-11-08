@@ -17,8 +17,8 @@ const (
 // filterTabs are the status filters, in the order tab cycles them.
 var filterTabs = []string{"all", "down", "failing", "held"}
 
-// listFilter narrows the monitor list: a case-insensitive query on name, URL
-// or host, and a status tab. open is the search bar being edited; a closed
+// listFilter narrows the monitor list: a case-insensitive query on name, URL,
+// host or domain, and a status tab. open is the search bar being edited; a closed
 // filter that is still active stays applied until esc clears it. total and
 // shown are filled for rendering.
 type listFilter struct {
@@ -97,7 +97,7 @@ func (f listFilter) matches(s Service, now time.Time) bool {
 		return true
 	}
 	query := strings.ToLower(f.query)
-	for _, text := range []string{s.Check.Name, s.Check.URL, s.Check.Host} {
+	for _, text := range []string{s.Check.Name, s.Check.URL, s.Check.Host, s.Check.Domain} {
 		if strings.Contains(strings.ToLower(text), query) {
 			return true
 		}
@@ -122,7 +122,7 @@ func (m Model) visible() []int {
 	now := m.now()
 	var out []int
 	for i, s := range m.snap.Services {
-		if !m.filter.active() || m.filter.matches(s, now) {
+		if !m.filter.active() || m.filter.matches(m.snap.shown(s), now) {
 			out = append(out, i)
 		}
 	}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -15,7 +14,10 @@ import (
 // kindTCP is the form's type for a TCP monitor; the zero value is HTTP.
 const kindTCP = config.CheckTCP
 
-var kindChoices = []string{"HTTP", "TCP", "Heartbeat"}
+var kindChoices = []string{"HTTP", "TCP", "Heartbeat", "Ping", "DNS"}
+
+// kindByName maps a Type choice to the form's kind.
+var kindByName = map[string]string{"HTTP": "", "TCP": kindTCP, "Heartbeat": kindHeartbeat, "Ping": kindPing, "DNS": kindDNS}
 
 const tcpCopy = "Checks that the port accepts a connection."
 
@@ -27,13 +29,21 @@ func (f monitorForm) kindName() string {
 		return "TCP"
 	case f.isHeartbeat():
 		return "Heartbeat"
+	case f.isPing():
+		return "Ping"
+	case f.isDNS():
+		return "DNS"
 	}
 	return "HTTP"
 }
 
 // choiceFocus reports whether the focused row is chosen with ←/→ instead of typed.
 func (f monitorForm) choiceFocus() bool {
-	return f.focus >= focusChannel && f.focus < focusAdvanced && f.focus != focusPort && f.focus != focusPeriod && f.focus != focusGrace
+	switch f.focus {
+	case focusPort, focusPeriod, focusGrace, focusResolver, focusExpected:
+		return false
+	}
+	return f.focus >= focusChannel && f.focus < focusAdvanced
 }
 
 // order is the tab order of the focusable rows, Type first. An existing
@@ -48,6 +58,10 @@ func (f monitorForm) order() []int {
 		if f.tokenRow() {
 			rows = append(rows, focusToken)
 		}
+	case f.isPing():
+		rows = []int{focusType, 0, 1, 2, 3, focusChannel, focusAlertAfter, focusRecoverAfter}
+	case f.isDNS():
+		rows = []int{focusType, 0, 1, focusRecord, focusResolver, focusExpected, 2, 3, focusChannel, focusAlertAfter, focusRecoverAfter}
 	default:
 		rows = []int{focusType, 0, 1, 2, 3, 4, focusChannel, focusAlertAfter, focusRecoverAfter, focusTLS}
 	}
@@ -74,14 +88,18 @@ func (f *monitorForm) text() *string {
 		return &f.period
 	case f.focus == focusGrace:
 		return &f.grace
+	case f.focus == focusResolver:
+		return &f.resolver
+	case f.focus == focusExpected:
+		return &f.expected
 	}
 	return f.advText()
 }
 
 // setKind switches the monitor type. The other type's values are dropped, not
-// hidden: the target field, port, expected status, TLS choice, period, grace
-// and every field carried over from an edited monitor start over, keeping
-// only the name.
+// hidden: the target field, port, expected status, TLS choice, period, grace,
+// the DNS rows and every field carried over from an edited monitor start
+// over, keeping only the name.
 func (f *monitorForm) setKind(kind string) {
 	if f.kind == kind {
 		return
@@ -89,8 +107,9 @@ func (f *monitorForm) setKind(kind string) {
 	f.kind, f.newToken = kind, false
 	f.period, f.grace = shortDuration(config.DefaultHeartbeatPeriod), shortDuration(config.DefaultHeartbeatGrace)
 	f.values[1], f.port, f.tlsExpiry = "", "", "on"
+	f.record, f.resolver, f.expected = config.DNSRecords[0], "", ""
 	f.values[4] = ""
-	if !f.isTCP() {
+	if f.kind == "" || f.isHeartbeat() {
 		f.values[4] = cmp.Or(f.status, "200")
 	}
 	f.base = config.Check{Name: f.base.Name}
@@ -100,7 +119,7 @@ func (f *monitorForm) setKind(kind string) {
 func editTCPForm(c config.Check, detail bool) *monitorForm {
 	return &monitorForm{
 		kind:   kindTCP,
-		values: [5]string{c.Name, c.Host, shortDuration(c.Interval), shortDuration(c.Timeout), ""}, port: strconv.Itoa(c.Port),
+		values: [5]string{c.Name, c.Host, shortDuration(c.Interval), shortDuration(c.Timeout), ""}, port: strconv.Itoa(c.Port), record: config.DNSRecords[0],
 		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: "on",
 		focus: 1, cursor: len([]rune(c.Host)), editing: true, returnDetail: detail, base: c,
 	}
@@ -113,17 +132,8 @@ func (f monitorForm) tcpCheck() (config.Check, error) {
 	if c.Port, err = strconv.Atoi(f.port); err != nil {
 		return c, fmt.Errorf("port: %w", err)
 	}
-	if c.Interval, err = time.ParseDuration(f.values[2]); err != nil {
-		return c, fmt.Errorf("interval: %w", err)
-	}
-	if c.Timeout, err = time.ParseDuration(f.values[3]); err != nil {
-		return c, fmt.Errorf("timeout: %w", err)
-	}
-	if c.AlertAfter, err = strconv.Atoi(f.alertAfter); err != nil {
-		return c, fmt.Errorf("alert after: %w", err)
-	}
-	if c.RecoverAfter, err = strconv.Atoi(f.recoverAfter); err != nil {
-		return c, fmt.Errorf("recover after: %w", err)
+	if err := f.parseShared(&c); err != nil {
+		return c, err
 	}
 	return c, config.ValidateCheck(c)
 }
@@ -158,34 +168,35 @@ func renderTCPFields(b *strings.Builder, f monitorForm) {
 	b.WriteString(helpStyle.Render(tcpCopy) + "\n")
 }
 
-// kindTagWidth is the extra name-column width for the "tcp" and "hb" tags:
-// 0 when no monitor is TCP or a heartbeat, or the terminal is too narrow to
-// keep the existing columns.
+// kindTags are the dim tags after the name of monitors that are not HTTP.
+var kindTags = map[string]string{kindTCP: " tcp", kindHeartbeat: " hb", kindPing: " ping", kindDNS: " dns"}
+
+// kindTagWidth is the extra name-column width for the kind tags: 4 cells,
+// 5 when a monitor is a ping, 0 when every monitor is HTTP or the terminal
+// is too narrow to keep the existing columns.
 func kindTagWidth(snap Snapshot, width, nameWidth, statusWidth, certWidth int) int {
-	const tag = len(" tcp")
+	tag := 0
 	for _, s := range snap.Services {
-		if s.Check.Kind == kindTCP || s.Check.Kind == kindHeartbeat {
-			if width <= 0 || width >= max(78, nameWidth+tag+55+statusWidth+certWidth) {
-				return tag
-			}
-			return 0
+		if t, ok := kindTags[s.Check.Kind]; ok {
+			tag = max(tag, len(" tcp"), len(t))
 		}
 	}
-	return 0
+	if tag == 0 || (width > 0 && width < max(78, nameWidth+tag+55+statusWidth+certWidth)) {
+		return 0
+	}
+	return tag
 }
 
-// tagKind appends the dim "tcp" or "hb" tag to a TCP or heartbeat monitor's
-// name cell. The name column is padded first so the tags line up.
+// tagKind appends the dim kind tag to a monitor's name cell. The name column
+// is padded first so the tags line up.
 func tagKind(name string, c config.Check, nameWidth, tag int) string {
 	if tag == 0 {
 		return name
 	}
 	name += strings.Repeat(" ", max(0, nameWidth-tag-ansi.StringWidth(name)))
-	switch c.Kind {
-	case kindTCP:
-		return name + helpStyle.Render(" tcp")
-	case kindHeartbeat:
-		return name + helpStyle.Render(" hb ")
+	t := kindTags[c.Kind]
+	if t == "" {
+		return name + strings.Repeat(" ", tag)
 	}
-	return name + strings.Repeat(" ", tag)
+	return name + helpStyle.Render(t+strings.Repeat(" ", max(0, tag-len(t))))
 }
