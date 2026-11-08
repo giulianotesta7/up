@@ -57,7 +57,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          image="ghcr.io/giulianotesta7/up"
+          image="ghcr.io/heohlee/up"
           image_tag=$(printf '%s' "$RELEASE_TAG" | LC_ALL=C sed 's/[^a-zA-Z0-9_.-]/-/g' | cut -c1-128)
           {
             echo 'tags<<EOF'

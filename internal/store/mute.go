@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // SetMute creates or extends a mute, retaining its original notification state.

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
 )
 
 func sealed(b byte) secret.Sealed { return secret.Sealed{Key: []byte{9}, Data: []byte{b}} }

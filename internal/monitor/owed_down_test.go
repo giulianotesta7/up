@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/check"
+	"github.com/heohlee/up/internal/check"
 )
 
 // setChannel edits the "api" check's channel and waits for the daemon to

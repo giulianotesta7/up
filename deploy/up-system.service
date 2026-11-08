@@ -1,6 +1,6 @@
 [Unit]
 Description=up HTTP uptime monitor
-Documentation=https://github.com/giulianotesta7/up
+Documentation=https://github.com/heohlee/up
 Wants=network-online.target
 After=network-online.target
 

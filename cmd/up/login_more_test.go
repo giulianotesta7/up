@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/giulianotesta7/up/internal/connection"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/connection"
+	"github.com/heohlee/up/internal/tui"
 )
 
 const loginSecret = "up_LOGIN-SECRET-0123456789abcdefghijklmnopqrstu"

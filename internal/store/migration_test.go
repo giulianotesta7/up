@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/config"
 )
 
 // schemaV1 is the schema written by up v0.4.0 and earlier. It is frozen here

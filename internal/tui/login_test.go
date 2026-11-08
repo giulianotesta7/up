@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/connection"
+	"github.com/heohlee/up/internal/connection"
 )
 
 type loginCall struct{ url, token string }

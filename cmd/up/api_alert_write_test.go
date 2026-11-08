@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/giulianotesta7/up/internal/remote"
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/remote"
+	"github.com/heohlee/up/internal/secret"
 )
 
 func TestAPIAlertWritesKeepPasswordsSealed(t *testing.T) {

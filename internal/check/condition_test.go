@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 const conditionBody = `{"status":"OK","count":3,"ready":true,"flag":"true","none":null,"version":"2",

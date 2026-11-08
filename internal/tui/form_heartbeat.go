@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // kindHeartbeat is the form's type for a heartbeat monitor.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/giulianotesta7/up/internal/remote"
+	"github.com/heohlee/up/internal/remote"
 )
 
 const tokenHelp = `Usage: up token reset [--db PATH]

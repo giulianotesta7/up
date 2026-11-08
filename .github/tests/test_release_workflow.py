@@ -92,7 +92,7 @@ class ContainerReleaseTest(unittest.TestCase):
         self.assertIn('name: Container tags', workflow)
         block = run_block(workflow, 'Container tags')
         self.assertNotIn('${{', block)
-        image = 'ghcr.io/giulianotesta7/up'
+        image = 'ghcr.io/heohlee/up'
         for tag, latest in [('v1.2.3', True), ('v0.0.0', True), ('v1.2.3-rc.1', False),
                             ('v1.2', False), ('v1.2.3.4', False), ('vabc', False),
                             ('v1.2.3+build.1', True), ('v1.2.3-rc.1+build.1', False),

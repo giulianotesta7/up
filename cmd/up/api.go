@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/remote"
-	"github.com/giulianotesta7/up/internal/secret"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/remote"
+	"github.com/heohlee/up/internal/secret"
+	"github.com/heohlee/up/internal/tui"
 )
 
 // apiRecorder records the API the daemon serves. *store.Store implements it.

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
 )
 
 // InUseError reports a deletion refused because other objects use the target.

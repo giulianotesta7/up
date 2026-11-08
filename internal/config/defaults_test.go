@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 func TestBuiltinDefaultsAreTodaysValues(t *testing.T) {

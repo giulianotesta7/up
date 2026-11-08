@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // DialFunc opens a connection; it is the seam TCP checks dial through.

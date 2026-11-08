@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/giulianotesta7/up/internal/connection"
+	"github.com/heohlee/up/internal/connection"
 	"io"
 )
 
