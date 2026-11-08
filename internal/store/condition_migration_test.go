@@ -71,12 +71,12 @@ func v9Checks(t *testing.T, path string) []string {
 }
 
 func TestOpenMigratesV10AddingOnlyConditions(t *testing.T) {
-	if schemaVersion != conditionsVersion {
-		t.Fatalf("schemaVersion = %d, want %d", schemaVersion, conditionsVersion)
+	if schemaVersion < conditionsVersion {
+		t.Fatalf("schemaVersion = %d, want at least %d", schemaVersion, conditionsVersion)
 	}
 	path := v10Database(t)
 	before, beforeChecks := dumpTables(t, path, v10Tables...), v9Checks(t, path)
-	want := fmt.Sprintf("database schema version %d is older than this up (%d)", conditionsVersion-1, conditionsVersion)
+	want := fmt.Sprintf("database schema version %d is older than this up (%d)", conditionsVersion-1, schemaVersion)
 	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("OpenReadOnly(v10) error = %v", err)
 	}
@@ -85,8 +85,8 @@ func TestOpenMigratesV10AddingOnlyConditions(t *testing.T) {
 		t.Fatalf("Open(v10) error = %v", err)
 	}
 	defer s.Close()
-	if got := version(t, path); got != conditionsVersion {
-		t.Fatalf("user_version = %d, want %d", got, conditionsVersion)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version = %d, want %d", got, schemaVersion)
 	}
 	if after := dumpTables(t, path, v10Tables...); !reflect.DeepEqual(before, after) {
 		t.Fatalf("migration changed existing rows:\nbefore %v\nafter  %v", before, after)
@@ -144,8 +144,8 @@ func TestOpenMigratesV9ThroughPushChannelsAndConditions(t *testing.T) {
 		t.Fatalf("Open(v9) error = %v", err)
 	}
 	defer s.Close()
-	if got := version(t, path); got != conditionsVersion {
-		t.Fatalf("user_version = %d, want %d", got, conditionsVersion)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version = %d, want %d", got, schemaVersion)
 	}
 	if after := dumpTables(t, path, v9Tables...); !reflect.DeepEqual(before, after) {
 		t.Fatalf("migration changed existing rows:\nbefore %v\nafter  %v", before, after)
@@ -233,8 +233,8 @@ func TestNewDatabaseHasConditionsColumn(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
-	if got := version(t, path); got != conditionsVersion {
-		t.Fatalf("user_version = %d, want %d", got, conditionsVersion)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version = %d, want %d", got, schemaVersion)
 	}
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	if err != nil {

@@ -9,7 +9,7 @@ rebasing on this one; migrations are append-only.
 
 | Type | Fields added |
 |---|---|
-| `Check` | `Kind` (`""`/`"http"` = HTTP, `"tcp"`), `Method` (`""` = GET), `Headers []Header`, `Body secret.Sealed`, `BodyEdit Edit`, `ExpectText`, `Conditions []Condition`, `Host`, `Port` |
+| `Check` | `Kind` (`""`/`"http"` = HTTP, `"tcp"`, `"heartbeat"`, `"ping"`, `"dns"`), `Method` (`""` = GET), `Headers []Header`, `Body secret.Sealed`, `BodyEdit Edit`, `ExpectText`, `Conditions []Condition`, `Host`, `Port` |
 | `Condition` | `Kind` (`ConditionJSON` `"json"`, `ConditionRegex` `"regex"`, `ConditionResponseTime` `"response_time"`, `ConditionHeader` `"header"`), `Path`, `Name`, `Value`, `Pattern`, `Within`; `Summary()`, `ConditionLabel(kind)`, `ConditionKinds`, `SensitiveHeader(name)`, `JSONPath(path)` |
 | `Header` | `Name`, `Value secret.Sealed`, `Edit Edit` |
 | `Defaults` | `Zone`, `Channel` (`""` = none), `Interval`, `Timeout`, `ExpectedStatus`, `AlertAfter`, `RecoverAfter`; `BuiltinDefaults()` is UTC, no channel, 30s, 5s, 200, 1, 1; `ValidateDefaults` reuses `ValidateZone` and `ValidateCheck` and requires thresholds 1..10 |
@@ -35,6 +35,14 @@ rebasing on this one; migrations are append-only.
 
 Results (`internal/check/heartbeat.go`): `Ping` (up), `Fail` (down, `reported failure`, `Failed(r)`), missed deadlines (down, `no ping since 15:04 MST` or `Jan 2 15:04 MST`, `Missed(r)`: the last contact in `loc`, nil is UTC, labeled with the zone abbreviation, e.g. `-03`, `CET`, `UTC`; the date appears when the contact and the deadline fall on different days in `loc`). `NextDeadline(c, newest) = newest + Period + Grace` after any result; `Overdue(c, newest, lastContact, now, loc)` returns the misses due (now strictly after the deadline), at most the first and the latest. The monitor passes the Defaults zone, read when a miss is due (UTC when it cannot be read or loaded), so a change applies to the next miss and the stored reason reads the same in the TUI, remote and alerts. The monitor runs no `Runner` for heartbeats: every discovery interval it observes new stored results and records misses with `RecordMissed`, through the same streak, mute, maintenance and alert path as HTTP/TCP.
 
+### Ping and DNS (schema v12)
+
+`Check.Kind` `"ping"` (`config.CheckPing`) uses `Host` (the TCP host rule) and no `Port`; `"dns"` (`config.CheckDNS`) adds `Domain`, `Record` (one of `config.DNSRecords`: `A AAAA CNAME MX TXT`), `Resolver` (`host`, `host:port`, `[ipv6]` or `[ipv6]:port`; empty = system resolver; `config.ResolverAddress` gives `host:port` with port 53) and `Expected` (at most `MaxDNSExpected`, 1024 bytes; an IPv4 address for `A`, IPv6 for `AAAA`, a host name for `CNAME` and `MX`, any text for `TXT`). Both share the name/interval/timeout rules and reject HTTP fields with TCP's messages plus `tls is only for http checks`; ping rejects `port is only for tcp checks`, DNS `host and port are not used by dns checks`, and every other kind `domain, record, resolver and expected value are only for dns checks`. The four DNS fields are in `SameDefinition` and `RecordDefined`. `Target()` is the host for ping and `"A example.com"` for DNS.
+
+Results: `check.Result.Answer` (the matched answer, else the first) and `Answers` (how many of the queried type) for DNS; zero otherwise. Reasons: ping `no reply from <host> in <timeout>`, `cannot resolve <host>`, the send error's cause; DNS `NXDOMAIN for <domain>`, `SERVFAIL for <domain>`, `REFUSED for <domain>` (other RCODEs by name), `no <TYPE> record for <domain>`, `no reply from <server> in <timeout>`, `cannot query <server>: <cause>`, `no system resolver configured`, and `<TYPE> = <answer>[ +N], want <expected>`. `check.Checker` seams: `Pinger` (`check.Pinger`; `check.SystemPinger` opens an unprivileged ICMP datagram socket, else a raw one), `LookupIP`, `Nameservers` (nil reads `/etc/resolv.conf`) and `Dial` (DNS over UDP, TCP on truncation).
+
+`config.PingPermission` (`PingUnknown` `""`, `PingAllowed` `"allowed"`, `PingDenied` `"denied"`): `up serve` calls `check.DetectPings` at start, stores it (`store.SetPingPermission`/`PingPermission`, v12 one-row `daemon_pings`; no row = unknown) and passes it in `monitor.Options.Pings`. `PingDenied.Holds(c)` is true for ping checks: the monitor does not run them, records nothing and sends no alerts, owed ones included; the TUI shows them pending with `config.PingDeniedReason` (`cannot send pings`). Snapshot: `tui.Snapshot.Pings`, `"pings"` on the wire (missing or unknown values read as unknown).
+
 ### Protected values
 
 Header values, HTTP body, webhook URL and webhook auth value are `secret.Sealed` to the daemon public key (`secret.Seal`, same scheme as SMTP passwords). The daemon opens them with `*secret.Key.Open`; the store, snapshot and API never expose plain text or ciphertext, only `*_set` booleans (webhook: scheme+host in `webhook_origin`; build it with `config.WebhookOrigin(url)`).
@@ -47,7 +55,7 @@ Header values, HTTP body, webhook URL and webhook auth value are `secret.Sealed`
 
 ## Store (`internal/store`)
 
-- Checks: `AddCheck`, `UpdateCheck`, `SetChecks`, `Checks` carry every field above; `RecordDefined` compares URL, kind, method, headers, body, expect text, conditions, host, port, interval, timeout, status. Conditions (v11 `checks.conditions`, a deterministic JSON list of `{k,p,n,v,r,w}`, `''` = none) hold no secrets.
+- Checks: `AddCheck`, `UpdateCheck`, `SetChecks`, `Checks` carry every field above; `RecordDefined` compares URL, kind, method, headers, body, expect text, conditions, host, port, interval, timeout, status, period, grace and the DNS fields. v12 adds `checks.domain`, `record`, `resolver`, `expected` and `results.answer`, `answers`; `AddCheckFrom` copies no protected value into a TCP, ping or DNS check. Conditions (v11 `checks.conditions`, a deterministic JSON list of `{k,p,n,v,r,w}`, `''` = none) hold no secrets.
 - Channels: `AddChannel`, `UpdateChannel`, `Channels`, `Channel` carry the webhook fields (sealed values come back sealed). `DeleteChannel` also deletes its test requests.
 - Windows (max `MaxMaintenanceWindows` = 20 per check): `AddMaintenanceWindow(ctx, w) (w with ID, error)`, `UpdateMaintenanceWindow(ctx, w)`, `DeleteMaintenanceWindow(ctx, check, id)`, `MaintenanceWindows(ctx, check)`, `AllMaintenanceWindows(ctx)`. `DeleteCheck` deletes its windows. Unknown check/window is `ErrNotFound`, invalid input `ErrValidation`.
 - Defaults (v7 `defaults`, one row with `id = 1`; no row reads as `BuiltinDefaults`): `Defaults(ctx)`, `SetDefaults(ctx, d)` (invalid input or a channel that does not exist is `ErrValidation`; nothing is stored). `DeleteChannel` sets a default channel of that name to none, so reads never name a deleted channel.
@@ -100,6 +108,7 @@ defaults        {"zone","channel","interval_ms","timeout_ms","expected_status","
 channel test    {"id","channel","status":"pending|sending|ok|error","error","requested","started","finished"}
 snapshot adds   services[].maintenance [window], services[].in_maintenance, services[].maintenance_end, channel_tests [channel test], defaults
 heartbeat       check adds "period_ms","grace_ms" (kind "heartbeat"; write omits them for other kinds); services[].heartbeat {"waiting","last_ping","deadline"} (heartbeats only); snapshot "api" {"listen","tls"}
+ping, dns       check adds "domain","record","resolver","expected" (kind "dns"; ping uses "host"; write omits them when empty); results add "answer","answers" (omitted when empty); snapshot "pings" "allowed|denied|"
 ```
 
 Sealed values must be sealed to the key in the snapshot's `public_key`; `sealed.key` must equal it (400 otherwise). `cmd/up/api.go` mounts the wildcard routes; `internal/client` implements the matching methods and `LoadSnapshot` shifts `in_maintenance`'s end and channel test times by clock skew.

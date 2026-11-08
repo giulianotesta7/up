@@ -15,6 +15,9 @@ FROM alpine:3
 RUN adduser -D -u 10001 up && mkdir /data && chown up:up /data && chmod 700 /data
 COPY --from=build /out/up /usr/local/bin/up
 USER up
+# Ping monitors run as this user through unprivileged ICMP sockets: Docker
+# allows them by default; elsewhere pass
+# --sysctl net.ipv4.ping_group_range="0 2147483647" (no capability needed).
 ENV UP_DB=/data/up.db
 VOLUME /data
 EXPOSE 8080
