@@ -8,8 +8,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
 )
 
 var (
@@ -139,8 +139,8 @@ func TestEditingConfiguredMonitorOpensAdvancedWithoutShowingSecrets(t *testing.T
 	}
 
 	// Replace the header value, clear the body.
-	m, _ = press(t, m, keyE, keyTab, keyTab, keyTab, keyTab, keyTab, keyTab, keyTab, keyTab) // fold row
-	m, _ = press(t, m, keyTab, keyTab, keyTab)                                               // header 1 value
+	m, _ = press(t, m, keyE, keyTab, keyTab, keyTab, keyTab, keyTab, keyTab, keyTab, keyTab, keyTab) // fold row
+	m, _ = press(t, m, keyTab, keyTab, keyTab)                                                       // header 1 value
 	m = typeText(t, m, "newvalue")
 	requireText(t, m, "‹ replace ›")
 	m, _ = press(t, m, keyTab, keyTab, keyRight, keyRight)

@@ -3,7 +3,7 @@ name: go-tests
 description: "Trigger: Go tests, check execution, SQLite persistence, monitor scheduling, TUI behavior, CLI validation, installer tests, or Go CI evidence. Govern up's test layers and their real gates."
 license: MIT
 metadata:
-  author: "giulianotesta7"
+  author: "heohlee"
   version: "1.0"
 ---
 

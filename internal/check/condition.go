@@ -13,7 +13,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // maxShown is how many terminal cells of a received or expected value a

@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/store"
 )
 
 func keepValues(c config.Check, name string) config.Check {

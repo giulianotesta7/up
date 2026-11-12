@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // Reasons of a heartbeat's down results. A missed deadline's reason starts

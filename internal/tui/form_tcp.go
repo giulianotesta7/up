@@ -9,7 +9,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // kindTCP is the form's type for a TCP monitor; the zero value is HTTP.
@@ -33,7 +33,7 @@ func (f monitorForm) kindName() string {
 
 // choiceFocus reports whether the focused row is chosen with ←/→ instead of typed.
 func (f monitorForm) choiceFocus() bool {
-	return f.focus >= focusChannel && f.focus < focusAdvanced && f.focus != focusPort && f.focus != focusPeriod && f.focus != focusGrace
+	return f.focus >= focusChannel && f.focus < focusAdvanced && f.focus != focusPort && f.focus != focusPeriod && f.focus != focusGrace && f.focus != focusTags
 }
 
 // order is the tab order of the focusable rows, Type first. An existing
@@ -42,14 +42,14 @@ func (f monitorForm) order() []int {
 	var rows []int
 	switch {
 	case f.isTCP():
-		rows = []int{focusType, 0, 1, focusPort, 2, 3, focusChannel, focusAlertAfter, focusRecoverAfter}
+		rows = []int{focusType, 0, 1, focusPort, 2, 3, focusTags, focusChannel, focusAlertAfter, focusRecoverAfter}
 	case f.isHeartbeat():
-		rows = []int{focusType, 0, focusPeriod, focusGrace, focusChannel, focusAlertAfter, focusRecoverAfter}
+		rows = []int{focusType, 0, focusPeriod, focusGrace, focusTags, focusChannel, focusAlertAfter, focusRecoverAfter}
 		if f.tokenRow() {
 			rows = append(rows, focusToken)
 		}
 	default:
-		rows = []int{focusType, 0, 1, 2, 3, 4, focusChannel, focusAlertAfter, focusRecoverAfter, focusTLS}
+		rows = []int{focusType, 0, 1, 2, 3, 4, focusTags, focusChannel, focusAlertAfter, focusRecoverAfter, focusTLS}
 	}
 	if f.editing {
 		rows = append(rows[:1:1], rows[2:]...)
@@ -74,6 +74,8 @@ func (f *monitorForm) text() *string {
 		return &f.period
 	case f.focus == focusGrace:
 		return &f.grace
+	case f.focus == focusTags:
+		return &f.tags
 	}
 	return f.advText()
 }
@@ -108,7 +110,7 @@ func editTCPForm(c config.Check, detail bool) *monitorForm {
 
 // tcpCheck converts text only, like check; it carries no HTTP field.
 func (f monitorForm) tcpCheck() (config.Check, error) {
-	c := config.Check{Name: f.values[0], Kind: kindTCP, Host: f.values[1], Channel: f.channel}
+	c := config.Check{Name: f.values[0], Kind: kindTCP, Host: f.values[1], Channel: f.channel, Tags: config.ParseTags(f.tags)}
 	var err error
 	if c.Port, err = strconv.Atoi(f.port); err != nil {
 		return c, fmt.Errorf("port: %w", err)

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/remote"
-	"github.com/giulianotesta7/up/internal/store"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/remote"
+	"github.com/heohlee/up/internal/store"
+	"github.com/heohlee/up/internal/tui"
 )
 
 // hostile is what a compromised server could put in any text field: color and

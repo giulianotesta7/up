@@ -2,7 +2,7 @@
 # mounted certificates configured with UP_TLS_CERT and UP_TLS_KEY.
 services:
   up:
-    image: ghcr.io/giulianotesta7/up:latest
+    image: ghcr.io/heohlee/up:latest
     restart: unless-stopped
     environment:
       UP_API_LISTEN: ":8080"

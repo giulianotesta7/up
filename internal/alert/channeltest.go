@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/store"
 )
 
 // Channel test processing limits.

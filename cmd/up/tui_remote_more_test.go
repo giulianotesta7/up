@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/connection"
-	"github.com/giulianotesta7/up/internal/store"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/connection"
+	"github.com/heohlee/up/internal/store"
+	"github.com/heohlee/up/internal/tui"
 )
 
 const remoteSecret = "up_REMOTE-SECRET-0123456789abcdefghijklmnopqrs"

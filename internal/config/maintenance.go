@@ -27,6 +27,10 @@ const MaintenanceHorizon = 366 * 24 * time.Hour
 //
 // Weekdays are the local weekdays on which a window STARTS; one that crosses
 // midnight keeps running into the next day. ID is assigned by the store.
+//
+// A window with a Tag belongs to that tag and applies to every monitor
+// carrying it when evaluated, including monitors tagged later; Check is then
+// ignored on writes and, on reads for a monitor, names that monitor.
 type MaintenanceWindow struct {
 	ID          int64
 	Check       string
@@ -34,6 +38,7 @@ type MaintenanceWindow struct {
 	StartMinute int
 	Duration    time.Duration
 	Zone        string
+	Tag         string
 }
 
 // Maintenance is the evaluation of a monitor's windows at one instant.
@@ -45,13 +50,18 @@ type Maintenance struct {
 	End time.Time
 }
 
-// ValidateMaintenanceWindow validates a window definition: a check, a
-// non-empty set of distinct weekdays 0 (Sunday) to 6, a start minute 0..1439,
+// ValidateMaintenanceWindow validates a window definition: a check or a
+// valid tag, a non-empty set of distinct weekdays 0 (Sunday) to 6, a start minute 0..1439,
 // a duration from MinMaintenance (1m) to MaxMaintenance (7d) and an IANA
 // zone that loads ("Local" and the empty zone are refused).
 func ValidateMaintenanceWindow(w MaintenanceWindow) error {
 	var errs []error
-	if w.Check == "" {
+	switch {
+	case w.Tag != "":
+		if err := ValidateTag(w.Tag); err != nil {
+			errs = append(errs, err)
+		}
+	case w.Check == "":
 		errs = append(errs, errors.New("check is required"))
 	}
 	if len(w.Weekdays) == 0 {

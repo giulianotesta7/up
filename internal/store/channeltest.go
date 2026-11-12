@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // Channel test request limits.

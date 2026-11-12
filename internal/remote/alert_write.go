@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
 )
 
 // maxSealedBytes bounds an inbound sealed password; real ones are tens of bytes.

@@ -1,4 +1,4 @@
-module github.com/giulianotesta7/up
+module github.com/heohlee/up
 
 go 1.26.10
 

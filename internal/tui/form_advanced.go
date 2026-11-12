@@ -12,8 +12,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
 )
 
 // editChoices are the actions offered for a protected value that is set.

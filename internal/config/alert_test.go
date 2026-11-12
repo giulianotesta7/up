@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/secret"
 
 	"reflect"
 	"testing"

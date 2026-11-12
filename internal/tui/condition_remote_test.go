@@ -9,9 +9,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/giulianotesta7/up/internal/client"
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/client"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/tui"
 )
 
 // TestRemoteFormAddsConditions adds a monitor with a condition through the
@@ -26,7 +26,7 @@ func TestRemoteFormAddsConditions(t *testing.T) {
 	tab, space := tea.KeyPressMsg{Code: tea.KeyTab}, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	text := func(s string) tea.KeyPressMsg { return tea.KeyPressMsg{Text: s} }
 	m, _ = remotePress(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"}, text("api"), tab, text("https://example.com"))
-	for range 8 { // to the Advanced row
+	for range 9 { // to the Advanced row
 		m, _ = remotePress(t, m, tab)
 	}
 	m, _ = remotePress(t, m, space)

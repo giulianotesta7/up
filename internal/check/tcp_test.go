@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 func tcpCheck(host string, port int, timeout time.Duration) config.Check {

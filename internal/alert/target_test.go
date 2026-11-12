@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/config"
 )
 
 func TestTCPMonitorEmailsShowHostAndPort(t *testing.T) {

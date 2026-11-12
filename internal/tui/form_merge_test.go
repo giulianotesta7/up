@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 func TestOrderIncludesAdvancedForHTTPOnly(t *testing.T) {

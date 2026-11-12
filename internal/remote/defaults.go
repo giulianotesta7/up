@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/config"
 )
 
 // DefaultsDTO is the defaults on the wire, in both directions. Channel is

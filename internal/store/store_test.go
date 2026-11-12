@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/config"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/config"
 )
 
 var t0 = time.Date(2026, 10, 25, 3, 0, 0, 0, time.UTC)

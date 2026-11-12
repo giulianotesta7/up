@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
 )
 
 func sealTo(t *testing.T, key *secret.Key, plain string) secret.Sealed {

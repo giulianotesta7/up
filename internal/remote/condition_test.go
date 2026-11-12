@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/tui"
 )
 
 const conditionsJSON = `"conditions":[{"kind":"json","path":"services.0.status","value":"ok"},{"kind":"regex","pattern":"(?i)ready"},{"kind":"response_time","within_ms":800},{"kind":"header","name":"X-Version","value":"3"}]`

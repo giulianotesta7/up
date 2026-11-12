@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/secret"
 )
 
 // Check kinds; CheckHeartbeat is in heartbeat.go.
@@ -94,8 +94,8 @@ type Header struct {
 
 // Canonical returns c in its one stored form, without changing c:
 // kind "http" becomes "", method "GET" becomes "", an empty header or
-// condition list becomes nil. Edit intents are kept. Copies the header and
-// condition slices.
+// condition list becomes nil and tags are normalized (NormalizeTags). Edit
+// intents are kept. Copies the header, condition and tag slices.
 func (c Check) Canonical() Check {
 	if c.Kind == CheckHTTP {
 		c.Kind = ""
@@ -113,6 +113,7 @@ func (c Check) Canonical() Check {
 	} else {
 		c.Conditions = slices.Clone(c.Conditions)
 	}
+	c.Tags = NormalizeTags(c.Tags)
 	return c
 }
 
@@ -121,7 +122,9 @@ func (c Check) Canonical() Check {
 // the stored (sealed) values. Edit intents are not part of identity. The
 // monitor restarts a loop, and the store drops an in-flight result, when this
 // is false, so a new field that changes how a check runs must be added here
-// and to store.RecordDefined.
+// and to store.RecordDefined. Tags are not part of it: the monitor reads a
+// monitor's tag mutes and windows by name on every evaluation, so a tag edit
+// applies without restarting the loop.
 func (c Check) SameDefinition(o Check) bool {
 	a, b := c.Canonical(), o.Canonical()
 	return a.Name == b.Name && a.Kind == b.Kind && a.URL == b.URL &&

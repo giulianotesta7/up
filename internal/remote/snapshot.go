@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
-	"github.com/giulianotesta7/up/internal/store"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
+	"github.com/heohlee/up/internal/store"
+	"github.com/heohlee/up/internal/tui"
 )
 
 // SnapshotDTO is the secret-free wire representation of a TUI snapshot.
@@ -62,7 +62,8 @@ type HeartbeatDTO struct {
 // Method is the HTTP method (empty on write means GET). Host has no brackets
 // for IPv6. Conditions are plain and travel the same way in both directions.
 // A heartbeat has kind "heartbeat", PeriodMS and GraceMS and none of the HTTP
-// or TCP fields; its ping token is never in a CheckDTO.
+// or TCP fields; its ping token is never in a CheckDTO. Tags are normalized
+// by the server ("NAS" is stored as "nas"); absent on write means none.
 type CheckDTO struct {
 	Name           string         `json:"name"`
 	URL            string         `json:"url"`
@@ -84,6 +85,7 @@ type CheckDTO struct {
 	Port           int            `json:"port"`
 	PeriodMS       int64          `json:"period_ms"`
 	GraceMS        int64          `json:"grace_ms"`
+	Tags           []string       `json:"tags"`
 }
 
 // HeaderDTO is one request header: a plain name and a protected value.
@@ -122,12 +124,15 @@ func conditions(dtos []ConditionDTO) []config.Condition {
 }
 
 // MaintenanceDTO is a stored maintenance window. Weekdays are 0 (Sunday) to 6.
+// Tag is set for a tag's window, which a monitor shows because it carries
+// the tag; it is edited through the tag routes.
 type MaintenanceDTO struct {
 	ID          int64  `json:"id"`
 	Weekdays    []int  `json:"weekdays"`
 	StartMinute int    `json:"start_minute"`
 	DurationMS  int64  `json:"duration_ms"`
 	Zone        string `json:"zone"`
+	Tag         string `json:"tag,omitempty"`
 }
 
 // MaintenanceWriteDTO is the body that creates or replaces a window; the
@@ -168,9 +173,13 @@ type StreakDTO struct {
 	Failures  int  `json:"failures"`
 	Successes int  `json:"successes"`
 }
+
+// MuteDTO is a monitor's mute; Tag names the tag when it comes from a tag's
+// mute (the later end of the monitor's and its tags' mutes wins).
 type MuteDTO struct {
 	Until       time.Time `json:"until"`
 	WasAlerting bool      `json:"was_alerting"`
+	Tag         string    `json:"tag,omitempty"`
 }
 type CertDTO struct {
 	Host     string    `json:"host"`
@@ -296,7 +305,7 @@ func checkDTO(c config.Check) CheckDTO {
 	d := CheckDTO{Name: c.Name, URL: c.URL, IntervalMS: c.Interval.Milliseconds(), TimeoutMS: c.Timeout.Milliseconds(), ExpectedStatus: c.ExpectedStatus,
 		Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
 		Kind: c.Kind, Method: c.Method, BodySet: !c.Body.Empty(), ExpectText: c.ExpectText, Host: c.Host, Port: c.Port,
-		PeriodMS: c.Period.Milliseconds(), GraceMS: c.Grace.Milliseconds(), Conditions: conditionDTOs(c.Conditions)}
+		PeriodMS: c.Period.Milliseconds(), GraceMS: c.Grace.Milliseconds(), Conditions: conditionDTOs(c.Conditions), Tags: c.Tags}
 	if d.Kind == "" {
 		d.Kind = config.CheckHTTP
 	}
@@ -310,7 +319,7 @@ func checkDTO(c config.Check) CheckDTO {
 }
 
 func maintenanceDTO(w config.MaintenanceWindow) MaintenanceDTO {
-	d := MaintenanceDTO{ID: w.ID, StartMinute: w.StartMinute, DurationMS: w.Duration.Milliseconds(), Zone: w.Zone, Weekdays: []int{}}
+	d := MaintenanceDTO{ID: w.ID, StartMinute: w.StartMinute, DurationMS: w.Duration.Milliseconds(), Zone: w.Zone, Weekdays: []int{}, Tag: w.Tag}
 	for _, day := range w.Weekdays {
 		d.Weekdays = append(d.Weekdays, int(day))
 	}
@@ -318,7 +327,7 @@ func maintenanceDTO(w config.MaintenanceWindow) MaintenanceDTO {
 }
 
 func (d MaintenanceDTO) window(check string) config.MaintenanceWindow {
-	w := config.MaintenanceWindow{ID: d.ID, Check: check, StartMinute: d.StartMinute, Duration: time.Duration(d.DurationMS) * time.Millisecond, Zone: d.Zone}
+	w := config.MaintenanceWindow{ID: d.ID, Check: check, StartMinute: d.StartMinute, Duration: time.Duration(d.DurationMS) * time.Millisecond, Zone: d.Zone, Tag: d.Tag}
 	for _, day := range d.Weekdays {
 		w.Weekdays = append(w.Weekdays, time.Weekday(day))
 	}
@@ -349,7 +358,7 @@ func NewSnapshotDTO(s tui.Snapshot, now time.Time) SnapshotDTO {
 	d := SnapshotDTO{ServerTime: now.UTC(), PublicKey: s.PublicKey, HasKey: s.HasKey, LastBeat: s.LastBeat.UTC(), HasBeat: s.HasBeat, Uptime: s.Uptime, HasUptime: s.HasUptime, Incidents: s.Incidents}
 	for _, v := range s.Services {
 		c := v.Check
-		x := ServiceDTO{Check: checkDTO(c), Latest: resultDTO(v.Latest), HasResult: v.HasResult, DownSince: v.DownSince.UTC(), Streak: StreakDTO{v.Streak.Alerting, v.Streak.Failures, v.Streak.Successes}, Mute: MuteDTO{v.Mute.Until.UTC(), v.Mute.WasAlerting}, HasMute: v.HasMute, Cert: CertDTO{v.Cert.Host, v.Cert.Issuer, v.Cert.Serial, v.Cert.NotAfter.UTC(), v.Cert.Observed.UTC(), v.Cert.Notified}, HasCert: v.HasCert}
+		x := ServiceDTO{Check: checkDTO(c), Latest: resultDTO(v.Latest), HasResult: v.HasResult, DownSince: v.DownSince.UTC(), Streak: StreakDTO{v.Streak.Alerting, v.Streak.Failures, v.Streak.Successes}, Mute: MuteDTO{v.Mute.Until.UTC(), v.Mute.WasAlerting, v.Mute.Tag}, HasMute: v.HasMute, Cert: CertDTO{v.Cert.Host, v.Cert.Issuer, v.Cert.Serial, v.Cert.NotAfter.UTC(), v.Cert.Observed.UTC(), v.Cert.Notified}, HasCert: v.HasCert}
 		for _, r := range v.Recent {
 			x.Recent = append(x.Recent, resultDTO(r))
 		}
@@ -401,7 +410,7 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 	s := tui.Snapshot{PublicKey: d.PublicKey, HasKey: d.HasKey, LastBeat: d.LastBeat, HasBeat: d.HasBeat, Uptime: d.Uptime, HasUptime: d.HasUptime, Incidents: d.Incidents}
 	for _, v := range d.Services {
 		c := v.Check
-		x := tui.Service{Check: c.snapshotCheck(d.PublicKey), Latest: v.Latest.result(c.Name), HasResult: v.HasResult, DownSince: v.DownSince, Streak: check.Streak{Alerting: v.Streak.Alerting, Failures: v.Streak.Failures, Successes: v.Streak.Successes}, Mute: config.Mute{Until: v.Mute.Until, WasAlerting: v.Mute.WasAlerting}, HasMute: v.HasMute, Cert: config.Cert{Host: v.Cert.Host, Issuer: v.Cert.Issuer, Serial: v.Cert.Serial, NotAfter: v.Cert.NotAfter, Observed: v.Cert.Observed, Notified: v.Cert.Notified}, HasCert: v.HasCert}
+		x := tui.Service{Check: c.snapshotCheck(d.PublicKey), Latest: v.Latest.result(c.Name), HasResult: v.HasResult, DownSince: v.DownSince, Streak: check.Streak{Alerting: v.Streak.Alerting, Failures: v.Streak.Failures, Successes: v.Streak.Successes}, Mute: config.Mute{Until: v.Mute.Until, WasAlerting: v.Mute.WasAlerting, Tag: v.Mute.Tag}, HasMute: v.HasMute, Cert: config.Cert{Host: v.Cert.Host, Issuer: v.Cert.Issuer, Serial: v.Cert.Serial, NotAfter: v.Cert.NotAfter, Observed: v.Cert.Observed, Notified: v.Cert.Notified}, HasCert: v.HasCert}
 		if v.HasMute {
 			x.Mute.Check = c.Name
 		}
@@ -509,7 +518,7 @@ func (c CheckDTO) snapshotCheck(key []byte) config.Check {
 	out := config.Check{Name: c.Name, URL: c.URL, Interval: time.Duration(c.IntervalMS) * time.Millisecond, Timeout: time.Duration(c.TimeoutMS) * time.Millisecond,
 		ExpectedStatus: c.ExpectedStatus, Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
 		Kind: c.Kind, Method: c.Method, ExpectText: c.ExpectText, Host: c.Host, Port: c.Port,
-		Period: time.Duration(c.PeriodMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond, Conditions: conditions(c.Conditions)}
+		Period: time.Duration(c.PeriodMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond, Conditions: conditions(c.Conditions), Tags: c.Tags}
 	if c.BodySet {
 		out.Body = placeholder(key)
 	}

@@ -9,10 +9,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/secret"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/secret"
+	"github.com/heohlee/up/internal/tui"
 )
 
 var kY = tea.KeyPressMsg{Code: 'y', Text: "y"}
@@ -173,9 +173,9 @@ func TestDuplicateReplaceAndClearOverrideTheOriginal(t *testing.T) {
 			b, d, _ := duplicateBackend(t, backend)
 			original, _ := b.stored(t, "api")
 			d.press(kY)
-			// Name, URL, interval, timeout, status, channel, alert, recover,
-			// TLS, Advanced, Method, Header 1 name → Header 1 value.
-			for range 12 {
+			// Name, URL, interval, timeout, status, tags, channel, alert,
+			// recover, TLS, Advanced, Method, Header 1 name → Header 1 value.
+			for range 13 {
 				d.press(kTab)
 			}
 			d.typ("new-secret")

@@ -10,8 +10,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/store"
 )
 
 // conditionModel is advancedModel with the fold open and the focus on
@@ -294,7 +294,7 @@ func TestEditAndDuplicateReopenConditions(t *testing.T) {
 func TestEditRemovesAllConditions(t *testing.T) {
 	s, m := conditionStore(t)
 	m, _ = press(t, m, keyE)
-	m = tabs(t, m, 13) // from the URL to Condition 1
+	m = tabs(t, m, 14) // from the URL to Condition 1
 	if got := focusedLine(t, m); !strings.HasPrefix(got, "Condition 1:") {
 		t.Fatalf("focus = %q:\n%s", got, view(m))
 	}

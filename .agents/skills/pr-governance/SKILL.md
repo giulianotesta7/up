@@ -3,7 +3,7 @@ name: pr-governance
 description: "Trigger: creating, preparing, or reviewing a pull request in this repository. Apply up's issue linkage, branch naming, PR template, actual CI gates and merge-commit policy."
 license: MIT
 metadata:
-  author: "giulianotesta7"
+  author: "heohlee"
   version: "1.0"
 ---
 

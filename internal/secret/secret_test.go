@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/giulianotesta7/up/internal/secret"
+	"github.com/heohlee/up/internal/secret"
 )
 
 func newKey(t *testing.T) *secret.Key {

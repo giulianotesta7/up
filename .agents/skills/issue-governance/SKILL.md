@@ -3,7 +3,7 @@ name: issue-governance
 description: "Trigger: creating an issue, starting a feature, fixing a bug, labeling, planning work, or any change to up. Require a GitHub issue before implementation, self-authorized on creation, with existing default labels applied best-effort."
 license: MIT
 metadata:
-  author: "giulianotesta7"
+  author: "heohlee"
   version: "1.0"
 ---
 
@@ -72,4 +72,4 @@ Paths below are repository-relative.
 
 - `AGENTS.md`: skill registration and workflow gates
 - `.agents/skills/pr-governance/SKILL.md`: PR linkage and readiness
-- GitHub label inventory: `gh label list --repo giulianotesta7/up`
+- GitHub label inventory: `gh label list --repo heohlee/up`

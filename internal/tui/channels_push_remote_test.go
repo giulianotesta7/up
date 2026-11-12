@@ -10,9 +10,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/giulianotesta7/up/internal/client"
-	"github.com/giulianotesta7/up/internal/secret"
-	"github.com/giulianotesta7/up/internal/tui"
+	"github.com/heohlee/up/internal/client"
+	"github.com/heohlee/up/internal/secret"
+	"github.com/heohlee/up/internal/tui"
 )
 
 // TestRemotePushChannelCreateEditAndList drives the channel form against the

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/check"
+	"github.com/heohlee/up/internal/check"
 )
 
 func TestUptimeWindow(t *testing.T) {

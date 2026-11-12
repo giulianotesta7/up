@@ -15,9 +15,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/monitor"
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/monitor"
+	"github.com/heohlee/up/internal/store"
 )
 
 var (
@@ -51,7 +51,10 @@ func fillForm(t *testing.T, m Model, name, url, interval, timeout, status string
 	m, _ = press(t, m, keyTab)
 	m = replaceField(t, m, "5s", timeout)
 	m, _ = press(t, m, keyTab)
-	return replaceField(t, m, "200", status)
+	m = replaceField(t, m, "200", status)
+	// To the Tags row, so the next tab reaches Channel.
+	m, _ = press(t, m, keyTab)
+	return m
 }
 
 func formStore(t *testing.T) (*store.Store, Model) {

@@ -8,11 +8,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/giulianotesta7/up/internal/check"
-	"github.com/giulianotesta7/up/internal/config"
-	"github.com/giulianotesta7/up/internal/monitor"
-	"github.com/giulianotesta7/up/internal/secret"
-	"github.com/giulianotesta7/up/internal/store"
+	"github.com/heohlee/up/internal/check"
+	"github.com/heohlee/up/internal/config"
+	"github.com/heohlee/up/internal/monitor"
+	"github.com/heohlee/up/internal/secret"
+	"github.com/heohlee/up/internal/store"
 )
 
 // StaleAfter is how old the daemon heartbeat may get before the TUI warns
