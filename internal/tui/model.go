@@ -64,6 +64,7 @@ type Model struct {
 	form              *monitorForm
 	deletion          *deletePrompt
 	mute              *mutePrompt
+	unmuteTagPrompt   *unmuteTagPrompt
 	maint             *maintenancePopup
 	defaults          *defaultsPopup
 	notice            string
@@ -456,7 +457,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.notify && m.deliveries.open && m.smtpForm == nil && m.channelForm == nil {
 			return m.pasteDeliverySearch(msg.Content), nil
 		}
-		if m.filter.open && m.form == nil && m.deletion == nil && m.mute == nil && !m.help && !m.notify {
+		if m.filter.open && m.form == nil && m.deletion == nil && m.mute == nil && m.unmuteTagPrompt == nil && !m.help && !m.notify {
 			m.filter.query += strings.NewReplacer("\r", "", "\n", " ").Replace(msg.Content)
 			return m.reselect(), nil
 		}
@@ -514,6 +515,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.mute != nil {
 		return m.handleMuteKey(msg)
+	}
+	if m.unmuteTagPrompt != nil {
+		return m.handleUnmuteTagKey(msg)
 	}
 	if m.maint != nil {
 		return m.handleMaintenanceKey(msg)
@@ -580,7 +584,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.hasSelection() {
 			svc := m.snap.Services[m.selected]
 			if msg.String() == "m" {
-				m.mute = &mutePrompt{name: svc.Check.Name, wasAlerting: svc.KnownAlerting}
+				m.mute = &mutePrompt{name: svc.Check.Name, wasAlerting: svc.KnownAlerting, tags: config.NormalizeTags(svc.Check.Tags)}
+			} else if svc.Muted(m.now()) && svc.Mute.Tag != "" {
+				// Muted through a tag: unmuting ends it for the tag's other
+				// monitors too, so ask first.
+				m.unmuteTagPrompt = &unmuteTagPrompt{name: svc.Check.Name, tag: svc.Mute.Tag}
 			} else if svc.Muted(m.now()) {
 				m.generation++
 				return m, m.unmute(svc.Check.Name)
@@ -688,7 +696,7 @@ func (m Model) View() tea.View {
 		content, split = m.renderNotifications(now), false
 	}
 	modal := ""
-	if m.form != nil || m.deletion != nil || m.mute != nil || m.maint != nil || m.defaults != nil || m.pingError != nil {
+	if m.form != nil || m.deletion != nil || m.mute != nil || m.unmuteTagPrompt != nil || m.maint != nil || m.defaults != nil || m.pingError != nil {
 		screen, minimum := "", 0
 		switch {
 		case m.pingError != nil:
@@ -699,20 +707,30 @@ func (m Model) View() tea.View {
 			screen = renderDefaults(*m.defaults, m.snap, now, m.err)
 			minimum = defaultsMinWidth(*m.defaults, m.snap, now, m.err)
 		case m.maint != nil:
-			screen, minimum = m.maintenanceScreen(now), maintenanceMinWidth
+			screen, minimum = m.maintenanceScreen(now)
 		case m.mute != nil:
+			// One width for every target and the custom duration, so neither
+			// moves the box.
 			screen = renderMute(*m.mute, m.snap, now, m.err)
 			p := *m.mute
-			p.custom = !p.custom
-			minimum = modalContentWidth(renderMute(p, m.snap, now, m.err))
+			for p.target = range len(p.tags) + 1 {
+				for _, custom := range []bool{false, true} {
+					p.custom = custom
+					minimum = max(minimum, modalContentWidth(renderMute(p, m.snap, now, m.err)))
+				}
+			}
+		case m.unmuteTagPrompt != nil:
+			screen = renderUnmuteTag(*m.unmuteTagPrompt, m.snap, now, m.err)
 		case m.deletion != nil:
 			screen = renderDelete(*m.deletion, m.snap, now, m.err)
 		default:
 			// The box keeps one size for every Type, focus and the token
-			// question, so none of them moves it.
+			// question, so none of them moves it. It is measured without the
+			// typed tags, whose hint then fits the box rather than widen it.
 			var focusLine, height int
 			for _, f := range formVariants(*m.form) {
 				height = max(height, strings.Count(renderForm(f, m.snap, now, m.err), "\n")+1)
+				f.tags = ""
 				for focus := 0; focus < focusCount; focus++ {
 					if f.editing && focus == 0 {
 						continue
@@ -721,7 +739,9 @@ func (m Model) View() tea.View {
 					minimum = max(minimum, modalContentWidth(renderForm(f, m.snap, now, m.err)))
 				}
 			}
-			screen, focusLine = renderFormFocus(*m.form, m.snap, now, m.err)
+			form := *m.form
+			form.tagsWidth = min(popupRowWidth, minimum-4)
+			screen, focusLine = renderFormFocus(form, m.snap, now, m.err)
 			screen = scrollForm(padFormHeight(screen, height), focusLine, m.height)
 		}
 		title, body := splitModalScreen(screen)

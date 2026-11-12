@@ -13,8 +13,8 @@ import (
 // checkColumns lists the checks columns in the order checkFields.values and
 // scanCheck use. checkPlaceholders has one "?" per column.
 const (
-	checkColumns      = "name, kind, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after, tls_off, method, headers, body, body_key, expect_text, host, port, period_ns, grace_ns, conditions"
-	checkPlaceholders = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+	checkColumns      = "name, kind, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after, tls_off, method, headers, body, body_key, expect_text, host, port, period_ns, grace_ns, conditions, tags"
+	checkPlaceholders = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
 )
 
 // headerRow is the stored form of one header inside the headers column. The
@@ -157,19 +157,20 @@ func checkFields(c config.Check, stored *protectedValues) (fields, error) {
 // values lists the column values in checkColumns order.
 func (f fields) values(c config.Check) []any {
 	return []any{c.Name, f.kind, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter, c.TLSOff,
-		c.Method, f.headers, blob(f.body.Data), blob(f.body.Key), c.ExpectText, c.Host, c.Port, int64(c.Period), int64(c.Grace), f.conditions}
+		c.Method, f.headers, blob(f.body.Data), blob(f.body.Key), c.ExpectText, c.Host, c.Port, int64(c.Period), int64(c.Grace), f.conditions, encodeTags(c.Tags)}
 }
 
 func scanCheck(row scanner) (config.Check, error) {
 	var c config.Check
-	var kind, headers, conds string
+	var kind, headers, conds, tags string
 	var interval, timeout, period, grace int64
 	var body, bodyKey []byte
 	err := row.Scan(&c.Name, &kind, &c.URL, &interval, &timeout, &c.ExpectedStatus, &c.Channel, &c.AlertAfter, &c.RecoverAfter, &c.TLSOff,
-		&c.Method, &headers, &body, &bodyKey, &c.ExpectText, &c.Host, &c.Port, &period, &grace, &conds)
+		&c.Method, &headers, &body, &bodyKey, &c.ExpectText, &c.Host, &c.Port, &period, &grace, &conds, &tags)
 	if err != nil {
 		return config.Check{}, err
 	}
+	c.Tags = decodeTags(tags)
 	if kind != config.CheckHTTP {
 		c.Kind = kind
 	}

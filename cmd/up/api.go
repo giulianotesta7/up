@@ -76,6 +76,12 @@ func startAPI(ctx context.Context, cancel context.CancelFunc, addr, cert, key, t
 		routes.Handle("/api/v1/checks/{name}/maintenance", maintenance)
 		routes.Handle("/api/v1/checks/{name}/maintenance/{id}", maintenance)
 	}
+	if ts, ok := s.(remote.TagStore); ok {
+		tags := remote.TagRoutes(ts)
+		for _, p := range remote.TagPatterns {
+			routes.Handle(p, tags)
+		}
+	}
 	if ds, ok := s.(remote.DefaultsStore); ok {
 		routes.Handle("/api/v1/defaults", remote.DefaultsRoutes(ds))
 	}
