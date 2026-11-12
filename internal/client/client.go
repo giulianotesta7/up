@@ -306,6 +306,7 @@ type checkWrite struct {
 	Record         string                `json:"record,omitempty"`
 	Resolver       string                `json:"resolver,omitempty"`
 	Expected       string                `json:"expected,omitempty"`
+	Tags           []string              `json:"tags,omitempty"`
 	// CopyFrom (create only) names the stored monitor whose protected values
 	// the server copies for every value this check keeps.
 	CopyFrom string `json:"copy_from,omitempty"`
@@ -321,7 +322,7 @@ func checkDTO(v config.Check) checkWrite {
 		AlertAfter: v.AlertAfter, RecoverAfter: v.RecoverAfter, TLSOff: v.TLSOff, Kind: v.Kind, Method: v.Method,
 		Body: protectedFor(v.BodyEdit, v.Body), ExpectText: v.ExpectText, Host: v.Host, Port: v.Port,
 		PeriodMS: v.Period.Milliseconds(), GraceMS: v.Grace.Milliseconds(),
-		Domain: v.Domain, Record: v.Record, Resolver: v.Resolver, Expected: v.Expected}
+		Domain: v.Domain, Record: v.Record, Resolver: v.Resolver, Expected: v.Expected, Tags: v.Tags}
 	for _, h := range v.Headers {
 		d.Headers = append(d.Headers, headerWrite{Name: h.Name, Value: protectedFor(h.Edit, h.Value)})
 	}
@@ -531,12 +532,23 @@ func (c *Client) SetDefaults(ctx context.Context, d config.Defaults) error {
 	return c.write(ctx, "PUT", "/api/v1/defaults", dto)
 }
 
-// AddMaintenanceWindow creates a window and returns it with its ID.
+// windowsPath is the collection of w's windows: its tag's when set, else its
+// check's.
+func windowsPath(w config.MaintenanceWindow) (string, error) {
+	if w.Tag != "" {
+		return item("tags", w.Tag) + "/maintenance", addressable(w.Tag)
+	}
+	return item("checks", w.Check) + "/maintenance", addressable(w.Check)
+}
+
+// AddMaintenanceWindow creates a window and returns it with its ID. A window
+// with a Tag is created for the tag; the returned one keeps w's Check.
 func (c *Client) AddMaintenanceWindow(ctx context.Context, w config.MaintenanceWindow) (config.MaintenanceWindow, error) {
-	if err := addressable(w.Check); err != nil {
+	path, err := windowsPath(w)
+	if err != nil {
 		return config.MaintenanceWindow{}, err
 	}
-	status, b, err := c.request(ctx, "POST", item("checks", w.Check)+"/maintenance", maintenanceBody(w))
+	status, b, err := c.request(ctx, "POST", path, maintenanceBody(w))
 	if err != nil {
 		return config.MaintenanceWindow{}, err
 	}
@@ -548,19 +560,47 @@ func (c *Client) AddMaintenanceWindow(ctx context.Context, w config.MaintenanceW
 		return config.MaintenanceWindow{}, errors.New("client: invalid response")
 	}
 	win := d.Window(w.Check)
-	win.Zone = clean(win.Zone)
+	win.Zone, win.Tag = clean(win.Zone), clean(win.Tag)
 	return win, nil
 }
 
-// UpdateMaintenanceWindow replaces the window with w.ID.
+// UpdateMaintenanceWindow replaces the window with w.ID, of w.Tag when set.
 func (c *Client) UpdateMaintenanceWindow(ctx context.Context, w config.MaintenanceWindow) error {
-	if err := addressable(w.Check); err != nil {
+	path, err := windowsPath(w)
+	if err != nil {
 		return err
 	}
-	return c.write(ctx, "PUT", fmt.Sprintf("%s/maintenance/%d", item("checks", w.Check), w.ID), maintenanceBody(w))
+	return c.write(ctx, "PUT", fmt.Sprintf("%s/%d", path, w.ID), maintenanceBody(w))
 }
 
-// DeleteMaintenanceWindow removes window id of a check.
+// DeleteTagMaintenanceWindow removes window id of a tag.
+func (c *Client) DeleteTagMaintenanceWindow(ctx context.Context, tag string, id int64) error {
+	if err := addressable(tag); err != nil {
+		return err
+	}
+	return c.write(ctx, "DELETE", fmt.Sprintf("%s/maintenance/%d", item("tags", tag), id), nil)
+}
+
+// SetTagMute mutes every monitor carrying tag until the given time, sent
+// like SetMute as the remaining time rounded to the second.
+func (c *Client) SetTagMute(ctx context.Context, tag string, until time.Time) error {
+	if err := addressable(tag); err != nil {
+		return err
+	}
+	return c.write(ctx, "PUT", item("tags", tag)+"/mute", struct {
+		DurationMS int64 `json:"duration_ms"`
+	}{time.Until(until).Round(time.Second).Milliseconds()})
+}
+
+// UnmuteTag ends a tag's mute for all its monitors.
+func (c *Client) UnmuteTag(ctx context.Context, tag string) error {
+	if err := addressable(tag); err != nil {
+		return err
+	}
+	return c.write(ctx, "DELETE", item("tags", tag)+"/mute", nil)
+}
+
+// DeleteMaintenanceWindow removes window id of a check, or of one of its tags.
 func (c *Client) DeleteMaintenanceWindow(ctx context.Context, check string, id int64) error {
 	if err := addressable(check); err != nil {
 		return err

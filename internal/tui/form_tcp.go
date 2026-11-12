@@ -40,7 +40,7 @@ func (f monitorForm) kindName() string {
 // choiceFocus reports whether the focused row is chosen with ←/→ instead of typed.
 func (f monitorForm) choiceFocus() bool {
 	switch f.focus {
-	case focusPort, focusPeriod, focusGrace, focusResolver, focusExpected:
+	case focusPort, focusPeriod, focusGrace, focusResolver, focusExpected, focusTags:
 		return false
 	}
 	return f.focus >= focusChannel && f.focus < focusAdvanced
@@ -52,18 +52,18 @@ func (f monitorForm) order() []int {
 	var rows []int
 	switch {
 	case f.isTCP():
-		rows = []int{focusType, 0, 1, focusPort, 2, 3, focusChannel, focusAlertAfter, focusRecoverAfter}
+		rows = []int{focusType, 0, 1, focusPort, 2, 3, focusTags, focusChannel, focusAlertAfter, focusRecoverAfter}
 	case f.isHeartbeat():
-		rows = []int{focusType, 0, focusPeriod, focusGrace, focusChannel, focusAlertAfter, focusRecoverAfter}
+		rows = []int{focusType, 0, focusPeriod, focusGrace, focusTags, focusChannel, focusAlertAfter, focusRecoverAfter}
 		if f.tokenRow() {
 			rows = append(rows, focusToken)
 		}
 	case f.isPing():
-		rows = []int{focusType, 0, 1, 2, 3, focusChannel, focusAlertAfter, focusRecoverAfter}
+		rows = []int{focusType, 0, 1, 2, 3, focusTags, focusChannel, focusAlertAfter, focusRecoverAfter}
 	case f.isDNS():
-		rows = []int{focusType, 0, 1, focusRecord, focusResolver, focusExpected, 2, 3, focusChannel, focusAlertAfter, focusRecoverAfter}
+		rows = []int{focusType, 0, 1, focusRecord, focusResolver, focusExpected, 2, 3, focusTags, focusChannel, focusAlertAfter, focusRecoverAfter}
 	default:
-		rows = []int{focusType, 0, 1, 2, 3, 4, focusChannel, focusAlertAfter, focusRecoverAfter, focusTLS}
+		rows = []int{focusType, 0, 1, 2, 3, 4, focusTags, focusChannel, focusAlertAfter, focusRecoverAfter, focusTLS}
 	}
 	if f.editing {
 		rows = append(rows[:1:1], rows[2:]...)
@@ -92,6 +92,8 @@ func (f *monitorForm) text() *string {
 		return &f.resolver
 	case f.focus == focusExpected:
 		return &f.expected
+	case f.focus == focusTags:
+		return &f.tags
 	}
 	return f.advText()
 }
@@ -127,7 +129,7 @@ func editTCPForm(c config.Check, detail bool) *monitorForm {
 
 // tcpCheck converts text only, like check; it carries no HTTP field.
 func (f monitorForm) tcpCheck() (config.Check, error) {
-	c := config.Check{Name: f.values[0], Kind: kindTCP, Host: f.values[1], Channel: f.channel}
+	c := config.Check{Name: f.values[0], Kind: kindTCP, Host: f.values[1], Channel: f.channel, Tags: config.ParseTags(f.tags)}
 	var err error
 	if c.Port, err = strconv.Atoi(f.port); err != nil {
 		return c, fmt.Errorf("port: %w", err)

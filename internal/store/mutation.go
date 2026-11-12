@@ -12,7 +12,8 @@ import (
 )
 
 // UpdateCheck replaces a validated definition's mutable fields. Its name,
-// position, history and the daemon heartbeat are left untouched.
+// position, history and the daemon heartbeat are left untouched. A tag it
+// drops that no other check carries loses its mutes and windows.
 func (s *Store) UpdateCheck(ctx context.Context, c config.Check) error {
 	if err := config.ValidateCheck(c); err != nil {
 		return classify(ErrValidation, fmt.Errorf("store: update check: %w", err))
@@ -37,10 +38,10 @@ func (s *Store) UpdateCheck(ctx context.Context, c config.Check) error {
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE checks
 SET kind = ?, url = ?, interval_ns = ?, timeout_ns = ?, expected_status = ?, channel = ?, alert_after = ?, recover_after = ?, tls_off = ?,
-    method = ?, headers = ?, body = ?, body_key = ?, expect_text = ?, host = ?, port = ?, period_ns = ?, grace_ns = ?, conditions = ?,
+    method = ?, headers = ?, body = ?, body_key = ?, expect_text = ?, host = ?, port = ?, period_ns = ?, grace_ns = ?, conditions = ?, tags = ?,
     domain = ?, record = ?, resolver = ?, expected = ? WHERE name = ?`,
 		f.kind, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter, c.TLSOff,
-		c.Method, f.headers, blob(f.body.Data), blob(f.body.Key), c.ExpectText, c.Host, c.Port, int64(c.Period), int64(c.Grace), f.conditions,
+		c.Method, f.headers, blob(f.body.Data), blob(f.body.Key), c.ExpectText, c.Host, c.Port, int64(c.Period), int64(c.Grace), f.conditions, encodeTags(c.Tags),
 		c.Domain, c.Record, c.Resolver, c.Expected, c.Name)
 	if err != nil {
 		return fmt.Errorf("store: update check: %w", err)
@@ -57,14 +58,18 @@ SET kind = ?, url = ?, interval_ns = ?, timeout_ns = ?, expected_status = ?, cha
 	if err := keepPingToken(ctx, tx, c); err != nil {
 		return fmt.Errorf("store: update check: %w", err)
 	}
+	if err := pruneTags(ctx, tx); err != nil {
+		return fmt.Errorf("store: update check: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: update check: %w", err)
 	}
 	return nil
 }
 
-// DeleteCheck atomically removes a definition and all its history. A missing
-// name is rejected without changing history, other definitions or heartbeat.
+// DeleteCheck atomically removes a definition and all its history, and the
+// mutes and windows of the tags no other check carries. A missing name is
+// rejected without changing history, other definitions or heartbeat.
 func (s *Store) DeleteCheck(ctx context.Context, name string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -95,6 +100,9 @@ func (s *Store) DeleteCheck(ctx context.Context, name string) error {
 		return fmt.Errorf("store: delete check: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM maintenance_windows WHERE check_name = ?", name); err != nil {
+		return fmt.Errorf("store: delete check: %w", err)
+	}
+	if err := pruneTags(ctx, tx); err != nil {
 		return fmt.Errorf("store: delete check: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

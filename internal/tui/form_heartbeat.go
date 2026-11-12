@@ -48,7 +48,7 @@ func editHeartbeatForm(c config.Check, detail bool) *monitorForm {
 
 // heartbeatCheck converts text only, like check; it carries no probe field.
 func (f monitorForm) heartbeatCheck() (config.Check, error) {
-	c := config.Check{Name: f.values[0], Kind: kindHeartbeat, Channel: f.channel}
+	c := config.Check{Name: f.values[0], Kind: kindHeartbeat, Channel: f.channel, Tags: config.ParseTags(f.tags)}
 	var err error
 	if c.Period, err = time.ParseDuration(f.period); err != nil {
 		return c, fmt.Errorf("period: %w", err)

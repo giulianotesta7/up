@@ -52,6 +52,9 @@ type DefinedRecorder interface {
 }
 
 // MuteStore is the optional API for holding and reconciling alerts.
+// *store.Store implements it: Mute is the one that ends last of the check's
+// own mute and its tags' mutes, so the later end wins, and ClearMute also
+// forgets its tags' ended mutes.
 type MuteStore interface {
 	Mute(context.Context, string) (config.Mute, bool, error)
 	ClearMute(context.Context, string, time.Time) error

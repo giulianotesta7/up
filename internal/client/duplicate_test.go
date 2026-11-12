@@ -173,9 +173,9 @@ func TestDuplicateReplaceAndClearOverrideTheOriginal(t *testing.T) {
 			b, d, _ := duplicateBackend(t, backend)
 			original, _ := b.stored(t, "api")
 			d.press(kY)
-			// Name, URL, interval, timeout, status, channel, alert, recover,
-			// TLS, Advanced, Method, Header 1 name → Header 1 value.
-			for range 12 {
+			// Name, URL, interval, timeout, status, tags, channel, alert,
+			// recover, TLS, Advanced, Method, Header 1 name → Header 1 value.
+			for range 13 {
 				d.press(kTab)
 			}
 			d.typ("new-secret")

@@ -21,10 +21,18 @@ type Cert struct {
 var CertWarnDays = []int{14, 7, 3}
 
 // Mute records when alert delivery resumes and the recipients' prior state.
+//
+// A tag's mute (see store.SetTagMute) holds every monitor carrying the tag.
+// Read for a monitor, Mute is the one that ends last of its own and its
+// tags' mutes; Tag names the tag when that one is a tag's (the detail shows
+// "muted through #nas"). A tag's mute keeps no notification state, so
+// WasAlerting is then the monitor's own mute's, or what the recipients were
+// last told.
 type Mute struct {
 	Check       string
 	Until       time.Time
 	WasAlerting bool
+	Tag         string
 }
 
 // Check is one validated check, HTTP (the default), TCP, heartbeat, ping or
@@ -90,6 +98,10 @@ type Check struct {
 	// URL, method, expected status, interval or timeout.
 	Period time.Duration
 	Grace  time.Duration
+	// Tags group monitors for search, mutes and maintenance windows: at most
+	// MaxTags, lowercase letters a-z, digits and "-", in the order typed
+	// (see NormalizeTags). Any kind can have them.
+	Tags []string
 }
 
 // MaxAlertThreshold is the largest AlertAfter and RecoverAfter.
@@ -146,6 +158,7 @@ func ValidateCheck(c Check) error {
 	if c.RecoverAfter < 0 || c.RecoverAfter > MaxAlertThreshold {
 		errs = append(errs, fmt.Errorf("recover after %d must be between 1 and %d", c.RecoverAfter, MaxAlertThreshold))
 	}
+	errs = append(errs, validateTags(c.Tags)...)
 	return errors.Join(errs...)
 }
 

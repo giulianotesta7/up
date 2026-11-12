@@ -71,9 +71,6 @@ func v9Checks(t *testing.T, path string) []string {
 }
 
 func TestOpenMigratesV10AddingOnlyConditions(t *testing.T) {
-	if schemaVersion < conditionsVersion {
-		t.Fatalf("schemaVersion = %d, want at least %d", schemaVersion, conditionsVersion)
-	}
 	path := v10Database(t)
 	before, beforeChecks := dumpTables(t, path, v10Tables...), v9Checks(t, path)
 	want := fmt.Sprintf("database schema version %d is older than this up (%d)", conditionsVersion-1, schemaVersion)

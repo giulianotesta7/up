@@ -36,6 +36,7 @@ const (
 	focusRecord
 	focusResolver
 	focusExpected
+	focusTags
 	focusAdvanced // HTTP fold row; the fields inside follow (form_advanced.go)
 	focusCount
 )
@@ -53,6 +54,7 @@ type monitorForm struct {
 	record       string // DNS only, like resolver and expected
 	resolver     string
 	expected     string
+	tags         string       // every kind, as typed: "nas, home"
 	adv          advancedForm // HTTP only
 	focus        int
 	cursor       int // rune offset in the focused field
@@ -60,6 +62,9 @@ type monitorForm struct {
 	saving       bool
 	editing      bool
 	returnDetail bool
+	// tagsWidth is the widest the Tags row may be so its hint never widens
+	// the box; 0 means popupRowWidth.
+	tagsWidth int
 	// copyOf is the monitor a new form was started from ("duplicate").
 	copyOf string
 	// status is the expected status a new HTTP monitor starts with (the
@@ -92,24 +97,30 @@ func newMonitorForm(snap Snapshot) *monitorForm {
 	}
 }
 
+// editMonitorForm edits c. Every kind carries c's tags, which a save without
+// them would remove (and with them the tags' mutes and windows).
 func editMonitorForm(c config.Check, detail bool) *monitorForm {
+	var f *monitorForm
 	switch c.Kind {
 	case kindTCP:
-		return editTCPForm(c, detail)
+		f = editTCPForm(c, detail)
 	case kindHeartbeat:
-		return editHeartbeatForm(c, detail)
+		f = editHeartbeatForm(c, detail)
 	case kindPing:
-		return editPingForm(c, detail)
+		f = editPingForm(c, detail)
 	case kindDNS:
-		return editDNSForm(c, detail)
+		f = editDNSForm(c, detail)
+	default:
+		f = &monitorForm{
+			values:  [5]string{c.Name, c.URL, shortDuration(c.Interval), shortDuration(c.Timeout), strconv.Itoa(c.ExpectedStatus)},
+			record:  config.DNSRecords[0],
+			channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: tlsChoice(c.TLSOff),
+			adv:   newAdvanced(c),
+			focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail, base: c,
+		}
 	}
-	return &monitorForm{
-		values:  [5]string{c.Name, c.URL, shortDuration(c.Interval), shortDuration(c.Timeout), strconv.Itoa(c.ExpectedStatus)},
-		record:  config.DNSRecords[0],
-		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: tlsChoice(c.TLSOff),
-		adv:   newAdvanced(c),
-		focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail, base: c,
-	}
+	f.tags = config.FormatTags(c.Tags)
+	return f
 }
 
 // copyName is the name a duplicate starts with: "<name> copy", then
@@ -153,7 +164,7 @@ func (f monitorForm) checkWith(key []byte) (config.Check, error) {
 		return f.probeCheck()
 	}
 	c := f.base
-	c.Name, c.URL, c.Channel = f.values[0], f.values[1], f.channel
+	c.Name, c.URL, c.Channel, c.Tags = f.values[0], f.values[1], f.channel, config.ParseTags(f.tags)
 	var err error
 	if c.Interval, err = time.ParseDuration(f.values[2]); err != nil {
 		return c, fmt.Errorf("interval: %w", err)
@@ -469,6 +480,10 @@ func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error)
 		}
 		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, rendered)
 	}
+	if f.focus == focusTags {
+		focusLine = strings.Count(b.String(), "\n")
+	}
+	b.WriteString(tagsLine(f, snap))
 	choiceLine(focusChannel, "Channel", renderChoice(selected, choices, f.focus == focusChannel))
 	failures, successes := "failures in a row", "successes in a row"
 	if f.isHeartbeat() {

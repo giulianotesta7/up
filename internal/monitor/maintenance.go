@@ -10,8 +10,9 @@ import (
 )
 
 // WindowStore is the optional API for a check's recurring maintenance windows.
-// *store.Store implements it. While a window is active, alerts and
-// certificate warnings are held exactly like a manual mute.
+// *store.Store implements it, including the windows of the check's tags at
+// the time of the read. While a window is active, alerts and certificate
+// warnings are held exactly like a manual mute.
 type WindowStore interface {
 	MaintenanceWindows(context.Context, string) ([]config.MaintenanceWindow, error)
 }
@@ -187,12 +188,12 @@ type AlertStateStore interface {
 }
 
 // loadNotified is what the recipients know when a loop starts: the live mute's
-// snapshot of it, else the persisted state, else the streak rebuilt from
+// snapshot of it (a tag's mute keeps none), else the persisted state, else the streak rebuilt from
 // history (databases from before the state was kept), which only counts when
 // a channel exists: without one nothing was ever handed over. A rebuilt value
 // is persisted at once, so later restarts do not depend on it.
 func loadNotified(ctx context.Context, opts Options, c config.Check, streak check.Streak, mute config.Mute, hasMute bool) bool {
-	if hasMute {
+	if hasMute && mute.Tag == "" {
 		return mute.WasAlerting
 	}
 	fallback := streak.Alerting && c.Channel != ""

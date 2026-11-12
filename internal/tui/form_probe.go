@@ -55,7 +55,7 @@ func editDNSForm(c config.Check, detail bool) *monitorForm {
 // probeCheck converts text only, like check, for ping and DNS monitors; it
 // carries no HTTP or TCP field, so no TLS choice either.
 func (f monitorForm) probeCheck() (config.Check, error) {
-	c := config.Check{Name: f.values[0], Kind: f.kind, Channel: f.channel}
+	c := config.Check{Name: f.values[0], Kind: f.kind, Channel: f.channel, Tags: config.ParseTags(f.tags)}
 	if f.isPing() {
 		c.Host = f.values[1]
 	} else {

@@ -34,7 +34,8 @@ type maintenancePopup struct {
 }
 
 // windowForm edits one window. focus 0 is the weekday row (cursor day);
-// 1..3 are the text fields start, duration and zone.
+// 1..3 are the text fields start, duration and zone; focusTarget is the
+// Applies to row of a new window for a tagged monitor.
 type windowForm struct {
 	id     int64
 	days   [7]bool // by weekdayOrder
@@ -42,6 +43,31 @@ type windowForm struct {
 	values [3]string
 	focus  int
 	cursor int
+	// tags are the monitor's tags a new window can apply to instead
+	// (target i > 0 is tags[i-1]); tag is the tag an edited window belongs
+	// to, which cannot change.
+	tags   []string
+	target int
+	tag    string
+}
+
+// focusTarget is the windowForm focus of the Applies to row.
+const focusTarget = 4
+
+// order is the tab order of the form's rows.
+func (f windowForm) order() []int {
+	if f.id == 0 && len(f.tags) > 0 {
+		return []int{focusTarget, 0, 1, 2, 3}
+	}
+	return []int{0, 1, 2, 3}
+}
+
+// windowTag is the tag the window belongs to, or "" for the monitor.
+func (f windowForm) windowTag() string {
+	if f.tag != "" || f.target == 0 {
+		return f.tag
+	}
+	return f.tags[f.target-1]
 }
 
 type maintenanceMsg struct {
@@ -52,12 +78,17 @@ type maintenanceMsg struct {
 // errNoMaintenance is shown when the store cannot edit windows.
 var errNoMaintenance = errors.New("this server does not support maintenance windows")
 
-func newWindowForm(zone string) *windowForm {
-	return &windowForm{values: [3]string{"02:00", "1h", zone}}
+// newWindowForm starts a window for the monitor; with tags, the Applies to
+// row comes first and offers them too.
+func newWindowForm(zone string, tags []string) *windowForm {
+	f := &windowForm{values: [3]string{"02:00", "1h", zone}, tags: tags}
+	f.focus = f.order()[0]
+	return f
 }
 
-func editWindowForm(w config.MaintenanceWindow) *windowForm {
-	f := &windowForm{id: w.ID, values: [3]string{fmt.Sprintf("%02d:%02d", w.StartMinute/60, w.StartMinute%60), shortDuration(w.Duration), w.Zone}}
+// editWindowForm edits w, of its tag when it has one.
+func editWindowForm(w config.MaintenanceWindow, tags []string) *windowForm {
+	f := &windowForm{id: w.ID, values: [3]string{fmt.Sprintf("%02d:%02d", w.StartMinute/60, w.StartMinute%60), shortDuration(w.Duration), w.Zone}, tags: tags, tag: w.Tag}
 	for i, d := range weekdayOrder {
 		for _, wd := range w.Weekdays {
 			f.days[i] = f.days[i] || wd == d
@@ -69,7 +100,7 @@ func editWindowForm(w config.MaintenanceWindow) *windowForm {
 // window builds the window the form describes and validates it with
 // config.ValidateMaintenanceWindow, the same rules the store enforces.
 func (f windowForm) window(check string) (config.MaintenanceWindow, error) {
-	w := config.MaintenanceWindow{ID: f.id, Check: check, Zone: strings.TrimSpace(f.values[2])}
+	w := config.MaintenanceWindow{ID: f.id, Check: check, Zone: strings.TrimSpace(f.values[2]), Tag: f.windowTag()}
 	for i, on := range f.days {
 		if on {
 			w.Weekdays = append(w.Weekdays, weekdayOrder[i])
@@ -102,7 +133,7 @@ func (f windowForm) window(check string) (config.MaintenanceWindow, error) {
 }
 
 func (f *windowForm) insert(text string) {
-	if f.focus == 0 {
+	if f.focus == 0 || f.focus == focusTarget {
 		return
 	}
 	editor := monitorForm{cursor: f.cursor}
@@ -113,6 +144,17 @@ func (f *windowForm) insert(text string) {
 }
 
 func (f *windowForm) edit(msg tea.KeyPressMsg) {
+	if f.focus == focusTarget {
+		switch key := msg.String(); key {
+		case "left", "h", "right", "l":
+			delta := 1
+			if key == "left" || key == "h" {
+				delta = -1
+			}
+			f.target = (f.target + delta + len(f.tags) + 1) % (len(f.tags) + 1)
+		}
+		return
+	}
 	if f.focus == 0 {
 		switch key := msg.String(); {
 		case key == "left" || key == "h":
@@ -184,11 +226,11 @@ func (m Model) handleMaintenanceKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		p.selected = min(max(0, len(windows)-1), p.selected+1)
 	case "a":
 		p.err = nil
-		p.form = newWindowForm(m.snap.NewItemDefaults().Zone)
+		p.form = newWindowForm(m.snap.NewItemDefaults().Zone, config.NormalizeTags(svc.Check.Tags))
 	case "e", "enter":
 		if len(windows) > 0 {
 			p.err = nil
-			p.form = editWindowForm(windows[p.selected])
+			p.form = editWindowForm(windows[p.selected], config.NormalizeTags(svc.Check.Tags))
 		}
 	case "d":
 		if len(windows) > 0 {
@@ -202,9 +244,16 @@ func (m Model) handleWindowFormKey(p *maintenancePopup) func(tea.KeyPressMsg) (t
 	return func(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		f := *p.form
 		p.form = &f
-		focus := func(to int) {
-			f.focus = (to + len(f.values) + 1) % (len(f.values) + 1)
-			if f.focus > 0 {
+		focus := func(delta int) {
+			order := f.order()
+			at := 0
+			for i, focus := range order {
+				if focus == f.focus {
+					at = i
+				}
+			}
+			f.focus = order[(at+delta+len(order))%len(order)]
+			if f.focus > 0 && f.focus < focusTarget {
 				f.cursor = len([]rune(f.values[f.focus-1]))
 			}
 		}
@@ -212,9 +261,9 @@ func (m Model) handleWindowFormKey(p *maintenancePopup) func(tea.KeyPressMsg) (t
 		case "esc":
 			p.form, p.err = nil, nil
 		case "tab", "down":
-			focus(f.focus + 1)
+			focus(1)
 		case "shift+tab", "up":
-			focus(f.focus - 1)
+			focus(-1)
 		case "enter":
 			w, err := f.window(p.name)
 			if p.err = err; err != nil {
@@ -278,9 +327,19 @@ func (m Model) handleMaintenancePaste(content string) Model {
 	return m
 }
 
-func (m Model) maintenanceScreen(now time.Time) string {
+// maintenanceScreen draws the popup and the width it keeps whichever target
+// a new window has.
+func (m Model) maintenanceScreen(now time.Time) (string, int) {
 	svc, _ := m.maintenanceService(m.maint.name)
-	return renderMaintenance(*m.maint, svc, m.snap, now, m.err, m.height)
+	minimum := maintenanceMinWidth
+	if m.maint.form != nil && m.maint.form.id == 0 {
+		p, f := *m.maint, *m.maint.form
+		p.form = &f
+		for f.target = range len(f.tags) + 1 {
+			minimum = max(minimum, modalContentWidth(renderMaintenance(p, svc, m.snap, now, m.err, m.height)))
+		}
+	}
+	return renderMaintenance(*m.maint, svc, m.snap, now, m.err, m.height), minimum
 }
 
 // renderMaintenance draws the popup. With a known terminal height the window
@@ -295,7 +354,7 @@ func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.
 	b.WriteString(helpStyle.Render("Alerts are held during a maintenance window or while muted.") + "\n")
 	b.WriteString(helpStyle.Render("Checks and uptime keep counting.") + "\n\n")
 	if p.form != nil {
-		renderWindowForm(&b, *p.form)
+		renderWindowForm(&b, *p.form, p.name, snap)
 	} else {
 		if len(svc.Maintenance) == 0 {
 			b.WriteString(helpStyle.Render("No maintenance windows yet. Press a to add one.") + "\n")
@@ -308,6 +367,9 @@ func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.
 			fixed := strings.Count(b.String(), "\n") - 1 + 2
 			if p.confirm {
 				fixed += 2
+				if p.selected < len(svc.Maintenance) && svc.Maintenance[p.selected].Tag != "" {
+					fixed++
+				}
 			}
 			if p.err != nil {
 				fixed += 1 + strings.Count(p.err.Error(), "\n") + 1
@@ -322,8 +384,18 @@ func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.
 		if first > 0 {
 			b.WriteString(helpStyle.Render(fmt.Sprintf("  ↑ %d more", first)) + "\n")
 		}
+		// A tagged monitor's rows end with what each window applies to: the
+		// monitor or one of its tags.
+		owners, rowWidth := len(svc.Check.Tags) > 0, 0
+		for _, w := range svc.Maintenance {
+			owners = owners || w.Tag != ""
+			rowWidth = max(rowWidth, ansi.StringWidth(describeWindow(w)))
+		}
 		for i := first; i < last; i++ {
 			row := describeWindow(svc.Maintenance[i])
+			if owners {
+				row += strings.Repeat(" ", rowWidth-ansi.StringWidth(row)) + "   " + windowOwner(svc.Maintenance[i], p.name)
+			}
 			if i == p.selected {
 				fmt.Fprintf(&b, "  %s %s\n", accentStyle.Render(">"), accentStyle.Render(row))
 			} else {
@@ -335,7 +407,12 @@ func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.
 		}
 	}
 	if p.confirm && p.selected < len(svc.Maintenance) {
-		b.WriteString("\n" + fmt.Sprintf("Delete the maintenance window %s?", describeWindow(svc.Maintenance[p.selected])) + "\n")
+		if w := svc.Maintenance[p.selected]; w.Tag != "" {
+			b.WriteString("\n" + fmt.Sprintf("Delete the #%s maintenance window %s?", w.Tag, describeWindow(w)) + "\n")
+			b.WriteString(fmt.Sprintf("It applies to every monitor tagged %s.", w.Tag) + "\n")
+		} else {
+			b.WriteString("\n" + fmt.Sprintf("Delete the maintenance window %s?", describeWindow(w)) + "\n")
+		}
 	}
 	if p.err != nil {
 		b.WriteString("\n")
@@ -346,6 +423,8 @@ func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.
 	switch {
 	case p.saving:
 		b.WriteString("\n" + renderHelp("Saving… · ctrl+c quit"))
+	case p.form != nil && p.form.order()[0] == focusTarget:
+		b.WriteString("\n" + renderHelp("tab/shift+tab field · ←/→ day or target · space toggle · enter save · esc back"))
 	case p.form != nil:
 		b.WriteString("\n" + renderHelp("tab/shift+tab field · ←/→ day · space toggle · enter save · esc back"))
 	case p.confirm:
@@ -356,7 +435,15 @@ func renderMaintenance(p maintenancePopup, svc Service, snap Snapshot, now time.
 	return b.String()
 }
 
-func renderWindowForm(b *strings.Builder, f windowForm) {
+// windowOwner is what a window applies to: "#nas" or the monitor's name.
+func windowOwner(w config.MaintenanceWindow, name string) string {
+	if w.Tag != "" {
+		return "#" + w.Tag
+	}
+	return name
+}
+
+func renderWindowForm(b *strings.Builder, f windowForm, name string, snap Snapshot) {
 	title := "Add maintenance window"
 	if f.id != 0 {
 		title = "Edit maintenance window"
@@ -367,6 +454,24 @@ func renderWindowForm(b *strings.Builder, f windowForm) {
 			return accentStyle.Render(">")
 		}
 		return " "
+	}
+	// A new window for a tagged monitor picks what it applies to; an edited
+	// one keeps it.
+	switch {
+	case f.id == 0 && len(f.tags) > 0:
+		focused := f.focus == focusTarget
+		label := fmt.Sprintf("%-12s", "Applies to")
+		if focused {
+			label = accentStyle.Render(label)
+		}
+		target := windowOwner(config.MaintenanceWindow{Tag: f.windowTag()}, name)
+		row := fmt.Sprintf("%s %s %s", marker(focused), label, renderChoice(target, nil, focused))
+		if tag := f.windowTag(); tag != "" {
+			row += "   " + helpStyle.Render(coversText(snap, tag))
+		}
+		b.WriteString(row + "\n")
+	case f.tag != "" || len(f.tags) > 0:
+		fmt.Fprintf(b, "%s %-12s %s\n", marker(false), "Applies to", windowOwner(config.MaintenanceWindow{Tag: f.tag}, name))
 	}
 	var days []string
 	for i, d := range weekdayOrder {

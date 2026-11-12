@@ -14,13 +14,15 @@ import (
 )
 
 // probesVersion is the schema version that adds ping and DNS monitors.
-const probesVersion = 12
+const probesVersion = 13
 
-// v11Database writes a database as the previous release left it (migrations
-// 0 to 10) with another TCP check, a check with conditions and a result.
-func v11Database(t *testing.T) string {
+// v12Database writes a database as the previous release left it (migrations
+// 0 to 11, built from the v11 fixture through the real tags step) with
+// another TCP check, a check with conditions, a result and a tagged monitor
+// with its tag mute and tag maintenance window.
+func v12Database(t *testing.T) string {
 	t.Helper()
-	path := v10Database(t)
+	path := v11Database(t)
 	db, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
@@ -30,24 +32,26 @@ func v11Database(t *testing.T) string {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d;
-INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, kind, host, port) VALUES (4, 'cache', '', 30000000000, 5000000000, 0, 'tcp', 'cache.example.com', 6379);
+INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, kind, host, port, tags) VALUES (4, 'cache', '', 30000000000, 5000000000, 0, 'tcp', 'cache.example.com', 6379, 'home');
 INSERT INTO checks (position, name, url, interval_ns, timeout_ns, expected_status, conditions) VALUES (5, 'json', 'https://example.com/health', 60000000000, 5000000000, 200, '[{"k":"json","p":"status","v":"ok"}]');
-INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error) VALUES ('cache', 1, 'down', 0, 0, 'connection refused');`, probesVersion-1)); err != nil {
+INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error) VALUES ('cache', 1, 'down', 0, 0, 'connection refused');
+INSERT INTO tag_mutes (tag, until_ns) VALUES ('home', 1900000000000000000);
+INSERT INTO maintenance_windows (check_name, tag, weekdays, start_minute, duration_ns, zone) VALUES ('', 'home', 4, 120, 1800000000000, 'UTC');`, probesVersion-1)); err != nil {
 		t.Fatal(err)
 	}
 	return path
 }
 
-// v11Results dumps the results columns that schemas before v12 have.
-func v11Results(t *testing.T, path string) []string {
+// v12Results dumps the results columns that schemas before v13 have.
+func v12Results(t *testing.T, path string) []string {
 	t.Helper()
 	return dumpColumns(t, path, "results", "id, check_name, at_ns, status, latency_ns, status_code, error")
 }
 
-// v11Checks dumps the checks columns that schema v11 has.
-func v11Checks(t *testing.T, path string) []string {
+// v12Checks dumps the checks columns that schema v12 has.
+func v12Checks(t *testing.T, path string) []string {
 	t.Helper()
-	return dumpColumns(t, path, "checks", "position, name, kind, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after, tls_off, method, headers, body, body_key, expect_text, host, port, period_ns, grace_ns, ping_token, ping_token_key, ping_token_hash, conditions")
+	return dumpColumns(t, path, "checks", "position, name, kind, url, interval_ns, timeout_ns, expected_status, channel, alert_after, recover_after, tls_off, method, headers, body, body_key, expect_text, host, port, period_ns, grace_ns, ping_token, ping_token_key, ping_token_hash, conditions, tags")
 }
 
 func dumpColumns(t *testing.T, path, table, columns string) []string {
@@ -78,34 +82,34 @@ func dumpColumns(t *testing.T, path, table, columns string) []string {
 	return out
 }
 
-// v11Tables are the tables whose rows and columns v12 leaves alone.
-var v11Tables = []string{"smtp_servers", "channels", "mutes", "alert_state", "defaults", "daemon", "daemon_api", "certs", "maintenance_windows", "channel_tests", "secret_key", "delivery_attempts"}
+// v12Tables are the tables whose rows and columns v13 leaves alone.
+var v12Tables = []string{"smtp_servers", "channels", "mutes", "tag_mutes", "alert_state", "defaults", "daemon", "daemon_api", "certs", "maintenance_windows", "channel_tests", "secret_key", "delivery_attempts"}
 
-func TestOpenMigratesV11AddingOnlyPingAndDNS(t *testing.T) {
+func TestOpenMigratesV12AddingOnlyPingAndDNS(t *testing.T) {
 	if schemaVersion < probesVersion {
 		t.Fatalf("schemaVersion = %d, want at least %d", schemaVersion, probesVersion)
 	}
-	path := v11Database(t)
-	before, beforeChecks, beforeResults := dumpTables(t, path, v11Tables...), v11Checks(t, path), v11Results(t, path)
+	path := v12Database(t)
+	before, beforeChecks, beforeResults := dumpTables(t, path, v12Tables...), v12Checks(t, path), v12Results(t, path)
 	want := fmt.Sprintf("database schema version %d is older than this up (%d)", probesVersion-1, schemaVersion)
 	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("OpenReadOnly(v11) error = %v", err)
+		t.Fatalf("OpenReadOnly(v12) error = %v", err)
 	}
 	s, err := Open(path)
 	if err != nil {
-		t.Fatalf("Open(v11) error = %v", err)
+		t.Fatalf("Open(v12) error = %v", err)
 	}
 	defer s.Close()
 	if got := version(t, path); got != schemaVersion {
 		t.Fatalf("user_version = %d, want %d", got, schemaVersion)
 	}
-	if after := dumpTables(t, path, v11Tables...); !reflect.DeepEqual(before, after) {
+	if after := dumpTables(t, path, v12Tables...); !reflect.DeepEqual(before, after) {
 		t.Fatalf("migration changed existing rows:\nbefore %v\nafter  %v", before, after)
 	}
-	if after := v11Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
+	if after := v12Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
 		t.Fatalf("migration changed existing checks:\nbefore %v\nafter  %v", beforeChecks, after)
 	}
-	if after := v11Results(t, path); !reflect.DeepEqual(beforeResults, after) {
+	if after := v12Results(t, path); !reflect.DeepEqual(beforeResults, after) {
 		t.Fatalf("migration changed existing results:\nbefore %v\nafter  %v", beforeResults, after)
 	}
 	ctx := context.Background()
@@ -120,6 +124,12 @@ func TestOpenMigratesV11AddingOnlyPingAndDNS(t *testing.T) {
 		if err := config.ValidateCheck(c); err != nil {
 			t.Fatalf("%s invalid after migration: %v", c.Name, err)
 		}
+	}
+	if !reflect.DeepEqual(checks[4].Tags, []string{"home"}) {
+		t.Fatalf("cache tags after migration = %q, want [home]", checks[4].Tags)
+	}
+	if mutes, err := s.TagMutes(ctx); err != nil || len(mutes) != 1 || mutes[0].Tag != "home" {
+		t.Fatalf("TagMutes() after migration = %+v, %v", mutes, err)
 	}
 	if r, ok, err := s.Latest(ctx, "cache"); err != nil || !ok || r.Answer != "" || r.Answers != 0 || r.Error != "connection refused" {
 		t.Fatalf("Latest(cache) after migration = %+v, %v, %v", r, ok, err)
@@ -166,10 +176,64 @@ func TestOpenMigratesV11AddingOnlyPingAndDNS(t *testing.T) {
 	}
 }
 
-// A migration that fails (a column already exists) rolls back as a whole:
-// the database stays v11 with its rows.
-func TestOpenV11FailingMigrationChangesNothing(t *testing.T) {
+// A v11 database migrates through tags (v12) and ping/DNS (v13) in one open,
+// keeping its rows, windows and mute and reading no tags and no DNS fields.
+func TestOpenMigratesV11ThroughTagsAndPingDNS(t *testing.T) {
 	path := v11Database(t)
+	before, beforeChecks, beforeWindows := dumpTables(t, path, v11Tables...), v11Checks(t, path), v11Windows(t, path)
+	if len(beforeWindows) == 0 || len(before["mutes"]) == 0 || len(before["results"]) == 0 {
+		t.Fatalf("the v11 fixture needs a window, a mute and a result: %v %v %v", beforeWindows, before["mutes"], before["results"])
+	}
+	want := fmt.Sprintf("database schema version %d is older than this up (%d)", tagsVersion-1, schemaVersion)
+	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("OpenReadOnly(v11) error = %v", err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(v11) error = %v", err)
+	}
+	defer s.Close()
+	if got := version(t, path); got != schemaVersion || schemaVersion != probesVersion {
+		t.Fatalf("user_version = %d, want %d", got, probesVersion)
+	}
+	if after := dumpTables(t, path, v11Tables...); !reflect.DeepEqual(before, after) {
+		t.Fatalf("migration changed existing rows:\nbefore %v\nafter  %v", before, after)
+	}
+	if after := v11Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
+		t.Fatalf("migration changed existing checks:\nbefore %v\nafter  %v", beforeChecks, after)
+	}
+	if after := v11Windows(t, path); !reflect.DeepEqual(beforeWindows, after) {
+		t.Fatalf("migration changed existing windows:\nbefore %v\nafter  %v", beforeWindows, after)
+	}
+	ctx := context.Background()
+	checks, err := s.Checks(ctx)
+	if err != nil || len(checks) != 4 {
+		t.Fatalf("Checks() after migration = %+v, %v", checks, err)
+	}
+	for _, c := range checks {
+		if c.Tags != nil || c.Domain != "" || c.Record != "" || c.Resolver != "" || c.Expected != "" {
+			t.Fatalf("%s has tags or DNS fields after migration: %+v", c.Name, c)
+		}
+		if err := config.ValidateCheck(c); err != nil {
+			t.Fatalf("%s invalid after migration: %v", c.Name, err)
+		}
+	}
+	if p, err := s.PingPermission(ctx); err != nil || p != config.PingUnknown {
+		t.Fatalf("PingPermission() after migration = %q, %v, want unknown", p, err)
+	}
+	if mutes, err := s.TagMutes(ctx); err != nil || len(mutes) != 0 {
+		t.Fatalf("TagMutes() after migration = %+v, %v, want none", mutes, err)
+	}
+	// Migrated monitors keep accepting results for their unchanged definition.
+	if stored, err := s.RecordDefined(ctx, checks[0], check.Result{CheckName: checks[0].Name, At: t0, Status: check.StatusUp}); err != nil || !stored {
+		t.Fatalf("RecordDefined(%s) after migration = %v, %v", checks[0].Name, stored, err)
+	}
+}
+
+// A migration that fails (a column already exists) rolls back as a whole:
+// the database stays v12 with its rows.
+func TestOpenV12FailingMigrationChangesNothing(t *testing.T) {
+	path := v12Database(t)
 	db, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
@@ -178,21 +242,21 @@ func TestOpenV11FailingMigrationChangesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
-	before, beforeChecks := dumpTables(t, path, v11Tables...), v11Checks(t, path)
+	before, beforeChecks := dumpTables(t, path, v12Tables...), v12Checks(t, path)
 	step := fmt.Sprintf("migrate schema %d to %d", probesVersion-1, probesVersion)
 	if s, err := Open(path); err == nil || !strings.Contains(err.Error(), step) {
 		if s != nil {
 			s.Close()
 		}
-		t.Fatalf("Open(v11 with a clashing column) error = %v, want %q", err, step)
+		t.Fatalf("Open(v12 with a clashing column) error = %v, want %q", err, step)
 	}
 	if got := version(t, path); got != probesVersion-1 {
 		t.Fatalf("user_version = %d, want %d", got, probesVersion-1)
 	}
-	if after := dumpTables(t, path, v11Tables...); !reflect.DeepEqual(before, after) {
+	if after := dumpTables(t, path, v12Tables...); !reflect.DeepEqual(before, after) {
 		t.Fatalf("failed migration changed rows:\nbefore %v\nafter  %v", before, after)
 	}
-	if after := v11Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
+	if after := v12Checks(t, path); !reflect.DeepEqual(beforeChecks, after) {
 		t.Fatalf("failed migration changed checks:\nbefore %v\nafter  %v", beforeChecks, after)
 	}
 	db, err = sql.Open("sqlite", "file:"+path+"?mode=ro")

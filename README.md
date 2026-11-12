@@ -29,6 +29,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 - **TLS expiry warnings** at 14, 7 and 3 days.
 - **Maintenance mute** from 1 minute to 7 days, without stopping checks or history.
 - **Recurring maintenance windows** that hold alerts and certificate warnings while checks and history continue.
+- **Tags** to group monitors, and mute them or give them maintenance windows together.
 - **Stale-daemon detection.** If the daemon stops, the TUI says so and keeps the last known statuses instead of marking everything DOWN.
 
 ## Install
@@ -119,7 +120,7 @@ The database is resolved in this order: `--db`, `$UP_DB`, `/var/lib/up/up.db` if
 
 ### Keys
 
-`j`/`k` move · `/` search (the footer becomes the prompt · `tab` status: all, down, failing, held · `enter` keep · `esc` clear) · `enter` details · `n` new · `e` edit · `y` duplicate · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` mail servers · `c` channels · `f` defaults · `v` ping URL (heartbeat detail) · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
+`j`/`k` move · `/` search (the footer becomes the prompt · `#` lists the tags and `#nas` shows the monitors tagged `nas` · `tab` status: all, down, failing, held · `enter` keep · `esc` clear) · `enter` details · `n` new · `e` edit · `y` duplicate · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` mail servers · `c` channels · `f` defaults · `v` ping URL (heartbeat detail) · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
 
 `y` opens the new monitor form filled from the selected monitor, named `<name> copy`. Headers and body stay sealed (`set`, with keep, replace or clear), and history, mute and maintenance windows are not copied. Nothing is saved until `enter`.
 
@@ -296,6 +297,12 @@ When everything ends, recipients only hear what they do not already know, once, 
 
 Daylight saving: durations are elapsed time. A start that does not exist that day is skipped; one that happens twice runs once, at its first occurrence.
 
+### Tags
+
+A monitor of any kind can have up to 5 tags, made of lowercase letters, digits and `-` (`NAS` is saved as `nas`), kept in the order typed. A mute or a maintenance window can target a tag instead of one monitor: it holds every monitor with that tag, including monitors tagged later. When a monitor and its tag are both muted, alerts are held until the later end. Removing a tag from its last monitor, by editing or deleting it, also deletes that tag's mutes and windows.
+
+In the TUI, tags are typed in the monitor form's `Tags` row, comma-separated (`nas, home`); the row lists the tags in use and names a typed tag no monitor has yet, to catch typos. The list shows them dim after the name (`#nas +1` when narrow) and the detail on a `Tags` line. In the mute popup (`m`) and a new maintenance window (`w`, `a`), `←`/`→` choose between the monitor and its tags; the window list says what each window applies to, and a member can edit or delete a tag's window. The detail says `through #nas` when a mute or window comes from a tag, and `u` on a monitor muted through its tag asks before unmuting the whole tag.
+
 ### Defaults
 
 `f` opens the defaults for new items: the time zone of new maintenance windows (also the time shown in heartbeat reasons, such as `no ping since 12:10 -03`), and the channel, interval, timeout, expected status, alert after and recover after of new monitors. The new monitor and new window forms start from them. Existing monitors, channels and windows keep their values, and each window keeps its own zone. Until you save, the defaults are UTC, no channel, 30s, 5s, 200, and 1 and 1. Deleting the default channel makes the default none.
@@ -354,6 +361,8 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 | `GET /api/v1/snapshot` | returns everything the TUI shows |
 | `POST /api/v1/checks`, `PUT`/`DELETE /api/v1/checks/{name}` | adds, edits or deletes a monitor (names cannot change). `POST` accepts an optional `copy_from` (a monitor name): header values and body the request keeps come from that monitor, sealed on the server; `404` if it does not exist |
 | `PUT`/`DELETE /api/v1/checks/{name}/mute` | mutes (`duration_ms`, 1 minute to 7 days) or unmutes |
+| `PUT`/`DELETE /api/v1/tags/{tag}/mute` | mutes or unmutes every monitor with the tag (`duration_ms`, 1 minute to 7 days); `400` for an invalid tag, `404` when no monitor has it |
+| `GET`/`POST /api/v1/tags/{tag}/maintenance`, `PUT`/`DELETE .../maintenance/{id}` | a tag's maintenance windows, with the same body as a monitor's |
 | `POST /api/v1/smtp-servers`, `PUT`/`DELETE /api/v1/smtp-servers/{name}` | manages SMTP servers |
 | `POST /api/v1/channels`, `PUT`/`DELETE /api/v1/channels/{name}` | manages channels |
 | `GET`/`POST /api/v1/checks/{name}/maintenance`, `PUT`/`DELETE .../maintenance/{id}` | lists, adds, edits or deletes a monitor's maintenance windows (`weekdays` 0=Sunday, `start_minute`, `duration_ms`, `zone`); active windows hold alerts and certificate warnings |
@@ -362,7 +371,7 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 | `POST`/`GET /api/v1/channels/{name}/test` | requests a channel test (`202`, or `409` while one is active) and reads the newest one; the daemon sends it |
 | `GET`/`POST /api/v1/checks/{name}/heartbeat-token` | shows a heartbeat's ping token, or replaces it (the old one stops working), as `{"token", "path"}`; `404` for a monitor that is not a heartbeat |
 
-HTTP monitors take optional `conditions`, an ordered list of `{"kind": "json", "path", "value"}`, `{"kind": "regex", "pattern"}`, `{"kind": "response_time", "within_ms"}` or `{"kind": "header", "name", "value"}`; the snapshot returns them the same way. Heartbeat monitors use `"kind": "heartbeat"` with `period_ms` and `grace_ms`. Ping monitors use `"kind": "ping"` with `host`; DNS monitors use `"kind": "dns"` with `domain`, `record`, `resolver` and `expected`, and their results carry `answer` and `answers`. The snapshot's `pings` says whether the daemon can send pings (`allowed`, `denied`, or empty when unknown). The snapshot carries each heartbeat's `heartbeat` state (`waiting`, `last_ping`, `deadline`) and the daemon's `api` listener (`listen`, `tls`); never the ping token.
+Monitors take optional `tags` (a list, saved lowercase); the snapshot's `mute` and `maintenance` windows carry a `tag` when they come from a tag. HTTP monitors take optional `conditions`, an ordered list of `{"kind": "json", "path", "value"}`, `{"kind": "regex", "pattern"}`, `{"kind": "response_time", "within_ms"}` or `{"kind": "header", "name", "value"}`; the snapshot returns them the same way. Heartbeat monitors use `"kind": "heartbeat"` with `period_ms` and `grace_ms`. Ping monitors use `"kind": "ping"` with `host`; DNS monitors use `"kind": "dns"` with `domain`, `record`, `resolver` and `expected`, and their results carry `answer` and `answers`. The snapshot's `pings` says whether the daemon can send pings (`allowed`, `denied`, or empty when unknown). The snapshot carries each heartbeat's `heartbeat` state (`waiting`, `last_ping`, `deadline`) and the daemon's `api` listener (`listen`, `tls`); never the ping token.
 
 Bodies are strict JSON, limited to 1 MiB. Errors: `400` invalid input, `404` not found, `409` duplicate or still in use. Rejected requests change nothing.
 
