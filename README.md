@@ -102,7 +102,7 @@ curl -fsSL https://raw.githubusercontent.com/heohlee/up/main/install.sh | sh -s 
 
 ### From source
 
-Requires Go 1.26.10:
+Requires Go 1.26.11:
 
 ```sh
 go build -o up ./cmd/up
