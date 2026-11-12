@@ -66,7 +66,7 @@ func (f *alertWriteFake) PublicKey(context.Context) ([]byte, bool, error) {
 func alertHandler(t *testing.T, s AlertWriteStore) http.Handler {
 	t.Helper()
 	h, _ := testHandler(t, func(m *http.ServeMux) {
-		routes := AlertWriteRoutes(s)
+		routes := AlertWriteRoutes(s, nil)
 		for _, p := range []string{"/api/v1/smtp-servers", "/api/v1/smtp-servers/", "/api/v1/channels", "/api/v1/channels/"} {
 			m.Handle(p, routes)
 		}

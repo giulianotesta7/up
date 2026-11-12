@@ -61,14 +61,23 @@ type channelWrite struct {
 	Priority        string        `json:"priority"`
 }
 
-// channel converts the body, or returns a client message (400) or an error (500).
-func (in channelWrite) channel(ctx context.Context, keys keyReader, name string) (config.Channel, string, error) {
+// channel converts the body, or returns a client message (400) or an error
+// (500). A server URL is stored in the form the TUI stores (an invalid one is
+// left for validation to report), and a replaced telegram bot token is opened
+// with key to check its format; a nil key skips that check.
+func (in channelWrite) channel(ctx context.Context, keys keyReader, key *secret.Key, name string) (config.Channel, string, error) {
 	c := config.Channel{Name: name, Kind: in.Kind, SMTPServer: in.SMTPServer, Recipients: in.Recipients, WebhookOrigin: in.WebhookOrigin, WebhookAuthName: in.WebhookAuthName,
 		ServerURL: in.ServerURL, Topic: in.Topic, ChatID: in.ChatID, Priority: in.Priority}
+	if s, err := config.ServerURL(in.ServerURL); err == nil {
+		c.ServerURL = s
+	}
 	var msg string
 	var err error
 	if c.Token, c.TokenEdit, msg, err = protectedEdit(ctx, keys, in.Token, "token", config.MaxSealedHeaderValue); msg != "" || err != nil {
 		return config.Channel{}, msg, err
+	}
+	if msg := telegramTokenMessage(key, c); msg != "" {
+		return config.Channel{}, msg, nil
 	}
 	if c.WebhookURL, c.WebhookURLEdit, msg, err = protectedEdit(ctx, keys, in.WebhookURL, "webhook_url", config.MaxSealedHeaderValue); msg != "" || err != nil {
 		return config.Channel{}, msg, err
@@ -77,6 +86,22 @@ func (in channelWrite) channel(ctx context.Context, keys keyReader, name string)
 		return config.Channel{}, msg, err
 	}
 	return c, "", nil
+}
+
+// telegramTokenMessage opens a replaced telegram bot token only to check its
+// format, as the TUI does before sealing. The message never carries the token.
+func telegramTokenMessage(key *secret.Key, c config.Channel) string {
+	if key == nil || c.Kind != config.KindTelegram || c.TokenEdit != config.EditReplace || c.Token.Empty() {
+		return ""
+	}
+	token, err := key.Open(c.Token)
+	if err != nil {
+		return "token could not be opened with the server key; seal it again"
+	}
+	if !config.ValidTelegramToken(token) {
+		return "bot token must look like 123456:ABC-def"
+	}
+	return ""
 }
 
 // addressableName refuses names the router would normalize away.
@@ -157,8 +182,9 @@ func protectedEdit(ctx context.Context, keys keyReader, p *ProtectedDTO, field s
 }
 
 // AlertWriteRoutes handles SMTP server and channel mutations after
-// authentication. Both resources share one set of conventions.
-func AlertWriteRoutes(s AlertWriteStore) http.Handler {
+// authentication. Both resources share one set of conventions. key is the
+// daemon key, used only to check a new telegram bot token's format.
+func AlertWriteRoutes(s AlertWriteStore, key *secret.Key) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.EscapedPath()
 		for _, resource := range []struct {
@@ -171,7 +197,7 @@ func AlertWriteRoutes(s AlertWriteStore) http.Handler {
 					w.WriteHeader(http.StatusMethodNotAllowed)
 					return
 				}
-				createAlertObject(w, r, s, resource.smtp)
+				createAlertObject(w, r, s, key, resource.smtp)
 				return
 			}
 			if rest, ok := strings.CutPrefix(path, resource.prefix+"/"); ok {
@@ -179,7 +205,7 @@ func AlertWriteRoutes(s AlertWriteStore) http.Handler {
 				if rest == "" || strings.Contains(rest, "/") || err != nil {
 					break
 				}
-				changeAlertObject(w, r, s, resource.smtp, name)
+				changeAlertObject(w, r, s, key, resource.smtp, name)
 				return
 			}
 		}
@@ -187,7 +213,7 @@ func AlertWriteRoutes(s AlertWriteStore) http.Handler {
 	})
 }
 
-func createAlertObject(w http.ResponseWriter, r *http.Request, s AlertWriteStore, smtp bool) {
+func createAlertObject(w http.ResponseWriter, r *http.Request, s AlertWriteStore, key *secret.Key, smtp bool) {
 	if smtp {
 		var in smtpWrite
 		if !DecodeJSON(w, r, &in) {
@@ -226,7 +252,7 @@ func createAlertObject(w http.ResponseWriter, r *http.Request, s AlertWriteStore
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
-	channel, msg, err := in.channel(r.Context(), s, in.Name)
+	channel, msg, err := in.channel(r.Context(), s, key, in.Name)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -242,7 +268,7 @@ func createAlertObject(w http.ResponseWriter, r *http.Request, s AlertWriteStore
 	writeJSON(w, http.StatusCreated, channelDTO(channel))
 }
 
-func changeAlertObject(w http.ResponseWriter, r *http.Request, s AlertWriteStore, smtp bool, name string) {
+func changeAlertObject(w http.ResponseWriter, r *http.Request, s AlertWriteStore, key *secret.Key, smtp bool, name string) {
 	var err error
 	switch r.Method {
 	case http.MethodDelete:
@@ -286,7 +312,7 @@ func changeAlertObject(w http.ResponseWriter, r *http.Request, s AlertWriteStore
 				writeError(w, http.StatusBadRequest, "name must match path")
 				return
 			}
-			channel, msg, e := in.channelWrite.channel(r.Context(), s, name)
+			channel, msg, e := in.channelWrite.channel(r.Context(), s, key, name)
 			if e != nil {
 				writeStoreError(w, e)
 				return

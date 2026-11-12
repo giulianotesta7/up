@@ -39,7 +39,7 @@ func remoteServer(t *testing.T) (*store.Store, string) {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/snapshot", remote.SnapshotRoutes(func(ctx context.Context, now time.Time) (tui.Snapshot, error) { return tui.Load(ctx, s, now) }))
-	alerts := remote.AlertWriteRoutes(s)
+	alerts := remote.AlertWriteRoutes(s, nil)
 	for _, p := range []string{"/api/v1/smtp-servers", "/api/v1/smtp-servers/", "/api/v1/channels", "/api/v1/channels/"} {
 		mux.Handle(p, alerts)
 	}

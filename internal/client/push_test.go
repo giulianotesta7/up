@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -86,5 +87,38 @@ func TestPushChannelsThroughTheClient(t *testing.T) {
 	}
 	if _, ok, _ := s.Channel(ctx, "sl"); ok {
 		t.Fatal("slack channel not deleted")
+	}
+}
+
+// A raw API caller gets the TUI's server URL form and token check.
+func TestPushChannelValidationThroughTheClient(t *testing.T) {
+	c, s, key := realServer(t)
+	ctx := context.Background()
+	if err := c.AddChannel(ctx, config.Channel{Name: "phone", Kind: config.KindNtfy, ServerURL: "HTTPS://NTFY.SH/", Topic: "up"}); err != nil {
+		t.Fatalf("AddChannel = %v", err)
+	}
+	if stored, _, _ := s.Channel(ctx, "phone"); stored.ServerURL != "https://ntfy.sh" {
+		t.Fatalf("stored server = %q", stored.ServerURL)
+	}
+	if err := c.AddChannel(ctx, config.Channel{Name: "creds", Kind: config.KindNtfy, ServerURL: "https://u:hunter2@ntfy.sh/", Topic: "up"}); err == nil ||
+		!strings.Contains(err.Error(), "ntfy server URL must be http or https") || strings.Contains(err.Error(), "hunter2") {
+		t.Fatalf("credential URL = %v", err)
+	}
+	tg := config.Channel{Name: "tg", Kind: config.KindTelegram, ChatID: "-1", Token: sealTo(t, key, "123:OK"), TokenEdit: config.EditReplace}
+	if err := c.AddChannel(ctx, tg); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.Channels(ctx)
+	bad := tg
+	bad.Name, bad.Token = "bad", sealTo(t, key, "notatoken")
+	if err := c.AddChannel(ctx, bad); err == nil || !strings.Contains(err.Error(), "bot token must look like 123456:ABC-def") || strings.Contains(err.Error(), "notatoken") {
+		t.Fatalf("bad create = %v", err)
+	}
+	tg.Token = sealTo(t, key, "notatoken")
+	if err := c.UpdateChannel(ctx, tg); err == nil || !strings.Contains(err.Error(), "bot token must look like 123456:ABC-def") {
+		t.Fatalf("bad replace = %v", err)
+	}
+	if after, _ := s.Channels(ctx); !reflect.DeepEqual(after, before) {
+		t.Fatal("rejected writes changed the channels")
 	}
 }
