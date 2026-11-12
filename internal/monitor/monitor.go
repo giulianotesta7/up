@@ -108,6 +108,10 @@ type Options struct {
 	Logger        *slog.Logger
 	// Now is the clock for mutes and maintenance windows; nil is time.Now.
 	Now func() time.Time
+	// Pings is whether the daemon can send pings (see check.DetectPings).
+	// With config.PingDenied ping checks are not run: they record nothing
+	// and send no alert, so they stay pending. Other values run them.
+	Pings config.PingPermission
 }
 
 // Run reads the SQLite definitions, then starts each check
@@ -266,6 +270,12 @@ func heartbeat(ctx context.Context, opts Options) {
 }
 
 func loop(ctx context.Context, opts Options, c config.Check, last check.Status) check.Status {
+	if opts.Pings.Holds(c) {
+		// Without permission a ping says nothing about the host, and an
+		// alert owed from before would report a state nobody can check.
+		<-ctx.Done()
+		return last
+	}
 	var streak check.Streak
 	var notified bool
 	muteStore, hasMutes := opts.Store.(MuteStore)

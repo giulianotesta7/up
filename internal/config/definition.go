@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"net/netip"
 	"slices"
 	"strings"
 
 	"github.com/heohlee/up/internal/secret"
 )
 
-// Check kinds; CheckHeartbeat is in heartbeat.go.
+// Check kinds; CheckHeartbeat is in heartbeat.go, CheckPing and CheckDNS in
+// probe.go.
 const (
 	CheckHTTP = "http"
 	CheckTCP  = "tcp"
@@ -132,6 +132,7 @@ func (c Check) SameDefinition(o Check) bool {
 		a.Channel == b.Channel && a.AlertAfter == b.AlertAfter && a.RecoverAfter == b.RecoverAfter && a.TLSOff == b.TLSOff &&
 		a.Method == b.Method && sameSealed(a.Body, b.Body) && a.ExpectText == b.ExpectText &&
 		a.Host == b.Host && a.Port == b.Port && a.Period == b.Period && a.Grace == b.Grace &&
+		a.Domain == b.Domain && a.Record == b.Record && a.Resolver == b.Resolver && a.Expected == b.Expected &&
 		slices.Equal(a.Conditions, b.Conditions) &&
 		slices.EqualFunc(a.Headers, b.Headers, func(x, y Header) bool {
 			return x.Name == y.Name && sameSealed(x.Value, y.Value)
@@ -226,15 +227,8 @@ func validateHTTPFields(c Check) []error {
 // written bare ("2001:db8::1"). Port is 1..65535.
 func validateTCPFields(c Check) []error {
 	var errs []error
-	switch {
-	case c.Host == "":
-		errs = append(errs, errors.New("host is required"))
-	case strings.ContainsAny(c.Host, " \t/@[]"):
-		errs = append(errs, fmt.Errorf("host %q must be a host name or IP address, without scheme, brackets or port", c.Host))
-	case strings.Contains(c.Host, ":"):
-		if _, err := netip.ParseAddr(c.Host); err != nil {
-			errs = append(errs, fmt.Errorf("host %q must be a host name or IP address, without scheme, brackets or port", c.Host))
-		}
+	if err := validateHost(c.Host); err != nil {
+		errs = append(errs, err)
 	}
 	if c.Port < 1 || c.Port > 65535 {
 		errs = append(errs, fmt.Errorf("port %d must be between 1 and 65535", c.Port))

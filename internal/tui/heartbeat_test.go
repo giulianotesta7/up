@@ -133,7 +133,7 @@ func TestHeartbeatFormShowsOnlyHeartbeatRows(t *testing.T) {
 		"Channel: ‹ none ›", "Alert after: ‹ 1 › missed pings in a row", "Recover after: ‹ 1 › pings in a row",
 		"First alert ≈ 25h after the last ping", "! No API listener: pings cannot arrive. Run up serve --api-listen")
 	requireAbsent(t, m, "HTTP/HTTPS URL", "Interval", "Timeout", "Expected status", "TLS expiry", "Advanced", "Host", "Port", "Token:")
-	m, _ = press(t, m, keyRight)
+	m, _ = press(t, m, keyArrowLeft, keyArrowLeft)
 	requireText(t, m, "Type: ‹ HTTP › ", "HTTP/HTTPS URL")
 	requireAbsent(t, m, "Period", "Grace", "No API listener")
 
@@ -166,7 +166,7 @@ func TestHeartbeatFormBoxStaysPutAcrossTypesAndFocus(t *testing.T) {
 		_, _, m := hbModel(t, false, size[0], size[1])
 		m, _ = press(t, m, keyN, keyShiftTab)
 		want := boxGeometry(t, m, "New monitor")
-		for i := range 3 {
+		for i := range 5 {
 			m, _ = press(t, m, keyRight)
 			if got := boxGeometry(t, m, "New monitor"); got != want {
 				t.Fatalf("%v: switch %d: box %v, was %v:\n%s", size, i, got, want, view(m))
