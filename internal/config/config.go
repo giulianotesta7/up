@@ -1,4 +1,4 @@
-// Package config defines and validates HTTP check definitions.
+// Package config defines and validates check definitions.
 package config
 
 import (
@@ -21,20 +21,30 @@ type Cert struct {
 var CertWarnDays = []int{14, 7, 3}
 
 // Mute records when alert delivery resumes and the recipients' prior state.
+//
+// A tag's mute (see store.SetTagMute) holds every monitor carrying the tag.
+// Read for a monitor, Mute is the one that ends last of its own and its
+// tags' mutes; Tag names the tag when that one is a tag's (the detail shows
+// "muted through #nas"). A tag's mute keeps no notification state, so
+// WasAlerting is then the monitor's own mute's, or what the recipients were
+// last told.
 type Mute struct {
 	Check       string
 	Until       time.Time
 	WasAlerting bool
+	Tag         string
 }
 
-// Check is one validated check, HTTP (the default), TCP or heartbeat.
+// Check is one validated check, HTTP (the default), TCP, heartbeat, ping or
+// DNS.
 //
 // A Check holds a slice, so it is not comparable with ==; use SameDefinition.
 // Build one from external input (API, form) and call Canonical before storing
 // or comparing it; the store does so on every write.
 type Check struct {
 	Name string
-	// Kind is CheckHTTP, CheckTCP or CheckHeartbeat; empty means HTTP.
+	// Kind is CheckHTTP, CheckTCP, CheckHeartbeat, CheckPing or CheckDNS;
+	// empty means HTTP.
 	Kind           string
 	URL            string
 	Interval       time.Duration
@@ -56,9 +66,21 @@ type Check struct {
 	// Condition). Empty means none. HTTP checks only.
 	Conditions []Condition
 	// Host and Port are the TCP target. Host has no brackets for IPv6.
-	// TCP checks only.
+	// TCP checks only, except that ping checks have a Host and no Port.
 	Host string
 	Port int
+	// Domain is the name a DNS check queries and Record its type, one of
+	// DNSRecords. Resolver is the server, "host", "host:port" or
+	// "[ipv6]:port" (port 53 when absent; see ResolverAddress), or empty for
+	// the system resolver. Expected, when set, is the value one of the
+	// answers must have: an address for A and AAAA, the target host for
+	// CNAME and MX (case and a final dot do not matter; the MX priority is
+	// ignored) and the whole text for TXT (a record's strings joined). DNS
+	// checks only.
+	Domain   string
+	Record   string
+	Resolver string
+	Expected string
 	// Channel is the name of the channel that receives this check's alerts;
 	// empty means no alerts.
 	Channel string
@@ -83,6 +105,10 @@ type Check struct {
 	// Heartbeat checks only.
 	Schedule string
 	Cron     string
+	// Tags group monitors for search, mutes and maintenance windows: at most
+	// MaxTags, lowercase letters a-z, digits and "-", in the order typed
+	// (see NormalizeTags). Any kind can have them.
+	Tags []string
 }
 
 // MaxAlertThreshold is the largest AlertAfter and RecoverAfter.
@@ -102,23 +128,28 @@ type rawCheck struct {
 	Interval       string
 	Timeout        string
 	ExpectedStatus *int
-	// TCP skips the URL and status rules, which only apply to HTTP.
-	TCP bool
+	// NotHTTP skips the URL and status rules, which only apply to HTTP.
+	NotHTTP bool
 }
 
 // ValidateCheck validates a check definition and is the single validation
 // entry point for every writer. For HTTP all of name, URL, interval, timeout
 // and expected status are required; durations must be positive, timeout must
 // not exceed interval, and the expected status must be between 100 and 599.
-// See validateHTTPFields and validateTCPFields for the rest.
+// Ping and DNS checks share the name, interval and timeout rules. See
+// validateHTTPFields, validateTCPFields, validatePingFields and
+// validateDNSFields for the rest.
 func ValidateCheck(c Check) error {
 	var errs []error
 	switch c.Kind {
-	case "", CheckHTTP, CheckTCP:
+	case "", CheckHTTP, CheckTCP, CheckPing, CheckDNS:
 	case CheckHeartbeat:
 		errs = validateHeartbeatFields(c)
 	default:
-		errs = append(errs, fmt.Errorf("kind %q must be http, tcp or heartbeat", c.Kind))
+		errs = append(errs, fmt.Errorf("kind %q must be http, tcp, heartbeat, ping or dns", c.Kind))
+	}
+	if c.Kind != CheckDNS && c.Kind != CheckPing && c.hasDNSFields() {
+		errs = append(errs, errDNSFields)
 	}
 	if c.Kind != CheckHeartbeat && (c.Schedule != "" || c.Cron != "") {
 		errs = append(errs, errors.New("schedule and cron are only for heartbeat checks"))
@@ -137,20 +168,26 @@ func ValidateCheck(c Check) error {
 	if c.RecoverAfter < 0 || c.RecoverAfter > MaxAlertThreshold {
 		errs = append(errs, fmt.Errorf("recover after %d must be between 1 and %d", c.RecoverAfter, MaxAlertThreshold))
 	}
+	errs = append(errs, validateTags(c.Tags)...)
 	return errors.Join(errs...)
 }
 
-// validateProbe checks the fields of a check the daemon runs itself: HTTP
-// and TCP.
+// validateProbe checks the fields of a check the daemon runs itself: HTTP,
+// TCP, ping and DNS.
 func validateProbe(c Check) []error {
 	var errs []error
 	raw := rawFromCheck(c)
-	raw.TCP = c.Kind == CheckTCP
+	raw.NotHTTP = c.Kind == CheckTCP || c.Kind == CheckPing || c.Kind == CheckDNS
 	_, parsed := parseCheck(raw)
 	errs = append(errs, parsed...)
-	if raw.TCP {
+	switch c.Kind {
+	case CheckTCP:
 		errs = append(errs, validateTCPFields(c)...)
-	} else {
+	case CheckPing:
+		errs = append(errs, validatePingFields(c)...)
+	case CheckDNS:
+		errs = append(errs, validateDNSFields(c)...)
+	default:
 		errs = append(errs, validateHTTPFields(c)...)
 	}
 	return errs
@@ -171,7 +208,7 @@ func parseCheck(rc rawCheck) (Check, []error) {
 		errs = append(errs, errors.New("name is required"))
 	}
 
-	if !rc.TCP {
+	if !rc.NotHTTP {
 		if err := validateURL(rc.URL); err != nil {
 			errs = append(errs, err)
 		}
@@ -194,7 +231,7 @@ func parseCheck(rc rawCheck) (Check, []error) {
 	}
 
 	switch {
-	case rc.TCP:
+	case rc.NotHTTP:
 	case rc.ExpectedStatus == nil:
 		errs = append(errs, errors.New("expected status is required"))
 	case *rc.ExpectedStatus < 100 || *rc.ExpectedStatus > 599:

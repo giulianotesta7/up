@@ -639,3 +639,34 @@ func TestInstallCreatesMissingInstallDir(t *testing.T) {
 		t.Fatalf("binary not installed: %v", err)
 	}
 }
+
+// Ping monitors use unprivileged ICMP datagram sockets, which the kernel
+// allows to the groups in net.ipv4.ping_group_range (systemd sets every
+// group by default). The shipped units grant no capability for it and set
+// nothing that would block those sockets; the compose file sets the
+// namespaced sysctl for its own container only.
+func TestShippedUnitsAndComposeAllowPingWithoutCapabilities(t *testing.T) {
+	for _, name := range []string{"up.service", "up-system.service"} {
+		content, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(content), "\n") {
+			for _, blocked := range []string{"AmbientCapabilities=", "CapabilityBoundingSet=", "RestrictAddressFamilies=", "PrivateNetwork=", "IPAddressDeny="} {
+				if strings.HasPrefix(line, blocked) {
+					t.Errorf("%s sets %q, which grants or blocks ICMP sockets", name, line)
+				}
+			}
+		}
+		if !strings.Contains(string(content), "net.ipv4.ping_group_range") || !strings.Contains(string(content), "AmbientCapabilities=CAP_NET_RAW") {
+			t.Errorf("%s does not document how ping monitors get permission:\n%s", name, content)
+		}
+	}
+	compose, err := os.ReadFile("../docker-compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(compose), "sysctls:\n      net.ipv4.ping_group_range: \"0 2147483647\"\n") || strings.Contains(string(compose), "cap_add:") || strings.Contains(string(compose), "privileged:") {
+		t.Errorf("docker-compose.yml must allow unprivileged pings with the namespaced sysctl only:\n%s", compose)
+	}
+}

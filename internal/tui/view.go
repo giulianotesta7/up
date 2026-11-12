@@ -9,6 +9,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/heohlee/up/internal/config"
 )
 
 const timeLayout = "Jan 02 15:04:05"
@@ -33,7 +35,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		// also consume terminal cells, including double-width characters.
 		statusWidth := 7
 		for _, s := range snap.Services {
-			statusWidth = max(statusWidth, ansi.StringWidth(s.Label()))
+			statusWidth = max(statusWidth, ansi.StringWidth(snap.shown(s).Label()))
 		}
 		// MUTED is always shown (13 cells), so its place does not move when a
 		// mute starts or ends.
@@ -46,10 +48,37 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			certWidth = 9
 		}
 		heldWidth, heldHeader := heldColumn(snap, now)
-		showTrend := width <= 0 || width >= max(78, nameWidth+55+statusWidth+certWidth)
+		// Tags follow the name, dim: they keep their place before the trend
+		// and the tcp tag, shortened to "#nas +1" when "#nas #home" does not
+		// fit. Width 1 (the split pane measure) takes the short form.
+		fullTags, shortTagWidth := tagColumn(snap)
+		tagRoom := 0
+		if shortTagWidth > 0 {
+			tagRoom = 2 + shortTagWidth
+		}
+		// fits reports whether rows with a name column of nameCells, up to
+		// the held column, fit the width; with tags it decides every column.
+		fits := func(nameCells int, trend bool) bool {
+			cells := nameCells + statusWidth + certWidth + heldWidth + 30
+			if trend {
+				cells += 18
+			}
+			return width <= 0 || shortTagWidth == 0 || cells <= width
+		}
+		showTrend := (width <= 0 || width >= max(78, nameWidth+tagRoom+55+statusWidth+certWidth)) && fits(nameWidth+tagRoom, true)
 		// A tcp or hb tag follows the name when the list has room for it.
-		tcpTag := kindTagWidth(snap, width, nameWidth, statusWidth, certWidth)
+		tcpTag := kindTagWidth(snap, width, nameWidth+tagRoom, statusWidth, certWidth)
+		if !fits(nameWidth+tagRoom+tcpTag, showTrend) {
+			tcpTag = 0
+		}
 		nameWidth += tcpTag
+		baseWidth, tagWidth, longTags := nameWidth, shortTagWidth, false
+		if fullTags > 0 {
+			if fits(nameWidth+2+fullTags, showTrend) {
+				tagWidth, longTags = fullTags, true
+			}
+			nameWidth += 2 + tagWidth
+		}
 		row := func(marker, dot, name, status, latency, trend, cert, last, muted, reason string) string {
 			padding := strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name)))
 			middle := ""
@@ -72,12 +101,19 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			if i == selected {
 				marker = accentStyle.Render("▌")
 			}
+			s = snap.shown(s)
 			latency, last, reason := "", "", ""
 			if s.HasResult {
 				latency, last = formatLatency(s.Latest.Latency), ago(now, s.Latest.At)
 				reason = s.Latest.Error
+				if answer := dnsAnswer(s.Latest); reason == "" && answer != "" {
+					reason = helpStyle.Render(s.Check.Record + " " + answer)
+				}
 			}
 			trend := sparkline(s.Recent, 16)
+			if snap.Pings.Holds(s.Check) {
+				trend, reason = "", warnStyle.Render(config.PingDeniedReason)
+			}
 			if s.Check.Kind == kindHeartbeat {
 				latency, last, reason = helpStyle.Render("—"), heartbeatLast(s, now), heartbeatReason(s, snap, now)
 				trend = pingCells(heartbeatCells(s, snap), 16, false)
@@ -93,9 +129,16 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 				}
 				name = highlightMatch(name, filter.query, base)
 			}
-			name = tagKind(name, s.Check, nameWidth, tcpTag)
+			name = tagKind(name, s.Check, baseWidth, tcpTag)
+			if tagWidth > 0 && len(s.Check.Tags) > 0 {
+				tags := shortTags(s.Check.Tags)
+				if longTags {
+					tags = hashTags(s.Check.Tags)
+				}
+				name += strings.Repeat(" ", max(0, baseWidth-ansi.StringWidth(name))) + "  " + helpStyle.Render(tags)
+			}
 			cert := ""
-			if anyCert && s.Check.Kind != kindTCP && s.Check.Kind != kindHeartbeat {
+			if anyCert && (s.Check.Kind == "" || s.Check.Kind == config.CheckHTTP) {
 				cert = helpStyle.Render("—")
 			}
 			if s.HasCert {
@@ -197,10 +240,15 @@ func detailHelp(s Service, opts detailOptions) string {
 
 func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr error, width int, opts detailOptions) string {
 	var b strings.Builder
+	held := snap.Pings.Holds(s.Check)
+	s = snap.shown(s)
 	heartbeat := s.Check.Kind == kindHeartbeat
 	target := s.Check.Target()
-	if heartbeat {
+	switch s.Check.Kind {
+	case kindHeartbeat:
 		target = heartbeatTarget(s.Check)
+	case kindPing, kindDNS:
+		target = probeTarget(s.Check)
 	}
 	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + target + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
@@ -224,30 +272,56 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		status := styledLabel(s, 0)
 		if s.HasResult {
 			status += "   last check " + ago(now, s.Latest.At) + " (" + formatLatency(s.Latest.Latency) + ")"
+			// A mismatch already names the answer in Last error.
+			if answer := dnsAnswer(s.Latest); answer != "" && s.Latest.Error == "" {
+				status += " · " + answer
+			}
 		}
 		field("Status", status)
 	}
-	if s.Muted(now) {
-		held := "nothing pending"
-		switch s.Pending() {
+	// hold writes a Muted or Maintenance row: until when, through which tag
+	// and the alert held. Too wide for the screen, the outage start is left
+	// to Down since; still too wide, the alert held goes on a line below.
+	hold := func(label, head, pending string) {
+		held, short := "nothing pending", "nothing pending"
+		switch pending {
 		case "down":
 			held = "1 alert pending (down since " + formatTime(s.DownSince, now) + ")"
+			short = "1 alert pending (down)"
 		case "recovery":
 			held = "1 alert pending (recovery)"
+			short = held
 		}
-		field("Muted", warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))+" · "+held)
+		fits := func(value string) bool { return width <= 0 || 15+ansi.StringWidth(value) <= width }
+		switch {
+		case fits(head + " · " + held):
+			field(label, head+" · "+held)
+		case fits(head + " · " + short):
+			field(label, head+" · "+short)
+		default:
+			field(label, head)
+			field("", held)
+		}
+	}
+	if s.Muted(now) {
+		head := warnStyle.Render(fmt.Sprintf("until %s (%s left)", s.Mute.Until.In(now.Location()).Format("15:04"), timeLeft(s.Mute.Until.Sub(now))))
+		if s.Mute.Tag != "" {
+			head += " · through #" + s.Mute.Tag
+		}
+		hold("Muted", head, s.Pending())
 	}
 	if s.InMaintenance.Active {
-		held := "nothing pending"
-		switch s.heldPending() {
-		case "down":
-			held = "1 alert pending (down since " + formatTime(s.DownSince, now) + ")"
-		case "recovery":
-			held = "1 alert pending (recovery)"
+		head := warnStyle.Render(fmt.Sprintf("until %s (%s left)", clockWithDay(s.InMaintenance.End, now), timeLeft(s.InMaintenance.End.Sub(now))))
+		if tag := tagMaintenance(s, now); tag != "" {
+			head += " · through #" + tag
 		}
-		field("Maintenance", warnStyle.Render(fmt.Sprintf("until %s (%s left)", clockWithDay(s.InMaintenance.End, now), timeLeft(s.InMaintenance.End.Sub(now))))+" · "+held)
+		hold("Maintenance", head, s.heldPending())
 	}
-	field("Last error", orDash(s.Latest.Error))
+	if held {
+		field("Last error", warnStyle.Render(config.PingDeniedReason)+helpStyle.Render(" · README › Ping"))
+	} else {
+		field("Last error", orDash(s.Latest.Error))
+	}
 	if streak := streakLine(s, now); streak != "" {
 		field("Streak", streak)
 	}
@@ -271,6 +345,18 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 			field("Interval", shortDuration(s.Check.Interval))
 			field("Timeout", shortDuration(s.Check.Timeout))
 			field("Type", "TCP connect")
+		case kindPing:
+			field("Interval", shortDuration(s.Check.Interval))
+			field("Timeout", shortDuration(s.Check.Timeout))
+			field("Type", "ICMP echo")
+		case kindDNS:
+			field("Interval", shortDuration(s.Check.Interval))
+			field("Timeout", shortDuration(s.Check.Timeout))
+			expected := s.Check.Expected
+			if expected == "" {
+				expected = helpStyle.Render(expectedHint)
+			}
+			field("Expected", expected)
 		default:
 			field("Interval", shortDuration(s.Check.Interval))
 			field("Timeout", shortDuration(s.Check.Timeout))
@@ -288,8 +374,11 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 			}
 		}
 		field("Channel", channel)
+		if len(s.Check.Tags) > 0 {
+			field("Tags", hashTags(s.Check.Tags))
+		}
 		if n := len(s.Maintenance); n > 0 {
-			field("Maintenance", plural(n, "window")+helpStyle.Render(" (w to edit)"))
+			field("Maintenance", plural(n, "window")+throughTags(s)+helpStyle.Render(" (w to edit)"))
 		}
 		failure, success := "failure", "success"
 		if heartbeat {

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,8 +18,8 @@ const (
 // filterTabs are the status filters, in the order tab cycles them.
 var filterTabs = []string{"all", "down", "failing", "held"}
 
-// listFilter narrows the monitor list: a case-insensitive query on name, URL
-// or host, and a status tab. open is the search bar being edited; a closed
+// listFilter narrows the monitor list: a case-insensitive query on name, URL,
+// host or domain, and a status tab. open is the search bar being edited; a closed
 // filter that is still active stays applied until esc clears it. total and
 // shown are filled for rendering.
 type listFilter struct {
@@ -29,6 +30,30 @@ type listFilter struct {
 	// listWidth is the width the split layout's left pane keeps whatever
 	// the filter hides.
 	listWidth int
+	// tags are the tags in use, which a query starting with # lists.
+	tags []string
+}
+
+// tagQuery reports whether the query looks for a tag ("#nas") and which.
+func (f listFilter) tagQuery() (string, bool) {
+	tag, ok := strings.CutPrefix(f.query, "#")
+	return strings.ToLower(strings.TrimSpace(tag)), ok
+}
+
+// tagChoices is what the counter shows while a tag is being typed: the tags
+// in use starting with it, unless it already names one.
+func (f listFilter) tagChoices() []string {
+	tag, ok := f.tagQuery()
+	if !ok || slices.Contains(f.tags, tag) {
+		return nil
+	}
+	var out []string
+	for _, t := range f.tags {
+		if strings.HasPrefix(t, tag) {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func (f listFilter) active() bool { return f.open || f.query != "" || f.tab != 0 }
@@ -67,7 +92,12 @@ func (f listFilter) prompt(width int) string {
 		return accentStyle.Render("/") + " " + query + accentStyle.Render("█") + "   " + strings.Join(tabs, " ") + "   " + helpStyle.Render(counter)
 	}
 	long := fmt.Sprintf("%d of %d", f.shown, f.total)
-	for _, counter := range []string{long + " · enter keep · esc clear", long, fmt.Sprintf("%d/%d", f.shown, f.total)} {
+	counters := []string{long + " · enter keep · esc clear", long, fmt.Sprintf("%d/%d", f.shown, f.total)}
+	if tags := f.tagChoices(); len(tags) > 0 {
+		list := "tags: " + strings.Join(tags, " · ")
+		counters = append([]string{list + " · esc clear", list}, counters...)
+	}
+	for _, counter := range counters {
 		if line := build(f.query, counter); width <= 1 || ansi.StringWidth(line) <= width {
 			return line
 		}
@@ -96,8 +126,12 @@ func (f listFilter) matches(s Service, now time.Time) bool {
 	if f.query == "" {
 		return true
 	}
+	// "#nas" matches the whole tag; a bare "#" matches every monitor.
+	if tag, ok := f.tagQuery(); ok {
+		return tag == "" || s.Check.HasTag(tag)
+	}
 	query := strings.ToLower(f.query)
-	for _, text := range []string{s.Check.Name, s.Check.URL, s.Check.Host} {
+	for _, text := range []string{s.Check.Name, s.Check.URL, s.Check.Host, s.Check.Domain} {
 		if strings.Contains(strings.ToLower(text), query) {
 			return true
 		}
@@ -122,7 +156,7 @@ func (m Model) visible() []int {
 	now := m.now()
 	var out []int
 	for i, s := range m.snap.Services {
-		if !m.filter.active() || m.filter.matches(s, now) {
+		if !m.filter.active() || m.filter.matches(m.snap.shown(s), now) {
 			out = append(out, i)
 		}
 	}
@@ -176,7 +210,7 @@ func (m Model) move(delta int) Model {
 // the selection translated to their positions.
 func (m Model) filtered() (Snapshot, int, listFilter) {
 	f := m.filter
-	f.total = len(m.snap.Services)
+	f.total, f.tags = len(m.snap.Services), m.snap.tagsInUse()
 	if m.splitMode() {
 		f.listWidth = splitListWidth(m.snap, m.selected, m.now())
 	}

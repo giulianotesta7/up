@@ -21,6 +21,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 
 - **HTTP checks** with per-monitor interval, timeout and expected status. Redirects are followed. Optional method, headers, body, expected text and response conditions (JSON value, body regex, max response time, response header).
 - **TCP checks** that connect to a host and port, for services without an HTTP endpoint.
+- **Ping and DNS checks**: one ICMP echo to a host, or one DNS query (A, AAAA, CNAME, MX, TXT) with an optional resolver and expected value.
 - **Managed from the TUI.** Add, edit, delete and mute monitors; the daemon picks up changes within ~2s.
 - **Remote TUI.** Run the daemon on a server and manage it from your laptop over an authenticated API.
 - **Check history.** Every result is stored and outages are derived from it. Results are kept for 30 days by default; retention is configurable.
@@ -28,6 +29,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 - **TLS expiry warnings** at 14, 7 and 3 days.
 - **Maintenance mute** from 1 minute to 7 days, without stopping checks or history.
 - **Recurring maintenance windows** that hold alerts and certificate warnings while checks and history continue.
+- **Tags** to group monitors, and mute them or give them maintenance windows together.
 - **Stale-daemon detection.** If the daemon stops, the TUI says so and keeps the last known statuses instead of marking everything DOWN.
 
 ## Install
@@ -100,7 +102,7 @@ curl -fsSL https://raw.githubusercontent.com/heohlee/up/main/install.sh | sh -s 
 
 ### From source
 
-Requires Go 1.26.10:
+Requires Go 1.26.11:
 
 ```sh
 go build -o up ./cmd/up
@@ -118,7 +120,7 @@ The database is resolved in this order: `--db`, `$UP_DB`, `/var/lib/up/up.db` if
 
 ### Keys
 
-`j`/`k` move · `/` search (the footer becomes the prompt · `tab` status: all, down, failing, held · `enter` keep · `esc` clear) · `enter` details · `n` new · `e` edit · `y` duplicate · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` mail servers · `c` channels · `f` defaults · `v` ping URL (heartbeat detail) · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
+`j`/`k` move · `/` search (the footer becomes the prompt · `#` lists the tags and `#nas` shows the monitors tagged `nas` · `tab` status: all, down, failing, held · `enter` keep · `esc` clear) · `enter` details · `n` new · `e` edit · `y` duplicate · `d` delete · `m` mute · `u` unmute · `w` maintenance windows · `s` mail servers · `c` channels · `f` defaults · `v` ping URL (heartbeat detail) · `a` animation · `r` retry now (remote) · `esc` back · `q` quit.
 
 `y` opens the new monitor form filled from the selected monitor, named `<name> copy`. Headers and body stay sealed (`set`, with keep, replace or clear), and history, mute and maintenance windows are not copied. Nothing is saved until `enter`.
 
@@ -158,6 +160,32 @@ A monitor with headers or a body does not follow a redirect to another scheme, h
 Set `Type` to `TCP` (first field, `←`/`→`) and enter a host (name or IP; IPv6 without brackets) and a port. The monitor is **up** when the connection opens and **down** if it is refused, DNS fails or it times out. Latency is the time to connect, including name resolution.
 
 It only proves that something is listening: no TLS, certificate or application check. TCP monitors have no URL, expected status or `TLS expiry`.
+
+### Ping monitors
+
+Set `Type` to `Ping` and enter a host (name or IP; IPv6 without brackets). Each check sends one ICMP echo request: the monitor is **up** when the reply arrives within the timeout (latency is the round-trip time) and **down** otherwise (`no reply from 192.168.1.1 in 2s`). A host name is resolved first, IPv4 before IPv6; one that does not resolve is down with `cannot resolve nas.home.arpa`. It proves the host answers ICMP, nothing about its services.
+
+**Requirement.** `up serve` sends pings through unprivileged ICMP sockets, which Linux allows to the groups listed in `net.ipv4.ping_group_range`, or through a raw socket when it has `CAP_NET_RAW`. No capability is needed in the usual setups:
+
+- **systemd** (the shipped user and system units): systemd sets `net.ipv4.ping_group_range` to every group by default.
+- **Docker**: unprivileged ICMP is allowed in containers by default; `docker-compose.yml` also sets the sysctl for its own container (Podman needs it: `--sysctl net.ipv4.ping_group_range="0 2147483647"`). It only applies to the container's network namespace.
+- **Elsewhere**: allow the group that runs `up serve`, for example every group: `sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"` (add it to `/etc/sysctl.d/` to keep it). As a last resort, the system service can get raw sockets instead with `sudo systemctl edit up` and `[Service]` `AmbientCapabilities=CAP_NET_RAW`; a user service cannot.
+
+The daemon checks this when it starts and logs `cannot send pings` when it cannot. Then ping monitors are not run: they stay pending with `cannot send pings`, record nothing and send no alerts, locally and with `--remote`. Restart `up serve` after changing the setting.
+
+In the TUI a dim `ping` tag follows the name and the detail's `Type` is `ICMP echo`. While the daemon cannot send pings, the form shows an amber line when `Type` is `Ping` (saving is still allowed) and ping monitors read `PENDING` with an amber `cannot send pings`, in the list and in the detail's `Last error`.
+
+### DNS monitors
+
+Set `Type` to `DNS` and enter a **domain**, a **record** type (`A`, `AAAA`, `CNAME`, `MX` or `TXT`), an optional **resolver** and an optional **expected** value. The query goes over UDP, again over TCP when the answer is truncated. DNS monitors need no permission.
+
+- **Resolver**: `host` or `host:port` (port 53 by default), an IPv6 address in brackets (`[fd00::53]:53`). Empty uses the system resolver: the `nameserver` lines of `/etc/resolv.conf`, in order. The next one is asked only when a server gives no reply at all (silent or refusing the connection); each gets an even share of the time left, so the check still ends within its timeout. An answer such as `NXDOMAIN` or `SERVFAIL` is final.
+- **Expected**: the monitor is up when any answer matches. `A` and `AAAA` compare addresses, `MX` the mail host (the priority is ignored), `CNAME` the first target (case and a final dot do not matter for host names) and `TXT` the whole text of a record, its strings joined. Empty: any answer is up.
+- **Down** on `NXDOMAIN for nas.home.arpa`, `SERVFAIL`, `REFUSED`, an answer without a record of the type (`no A record for nas.home.arpa`), no reply in the timeout (`no reply from 192.0.2.53:53 in 2s`, listing every system nameserver that stayed silent: `no reply from 192.0.2.53:53, 192.0.2.54:53 in 2s`) or a mismatch: `A = 203.0.113.9, want 203.0.113.10` (`+1` after the value when there were more answers).
+
+Latency is the query time. Each result keeps the answer shown (the one that matched, otherwise the first) and how many there were. DNSSEC is not validated.
+
+In the TUI the form rows are Domain, Record (`←`/`→`), Resolver (dim `system resolver` while empty) and Expected (dim `any answer` while empty). The list shows a dim `dns` tag and the answer in the last column (`A 203.0.113.10 +1`); the detail title adds `@resolver` when one is set, and its Status line ends with the answer (`· 203.0.113.10 +1`). A mismatch shows the answer once, in the reason.
 
 ### Heartbeat monitors
 
@@ -201,7 +229,7 @@ The token in the URL only records pings for that monitor: it grants no API or co
 
 In the TUI:
 
-- **Form.** Heartbeat rows are Name, Schedule (`‹ Period ›` by default), Period, Grace, Channel, Alert after (missed pings) and Recover after (pings), with how long after the last ping the first alert comes. `Schedule: ‹ Cron ›` swaps the Period row for a Cron row, which shows the field order `min hour day month weekday` while it has focus; below the form, the zone the runs are in and the next three runs (`Next runs  Mon 9 02:00 · Tue 10 02:00 · Wed 11 02:00`), blank while the expression does not parse. An amber line says when the daemon has no API listener; saving is still allowed.
+- **Form.** Heartbeat rows are Name, Schedule (`‹ Period ›` by default), Period, Grace, Tags, Channel, Alert after (missed pings) and Recover after (pings), with how long after the last ping the first alert comes. `Schedule: ‹ Cron ›` swaps the Period row for a Cron row, which shows the field order `min hour day month weekday` while it has focus; below the form, the zone the runs are in and the next three runs (`Next runs  Mon 9 02:00 · Tue 10 02:00 · Wed 11 02:00`), blank while the expression does not parse. An amber line says when the daemon has no API listener; saving is still allowed.
 - **After saving** a new heartbeat, the form box shows the full URL once, on its own line, ready to select with the mouse; `esc` closes it. When the terminal is too narrow for that line, the base URL and the token get a line each: join them.
 - **List.** A dim `hb` tag follows the name, `LATENCY` is `—`, `TREND` has one cell per period, or per expected run of a cron heartbeat (a ping, or a red `█` when missed or reported as failed) and `LAST CHECK` is the last ping. The last column says `no ping yet` (or `needs --api-listen`), `next by 02:30`, `missed · due by 03:30` or `job sent /fail`; a cron heartbeat's times are in the defaults zone with its abbreviation (`next by Mon 02:30 -03`).
 - **Detail.** The title has the schedule (`heartbeat · every 24h · grace 1h` or `heartbeat · cron 0 2 * * 1-5 · grace 1h`). Status with the last ping, `Next due` (`before 02:30 (in 21h 12m)`), a `PINGS` row in place of the latency chart (one cell per period or per run, `░` missed, `█` failed), and `PING URL` with the token masked: `v` shows it in place and any other key hides it. Incidents and recent alerts work as for any monitor.
@@ -281,6 +309,12 @@ When everything ends, recipients only hear what they do not already know, once, 
 
 Daylight saving: durations are elapsed time. A start that does not exist that day is skipped; one that happens twice runs once, at its first occurrence.
 
+### Tags
+
+A monitor of any kind can have up to 5 tags, made of lowercase letters, digits and `-` (`NAS` is saved as `nas`), kept in the order typed. A mute or a maintenance window can target a tag instead of one monitor: it holds every monitor with that tag, including monitors tagged later. When a monitor and its tag are both muted, alerts are held until the later end. Removing a tag from its last monitor, by editing or deleting it, also deletes that tag's mutes and windows.
+
+In the TUI, tags are typed in the monitor form's `Tags` row, comma-separated (`nas, home`); the row lists the tags in use and names a typed tag no monitor has yet, to catch typos. The list shows them dim after the name (`#nas +1` when narrow) and the detail on a `Tags` line. In the mute popup (`m`) and a new maintenance window (`w`, `a`), `←`/`→` choose between the monitor and its tags; the window list says what each window applies to, and a member can edit or delete a tag's window. The detail says `through #nas` when a mute or window comes from a tag, and `u` on a monitor muted through its tag asks before unmuting the whole tag.
+
 ### Defaults
 
 `f` opens the defaults for new items: the time zone of new maintenance windows (also the time shown in heartbeat reasons, such as `no ping since 12:10 -03`, and the zone cron heartbeats run in), and the channel, interval, timeout, expected status, alert after and recover after of new monitors. The new monitor and new window forms start from them. Existing monitors, channels and windows keep their values, and each window keeps its own zone. Until you save, the defaults are UTC, no channel, 30s, 5s, 200, and 1 and 1. Deleting the default channel makes the default none.
@@ -339,6 +373,8 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 | `GET /api/v1/snapshot` | returns everything the TUI shows |
 | `POST /api/v1/checks`, `PUT`/`DELETE /api/v1/checks/{name}` | adds, edits or deletes a monitor (names cannot change). `POST` accepts an optional `copy_from` (a monitor name): header values and body the request keeps come from that monitor, sealed on the server; `404` if it does not exist |
 | `PUT`/`DELETE /api/v1/checks/{name}/mute` | mutes (`duration_ms`, 1 minute to 7 days) or unmutes |
+| `PUT`/`DELETE /api/v1/tags/{tag}/mute` | mutes or unmutes every monitor with the tag (`duration_ms`, 1 minute to 7 days); `400` for an invalid tag, `404` when no monitor has it |
+| `GET`/`POST /api/v1/tags/{tag}/maintenance`, `PUT`/`DELETE .../maintenance/{id}` | a tag's maintenance windows, with the same body as a monitor's |
 | `POST /api/v1/smtp-servers`, `PUT`/`DELETE /api/v1/smtp-servers/{name}` | manages SMTP servers |
 | `POST /api/v1/channels`, `PUT`/`DELETE /api/v1/channels/{name}` | manages channels |
 | `GET`/`POST /api/v1/checks/{name}/maintenance`, `PUT`/`DELETE .../maintenance/{id}` | lists, adds, edits or deletes a monitor's maintenance windows (`weekdays` 0=Sunday, `start_minute`, `duration_ms`, `zone`); active windows hold alerts and certificate warnings |
@@ -347,7 +383,7 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 | `POST`/`GET /api/v1/channels/{name}/test` | requests a channel test (`202`, or `409` while one is active) and reads the newest one; the daemon sends it |
 | `GET`/`POST /api/v1/checks/{name}/heartbeat-token` | shows a heartbeat's ping token, or replaces it (the old one stops working), as `{"token", "path"}`; `404` for a monitor that is not a heartbeat |
 
-HTTP monitors take optional `conditions`, an ordered list of `{"kind": "json", "path", "value"}`, `{"kind": "regex", "pattern"}`, `{"kind": "response_time", "within_ms"}` or `{"kind": "header", "name", "value"}`; the snapshot returns them the same way. Heartbeat monitors use `"kind": "heartbeat"` with `grace_ms` and either `period_ms` or `"schedule": "cron"` with a `cron` expression (`schedule` reads back `period` or `cron`; an invalid expression is a `400` and nothing is stored). The snapshot carries each heartbeat's `heartbeat` state (`waiting`, `last_ping`, `deadline`) and the daemon's `api` listener (`listen`, `tls`); never the ping token.
+Monitors take optional `tags` (a list, saved lowercase); the snapshot's `mute` and `maintenance` windows carry a `tag` when they come from a tag. HTTP monitors take optional `conditions`, an ordered list of `{"kind": "json", "path", "value"}`, `{"kind": "regex", "pattern"}`, `{"kind": "response_time", "within_ms"}` or `{"kind": "header", "name", "value"}`; the snapshot returns them the same way. Heartbeat monitors use `"kind": "heartbeat"` with `grace_ms` and either `period_ms` or `"schedule": "cron"` with a `cron` expression (`schedule` reads back `period` or `cron`; an invalid expression is a `400` and nothing is stored). Ping monitors use `"kind": "ping"` with `host`; DNS monitors use `"kind": "dns"` with `domain`, `record`, `resolver` and `expected`, and their results carry `answer` and `answers`. The snapshot's `pings` says whether the daemon can send pings (`allowed`, `denied`, or empty when unknown). The snapshot carries each heartbeat's `heartbeat` state (`waiting`, `last_ping`, `deadline`) and the daemon's `api` listener (`listen`, `tls`); never the ping token.
 
 Bodies are strict JSON, limited to 1 MiB. Errors: `400` invalid input, `404` not found, `409` duplicate or still in use. Rejected requests change nothing.
 

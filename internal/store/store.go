@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 12
+const schemaVersion = 14
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -203,7 +203,36 @@ ALTER TABLE channels ADD COLUMN priority   TEXT NOT NULL DEFAULT '';
 	// JSON path, header name, value, regex pattern, max response time in
 	// nanoseconds) in check order; they hold no secrets.
 	`ALTER TABLE checks ADD COLUMN conditions TEXT NOT NULL DEFAULT '';`,
-	// v11 -> v12: heartbeat cron schedules. Additive: existing rows read an
+	// v11 -> v12: monitor tags, and mutes and maintenance windows for a tag.
+	// Additive: existing monitors read no tags and existing windows belong to
+	// their check. tags is the normalized list joined by commas. A tag's
+	// window has an empty check_name; tag_mutes holds one mute per tag and no
+	// notification state. Membership is resolved on every read, and removing
+	// a tag from its last monitor deletes its mutes and windows.
+	`
+ALTER TABLE checks ADD COLUMN tags TEXT NOT NULL DEFAULT '';
+ALTER TABLE maintenance_windows ADD COLUMN tag TEXT NOT NULL DEFAULT '';
+CREATE INDEX maintenance_windows_by_tag ON maintenance_windows (tag) WHERE check_name = '';
+CREATE TABLE tag_mutes (tag TEXT PRIMARY KEY, until_ns INTEGER NOT NULL);
+`,
+	// v12 -> v13: ping and DNS checks. Additive: existing checks read no DNS
+	// fields (ping checks use host) and existing results no answer. answer is
+	// the DNS answer shown and answers how many there were. daemon_pings is
+	// one row (id = 1) written by every `up serve` start: whether it can send
+	// pings; no row means unknown.
+	`
+ALTER TABLE checks  ADD COLUMN domain   TEXT    NOT NULL DEFAULT '';
+ALTER TABLE checks  ADD COLUMN record   TEXT    NOT NULL DEFAULT '';
+ALTER TABLE checks  ADD COLUMN resolver TEXT    NOT NULL DEFAULT '';
+ALTER TABLE checks  ADD COLUMN expected TEXT    NOT NULL DEFAULT '';
+ALTER TABLE results ADD COLUMN answer   TEXT    NOT NULL DEFAULT '';
+ALTER TABLE results ADD COLUMN answers  INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE daemon_pings (
+	id         INTEGER PRIMARY KEY CHECK (id = 1),
+	permission TEXT    NOT NULL
+);
+`,
+	// v13 -> v14: cron heartbeat schedules. Additive: existing rows read an
 	// empty schedule (period) and no cron expression, so existing heartbeats
 	// keep their period. schedule is '' or 'cron'; cron is the expression
 	// with its fields separated by one space. run_ns is the cron run a missed
@@ -323,7 +352,8 @@ func migrate(db *sql.DB) error {
 }
 
 // SetChecks replaces the configured checks, keeping their order. Results of
-// removed checks are kept.
+// removed checks are kept; mutes and windows of tags no check carries any
+// more are deleted.
 func (s *Store) SetChecks(ctx context.Context, checks []config.Check) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -337,6 +367,9 @@ func (s *Store) SetChecks(ctx context.Context, checks []config.Check) error {
 		if err := insertCheck(ctx, tx, i, c, nil); err != nil {
 			return fmt.Errorf("store: set checks: %w", err)
 		}
+	}
+	if err := pruneTags(ctx, tx); err != nil {
+		return fmt.Errorf("store: set checks: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: set checks: %w", err)
@@ -354,7 +387,8 @@ func (s *Store) AddCheck(ctx context.Context, c config.Check) error {
 // (EditKeep) from the stored monitor named source instead of from c: the
 // sealed values are copied inside the store and never decrypted. Replace and
 // clear still override them. A missing source stores nothing and fails with
-// ErrNotFound. A TCP check has no protected values and keeps nothing.
+// ErrNotFound. A TCP, ping or DNS check has no protected values and keeps
+// nothing.
 func (s *Store) AddCheckFrom(ctx context.Context, source string, c config.Check) error {
 	if source == "" {
 		return classify(ErrValidation, errors.New("store: add check: source monitor is required"))
@@ -387,7 +421,7 @@ func (s *Store) addCheck(ctx context.Context, source string, c config.Check) err
 		if !found {
 			return classify(ErrNotFound, fmt.Errorf("store: add check: source monitor %q not found", source))
 		}
-		if c.Kind != config.CheckTCP {
+		if c.Kind != config.CheckTCP && c.Kind != config.CheckPing && c.Kind != config.CheckDNS {
 			from = &values
 		}
 	}
@@ -461,8 +495,8 @@ func (s *Store) Record(ctx context.Context, r check.Result) error {
 		return fmt.Errorf("store: refusing to record status %q for %s", r.Status, r.CheckName)
 	}
 	_, err := s.db.ExecContext(ctx,
-		"INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error) VALUES (?, ?, ?, ?, ?, ?)",
-		r.CheckName, r.At.UnixNano(), string(r.Status), int64(r.Latency), r.StatusCode, r.Error)
+		"INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error, answer, answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		r.CheckName, r.At.UnixNano(), string(r.Status), int64(r.Latency), r.StatusCode, r.Error, r.Answer, r.Answers)
 	if err != nil {
 		return fmt.Errorf("store: record %s: %w", r.CheckName, err)
 	}
@@ -517,7 +551,7 @@ func (s *Store) Latest(ctx context.Context, name string) (r check.Result, ok boo
 // Recent returns up to limit results of a check, newest first.
 func (s *Store) Recent(ctx context.Context, name string, limit int) ([]check.Result, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT at_ns, status, latency_ns, status_code, error, run_ns FROM results WHERE check_name = ? ORDER BY at_ns DESC, id DESC LIMIT ?",
+		"SELECT at_ns, status, latency_ns, status_code, error, answer, answers, run_ns FROM results WHERE check_name = ? ORDER BY at_ns DESC, id DESC LIMIT ?",
 		name, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: recent %s: %w", name, err)
@@ -528,7 +562,7 @@ func (s *Store) Recent(ctx context.Context, name string, limit int) ([]check.Res
 		r := check.Result{CheckName: name}
 		var at, latency, run int64
 		var status string
-		if err := rows.Scan(&at, &status, &latency, &r.StatusCode, &r.Error, &run); err != nil {
+		if err := rows.Scan(&at, &status, &latency, &r.StatusCode, &r.Error, &r.Answer, &r.Answers, &run); err != nil {
 			return nil, fmt.Errorf("store: recent %s: %w", name, err)
 		}
 		r.At, r.Status, r.Latency = fromNanos(at), check.Status(status), time.Duration(latency)

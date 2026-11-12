@@ -120,6 +120,7 @@ func (d CheckDTO) check() config.Check {
 	return config.Check{Name: d.Name, URL: d.URL, Interval: time.Duration(d.IntervalMS) * time.Millisecond, Timeout: time.Duration(d.TimeoutMS) * time.Millisecond, ExpectedStatus: d.ExpectedStatus, Channel: d.Channel, AlertAfter: d.AlertAfter, RecoverAfter: d.RecoverAfter, TLSOff: d.TLSOff,
 		Kind: d.Kind, Method: d.Method, ExpectText: d.ExpectText, Host: d.Host, Port: d.Port,
 		Period: time.Duration(d.PeriodMS) * time.Millisecond, Grace: time.Duration(d.GraceMS) * time.Millisecond, Conditions: conditions(d.Conditions),
+		Domain: d.Domain, Record: d.Record, Resolver: d.Resolver, Expected: d.Expected, Tags: d.Tags,
 		Schedule: d.Schedule, Cron: d.Cron}
 }
 

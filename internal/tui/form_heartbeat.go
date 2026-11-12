@@ -62,6 +62,7 @@ func editHeartbeatForm(c config.Check, detail bool) *monitorForm {
 	f := &monitorForm{
 		kind:   kindHeartbeat,
 		values: [5]string{c.Name, "", shortDuration(d.Interval), shortDuration(d.Timeout)}, period: shortDuration(c.Period), grace: shortDuration(c.Grace),
+		record:  config.DNSRecords[0],
 		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: "on",
 		focus: focusPeriod, editing: true, returnDetail: detail, base: c, hadToken: true,
 	}
@@ -75,7 +76,7 @@ func editHeartbeatForm(c config.Check, detail bool) *monitorForm {
 
 // heartbeatCheck converts text only, like check; it carries no probe field.
 func (f monitorForm) heartbeatCheck() (config.Check, error) {
-	c := config.Check{Name: f.values[0], Kind: kindHeartbeat, Channel: f.channel}
+	c := config.Check{Name: f.values[0], Kind: kindHeartbeat, Channel: f.channel, Tags: config.ParseTags(f.tags)}
 	var err error
 	if f.isCron() {
 		c.Schedule, c.Cron = config.ScheduleCron, f.cron
@@ -182,7 +183,7 @@ func renderTokenConfirm(b *strings.Builder) {
 // screen.
 func formVariants(f monitorForm) []monitorForm {
 	var out []monitorForm
-	for _, kind := range []string{"", kindTCP, kindHeartbeat} {
+	for _, kind := range []string{"", kindTCP, kindHeartbeat, kindPing, kindDNS} {
 		v := f
 		v.confirm, v.cursor = false, 0
 		v.setKind(kind)

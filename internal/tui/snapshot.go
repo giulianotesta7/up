@@ -253,6 +253,10 @@ type Snapshot struct {
 	// zero value (API.Enabled false) means the daemon has no API: heartbeats
 	// need `up serve --api-listen`. API.BaseURL builds the ping URL's base.
 	API config.APIListener
+	// Pings is whether the daemon could send pings when it started; unknown
+	// when it never reported it. With config.PingDenied ping monitors stay
+	// pending with config.PingDeniedReason and send no alerts.
+	Pings config.PingPermission
 }
 
 // NewItemDefaults returns the defaults, or the built-in ones for a snapshot
@@ -383,6 +387,13 @@ type APIListenerReader interface {
 }
 
 var _ APIListenerReader = (*store.Store)(nil)
+
+// PingPermissionReader lets Load fill Snapshot.Pings.
+type PingPermissionReader interface {
+	PingPermission(context.Context) (config.PingPermission, error)
+}
+
+var _ PingPermissionReader = (*store.Store)(nil)
 
 // HeartbeatTokens shows and replaces heartbeat ping tokens, the only way a
 // token leaves the store. The remote client implements it through the
@@ -575,6 +586,11 @@ func Load(ctx context.Context, s Store, clock ...time.Time) (Snapshot, error) {
 	}
 	if r, ok := s.(APIListenerReader); ok {
 		if snap.API, err = r.APIListener(ctx); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	if r, ok := s.(PingPermissionReader); ok {
+		if snap.Pings, err = r.PingPermission(ctx); err != nil {
 			return Snapshot{}, err
 		}
 	}

@@ -22,9 +22,11 @@ Creates the SQLite database on first use; no daemon startup required.
 Keep 'up serve' running to discover monitors and record results while closed.
 New monitors require a name and HTTP/HTTPS URL. Defaults: interval 30s,
 timeout 5s, expected status 200. The form's first field,
-Type chooses HTTP, TCP or Heartbeat with ←/→; a TCP monitor takes a host and port and only checks that the
+Type chooses HTTP, TCP, Heartbeat, Ping or DNS with ←/→; a TCP monitor takes a host and port and only checks that the
 connection opens: no TLS validation, no application health, no certificate
 tracking.
+A ping monitor sends one ICMP echo to a host; 'up serve' needs permission to send pings (README: Ping monitors).
+A DNS monitor queries an A, AAAA, CNAME, MX or TXT record, with an optional resolver and expected value.
 A heartbeat takes a period and a grace; its job POSTs to a ping URL, which needs 'up serve --api-listen'.
 It shows WAITING until the first ping and is down when none arrives within period + grace.
 Schedule ‹ Cron › replaces the period with a cron expression (min hour day month weekday) run in the defaults zone.
@@ -38,7 +40,7 @@ Channels are email, webhook (a generic JSON POST), ntfy, telegram, discord, slac
 
 Keys: ↑/↓ or k/j select · enter details (small terminals) · n new monitor · e edit · d delete · s SMTP servers · c channels · v ping URL (heartbeats) · a toggle animation · ? all keys · esc back · q/ctrl+c quit
 Terminals of at least 110x30 show the selected monitor's detail beside the list, with an activity feed below; enter is not needed there.
-Form: tab/shift+tab focus · ←/→ choose (Type, Schedule, Channel, thresholds, Token) · enter save · esc cancel · ctrl+c quit
+Form: tab/shift+tab focus · ←/→ choose (Type, Schedule, Record, Channel, thresholds, Token) · enter save · esc cancel · ctrl+c quit
 Delete: y delete · n cancel · esc cancel · ctrl+c quit
 
 Use --remote or UP_REMOTE=true to connect to the remote saved by 'up login'.

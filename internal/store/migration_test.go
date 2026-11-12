@@ -107,7 +107,7 @@ func tables(t *testing.T, path string) []string {
 	return names
 }
 
-var v2Tables = []string{"alert_state", "certs", "channel_tests", "channels", "checks", "daemon", "daemon_api", "defaults", "delivery_attempts", "maintenance_windows", "mutes", "results", "secret_key", "smtp_servers", "sqlite_sequence"}
+var v2Tables = []string{"alert_state", "certs", "channel_tests", "channels", "checks", "daemon", "daemon_api", "daemon_pings", "defaults", "delivery_attempts", "maintenance_windows", "mutes", "results", "secret_key", "smtp_servers", "sqlite_sequence", "tag_mutes"}
 
 func TestOpenMigratesV1AndKeepsData(t *testing.T) {
 	path := v1Database(t)
@@ -337,6 +337,8 @@ INSERT INTO daemon (id, last_beat_ns) VALUES (1, 42);`); err != nil {
 }
 
 // dumpTables returns every row of the named tables as text, in a fixed order.
+// results rows show the columns schema v1 created: later schemas only add
+// columns to it, with defaults, which no older row was written with.
 func dumpTables(t *testing.T, path string, tables ...string) map[string][]string {
 	t.Helper()
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
@@ -346,11 +348,11 @@ func dumpTables(t *testing.T, path string, tables ...string) map[string][]string
 	defer db.Close()
 	out := map[string][]string{}
 	for _, table := range tables {
-		list := "*"
-		if table == "results" { // run_ns (v12) reads 0 on older rows
-			list = "id, check_name, at_ns, status, latency_ns, status_code, error"
+		columns := "*"
+		if table == "results" { // answer, answers (v13) and run_ns (v14) read empty on older rows
+			columns = "id, check_name, at_ns, status, latency_ns, status_code, error"
 		}
-		rows, err := db.Query("SELECT " + list + " FROM " + table + " ORDER BY 1, 2")
+		rows, err := db.Query("SELECT " + columns + " FROM " + table + " ORDER BY 1, 2")
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -29,7 +29,7 @@ func TestValidateCheckNewFields(t *testing.T) {
 	}{
 		{"http default kind", httpCheck, func(*config.Check) {}, ""},
 		{"http explicit kind", httpCheck, func(c *config.Check) { c.Kind = config.CheckHTTP }, ""},
-		{"unknown kind", httpCheck, func(c *config.Check) { c.Kind = "icmp" }, `kind "icmp" must be http, tcp or heartbeat`},
+		{"unknown kind", httpCheck, func(c *config.Check) { c.Kind = "icmp" }, `kind "icmp" must be http, tcp, heartbeat, ping or dns`},
 		{"every method", httpCheck, func(c *config.Check) { c.Method = "OPTIONS" }, ""},
 		{"lowercase method", httpCheck, func(c *config.Check) { c.Method = "get" }, `method "get" must be one of GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS`},
 		{"unknown method", httpCheck, func(c *config.Check) { c.Method = "TRACE" }, `method "TRACE" must be one of`},

@@ -57,11 +57,20 @@ shown and replaced in up tui; it only records pings. Without --api-listen pings
 cannot arrive. Requests are rate limited per token, per client address and overall
 (429 when exceeded).
 
+Ping monitors need ICMP: up serve uses unprivileged ICMP sockets, which Linux
+allows to the groups in net.ipv4.ping_group_range (systemd and Docker allow every
+group by default), or raw sockets with CAP_NET_RAW. It checks at start; without
+either, ping monitors stay pending with "cannot send pings" and send no alerts.
+DNS monitors need no permission.
+
 API and retention flags also read environment variables: UP_API_LISTEN,
 UP_TLS_CERT, UP_TLS_KEY and UP_RETENTION. An explicit flag overrides its variable.
 
 Flags:
 `
+
+// detectPings reports whether serve can send pings; tests replace it.
+var detectPings = check.DetectPings
 
 func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
@@ -182,6 +191,19 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	ctx = apiCtx
+	// Whether pings can be sent is checked once, like the API listener, so
+	// the TUI can tell a pending ping monitor from an unreachable host.
+	pings := detectPings()
+	if err := s.SetPingPermission(ctx, pings); err != nil {
+		if ctx.Err() != nil {
+			return 0
+		}
+		fmt.Fprintf(stderr, "up: %v\n", err)
+		return 1
+	}
+	if pings == config.PingDenied {
+		logger.Warn(config.PingDeniedReason + ": ping monitors stay pending; allow ICMP sockets with net.ipv4.ping_group_range or CAP_NET_RAW")
+	}
 	hostname, _ := os.Hostname()
 	notifier := alert.NewNotifier(alert.Options{Store: s, Key: key, Sender: alert.SMTPSender{}, Hostname: hostname, Logger: logger})
 	notifyCtx, cancelNotify := context.WithCancel(ctx)
@@ -201,6 +223,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		HeartbeatInterval: monitor.DefaultHeartbeatInterval,
 		Retention:         *retention,
 		Logger:            logger,
+		Pings:             pings,
 	})
 	cancelNotify()
 	<-done

@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"net/netip"
 	"slices"
 	"strings"
 
 	"github.com/heohlee/up/internal/secret"
 )
 
-// Check kinds; CheckHeartbeat is in heartbeat.go.
+// Check kinds; CheckHeartbeat is in heartbeat.go, CheckPing and CheckDNS in
+// probe.go.
 const (
 	CheckHTTP = "http"
 	CheckTCP  = "tcp"
@@ -95,8 +95,8 @@ type Header struct {
 // Canonical returns c in its one stored form, without changing c:
 // kind "http" becomes "", method "GET" becomes "", schedule "period"
 // becomes "", the cron fields are separated by one space, an empty header or
-// condition list becomes nil. Edit intents are kept. Copies the header and
-// condition slices.
+// condition list becomes nil and tags are normalized (NormalizeTags). Edit
+// intents are kept. Copies the header, condition and tag slices.
 func (c Check) Canonical() Check {
 	if c.Kind == CheckHTTP {
 		c.Kind = ""
@@ -118,6 +118,7 @@ func (c Check) Canonical() Check {
 	} else {
 		c.Conditions = slices.Clone(c.Conditions)
 	}
+	c.Tags = NormalizeTags(c.Tags)
 	return c
 }
 
@@ -126,7 +127,9 @@ func (c Check) Canonical() Check {
 // the stored (sealed) values. Edit intents are not part of identity. The
 // monitor restarts a loop, and the store drops an in-flight result, when this
 // is false, so a new field that changes how a check runs must be added here
-// and to store.RecordDefined.
+// and to store.RecordDefined. Tags are not part of it: the monitor reads a
+// monitor's tag mutes and windows by name on every evaluation, so a tag edit
+// applies without restarting the loop.
 func (c Check) SameDefinition(o Check) bool {
 	a, b := c.Canonical(), o.Canonical()
 	return a.Name == b.Name && a.Kind == b.Kind && a.URL == b.URL &&
@@ -134,6 +137,7 @@ func (c Check) SameDefinition(o Check) bool {
 		a.Channel == b.Channel && a.AlertAfter == b.AlertAfter && a.RecoverAfter == b.RecoverAfter && a.TLSOff == b.TLSOff &&
 		a.Method == b.Method && sameSealed(a.Body, b.Body) && a.ExpectText == b.ExpectText &&
 		a.Host == b.Host && a.Port == b.Port && a.Period == b.Period && a.Grace == b.Grace &&
+		a.Domain == b.Domain && a.Record == b.Record && a.Resolver == b.Resolver && a.Expected == b.Expected &&
 		a.Schedule == b.Schedule && a.Cron == b.Cron &&
 		slices.Equal(a.Conditions, b.Conditions) &&
 		slices.EqualFunc(a.Headers, b.Headers, func(x, y Header) bool {
@@ -229,15 +233,8 @@ func validateHTTPFields(c Check) []error {
 // written bare ("2001:db8::1"). Port is 1..65535.
 func validateTCPFields(c Check) []error {
 	var errs []error
-	switch {
-	case c.Host == "":
-		errs = append(errs, errors.New("host is required"))
-	case strings.ContainsAny(c.Host, " \t/@[]"):
-		errs = append(errs, fmt.Errorf("host %q must be a host name or IP address, without scheme, brackets or port", c.Host))
-	case strings.Contains(c.Host, ":"):
-		if _, err := netip.ParseAddr(c.Host); err != nil {
-			errs = append(errs, fmt.Errorf("host %q must be a host name or IP address, without scheme, brackets or port", c.Host))
-		}
+	if err := validateHost(c.Host); err != nil {
+		errs = append(errs, err)
 	}
 	if c.Port < 1 || c.Port > 65535 {
 		errs = append(errs, fmt.Errorf("port %d must be between 1 and 65535", c.Port))

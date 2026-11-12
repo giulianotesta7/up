@@ -36,6 +36,10 @@ const (
 	focusToken
 	focusSchedule
 	focusCron
+	focusRecord
+	focusResolver
+	focusExpected
+	focusTags
 	focusAdvanced // HTTP fold row; the fields inside follow (form_advanced.go)
 	focusCount
 )
@@ -46,12 +50,16 @@ type monitorForm struct {
 	alertAfter   string
 	recoverAfter string
 	tlsExpiry    string
-	kind         string       // "" is HTTP, kindTCP is TCP, kindHeartbeat is a heartbeat
-	port         string       // TCP only
-	period       string       // heartbeat only
-	grace        string       // heartbeat only
-	schedule     string       // heartbeat only: "" is a period, config.ScheduleCron a cron expression
-	cron         string       // heartbeat only
+	kind         string // "" is HTTP, otherwise kindTCP, kindHeartbeat, kindPing or kindDNS
+	port         string // TCP only
+	period       string // heartbeat only
+	grace        string // heartbeat only
+	schedule     string // heartbeat only: "" is a period, config.ScheduleCron a cron expression
+	cron         string // heartbeat only
+	record       string // DNS only, like resolver and expected
+	resolver     string
+	expected     string
+	tags         string       // every kind, as typed: "nas, home"
 	adv          advancedForm // HTTP only
 	focus        int
 	cursor       int // rune offset in the focused field
@@ -59,6 +67,9 @@ type monitorForm struct {
 	saving       bool
 	editing      bool
 	returnDetail bool
+	// tagsWidth is the widest the Tags row may be so its hint never widens
+	// the box; 0 means popupRowWidth.
+	tagsWidth int
 	// copyOf is the monitor a new form was started from ("duplicate").
 	copyOf string
 	// status is the expected status a new HTTP monitor starts with (the
@@ -87,22 +98,34 @@ func newMonitorForm(snap Snapshot) *monitorForm {
 		channel: snap.existingChannel(d.Channel), alertAfter: strconv.Itoa(d.AlertAfter), recoverAfter: strconv.Itoa(d.RecoverAfter),
 		tlsExpiry: "on", status: status,
 		period: shortDuration(config.DefaultHeartbeatPeriod), grace: shortDuration(config.DefaultHeartbeatGrace),
+		record: config.DNSRecords[0],
 	}
 }
 
+// editMonitorForm edits c. Every kind carries c's tags, which a save without
+// them would remove (and with them the tags' mutes and windows).
 func editMonitorForm(c config.Check, detail bool) *monitorForm {
+	var f *monitorForm
 	switch c.Kind {
 	case kindTCP:
-		return editTCPForm(c, detail)
+		f = editTCPForm(c, detail)
 	case kindHeartbeat:
-		return editHeartbeatForm(c, detail)
+		f = editHeartbeatForm(c, detail)
+	case kindPing:
+		f = editPingForm(c, detail)
+	case kindDNS:
+		f = editDNSForm(c, detail)
+	default:
+		f = &monitorForm{
+			values:  [5]string{c.Name, c.URL, shortDuration(c.Interval), shortDuration(c.Timeout), strconv.Itoa(c.ExpectedStatus)},
+			record:  config.DNSRecords[0],
+			channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: tlsChoice(c.TLSOff),
+			adv:   newAdvanced(c),
+			focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail, base: c,
+		}
 	}
-	return &monitorForm{
-		values:  [5]string{c.Name, c.URL, shortDuration(c.Interval), shortDuration(c.Timeout), strconv.Itoa(c.ExpectedStatus)},
-		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: tlsChoice(c.TLSOff),
-		adv:   newAdvanced(c),
-		focus: 1, cursor: len([]rune(c.URL)), editing: true, returnDetail: detail, base: c,
-	}
+	f.tags = config.FormatTags(c.Tags)
+	return f
 }
 
 // copyName is the name a duplicate starts with: "<name> copy", then
@@ -142,8 +165,11 @@ func (f monitorForm) checkWith(key []byte) (config.Check, error) {
 	if f.isHeartbeat() {
 		return f.heartbeatCheck()
 	}
+	if f.isPing() || f.isDNS() {
+		return f.probeCheck()
+	}
 	c := f.base
-	c.Name, c.URL, c.Channel = f.values[0], f.values[1], f.channel
+	c.Name, c.URL, c.Channel, c.Tags = f.values[0], f.values[1], f.channel, config.ParseTags(f.tags)
 	var err error
 	if c.Interval, err = time.ParseDuration(f.values[2]); err != nil {
 		return c, fmt.Errorf("interval: %w", err)
@@ -284,9 +310,11 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			switch {
 			case delta == 0:
 			case f.focus == focusType:
-				f.setKind(map[string]string{"HTTP": "", "TCP": kindTCP, "Heartbeat": kindHeartbeat}[cycleChoice(kindChoices, f.kindName(), delta)])
+				f.setKind(kindByName[cycleChoice(kindChoices, f.kindName(), delta)])
 			case f.focus == focusSchedule:
 				f.schedule = map[string]string{"Period": "", "Cron": config.ScheduleCron}[cycleChoice(scheduleChoices, f.scheduleName(), delta)]
+			case f.focus == focusRecord:
+				f.record = cycleChoice(config.DNSRecords, f.record, delta)
 			case f.focus == focusToken:
 				f.newToken = cycleChoice(tokenChoices, tokenChoice(f.newToken), delta) == "new"
 			case f.focus == focusChannel:
@@ -462,6 +490,14 @@ func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error,
 			renderHeartbeatFields(&b, f)
 			break
 		}
+		if f.isPing() {
+			renderPingFields(&b, f)
+			break
+		}
+		if f.isDNS() {
+			renderDNSFields(&b, f)
+			break
+		}
 		marker := " "
 		value := f.values[i]
 		if i == f.focus {
@@ -489,6 +525,10 @@ func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error,
 		}
 		fmt.Fprintf(&b, "%s %s: %s\n", marker, label, rendered)
 	}
+	if f.focus == focusTags {
+		focusLine = strings.Count(b.String(), "\n")
+	}
+	b.WriteString(tagsLine(f, snap))
 	choiceLine(focusChannel, "Channel", renderChoice(selected, choices, f.focus == focusChannel))
 	failures, successes := "failures in a row", "successes in a row"
 	if f.isHeartbeat() {
@@ -517,8 +557,17 @@ func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error,
 		if !snap.API.Enabled() {
 			b.WriteString(warnStyle.Render(noListenerLine) + "\n")
 		}
-	} else if hint := detectionHint(f); hint != "" {
-		b.WriteString("\n" + helpStyle.Render(hint) + "\n")
+	} else {
+		hint, denied := detectionHint(f), f.isPing() && snap.Pings == config.PingDenied
+		if hint != "" || denied {
+			b.WriteString("\n")
+		}
+		if hint != "" {
+			b.WriteString(helpStyle.Render(hint) + "\n")
+		}
+		if denied {
+			b.WriteString(warnStyle.Render(pingDeniedLine) + "\n")
+		}
 	}
 	if f.err != nil {
 		b.WriteString("\n" + renderSaveError(saveErrorPrefix+f.err.Error(), wrap) + "\n")
