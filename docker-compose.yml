@@ -8,6 +8,11 @@ services:
       UP_API_LISTEN: ":8080"
     ports:
       - "8080:8080"
+    # Ping monitors use unprivileged ICMP sockets. This sysctl is namespaced:
+    # it only applies to this container's network, and Docker already sets it
+    # by default; it is explicit for runtimes that do not (Podman).
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
     volumes:
       # Database, encryption key and API token hash.
       - up-data:/data

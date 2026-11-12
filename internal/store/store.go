@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 12
+const schemaVersion = 13
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -215,6 +215,23 @@ ALTER TABLE maintenance_windows ADD COLUMN tag TEXT NOT NULL DEFAULT '';
 CREATE INDEX maintenance_windows_by_tag ON maintenance_windows (tag) WHERE check_name = '';
 CREATE TABLE tag_mutes (tag TEXT PRIMARY KEY, until_ns INTEGER NOT NULL);
 `,
+	// v12 -> v13: ping and DNS checks. Additive: existing checks read no DNS
+	// fields (ping checks use host) and existing results no answer. answer is
+	// the DNS answer shown and answers how many there were. daemon_pings is
+	// one row (id = 1) written by every `up serve` start: whether it can send
+	// pings; no row means unknown.
+	`
+ALTER TABLE checks  ADD COLUMN domain   TEXT    NOT NULL DEFAULT '';
+ALTER TABLE checks  ADD COLUMN record   TEXT    NOT NULL DEFAULT '';
+ALTER TABLE checks  ADD COLUMN resolver TEXT    NOT NULL DEFAULT '';
+ALTER TABLE checks  ADD COLUMN expected TEXT    NOT NULL DEFAULT '';
+ALTER TABLE results ADD COLUMN answer   TEXT    NOT NULL DEFAULT '';
+ALTER TABLE results ADD COLUMN answers  INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE daemon_pings (
+	id         INTEGER PRIMARY KEY CHECK (id = 1),
+	permission TEXT    NOT NULL
+);
+`,
 }
 
 // Outage is a period during which a check was down. Ongoing outages have a
@@ -360,7 +377,8 @@ func (s *Store) AddCheck(ctx context.Context, c config.Check) error {
 // (EditKeep) from the stored monitor named source instead of from c: the
 // sealed values are copied inside the store and never decrypted. Replace and
 // clear still override them. A missing source stores nothing and fails with
-// ErrNotFound. A TCP check has no protected values and keeps nothing.
+// ErrNotFound. A TCP, ping or DNS check has no protected values and keeps
+// nothing.
 func (s *Store) AddCheckFrom(ctx context.Context, source string, c config.Check) error {
 	if source == "" {
 		return classify(ErrValidation, errors.New("store: add check: source monitor is required"))
@@ -393,7 +411,7 @@ func (s *Store) addCheck(ctx context.Context, source string, c config.Check) err
 		if !found {
 			return classify(ErrNotFound, fmt.Errorf("store: add check: source monitor %q not found", source))
 		}
-		if c.Kind != config.CheckTCP {
+		if c.Kind != config.CheckTCP && c.Kind != config.CheckPing && c.Kind != config.CheckDNS {
 			from = &values
 		}
 	}
@@ -467,8 +485,8 @@ func (s *Store) Record(ctx context.Context, r check.Result) error {
 		return fmt.Errorf("store: refusing to record status %q for %s", r.Status, r.CheckName)
 	}
 	_, err := s.db.ExecContext(ctx,
-		"INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error) VALUES (?, ?, ?, ?, ?, ?)",
-		r.CheckName, r.At.UnixNano(), string(r.Status), int64(r.Latency), r.StatusCode, r.Error)
+		"INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error, answer, answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		r.CheckName, r.At.UnixNano(), string(r.Status), int64(r.Latency), r.StatusCode, r.Error, r.Answer, r.Answers)
 	if err != nil {
 		return fmt.Errorf("store: record %s: %w", r.CheckName, err)
 	}
@@ -523,7 +541,7 @@ func (s *Store) Latest(ctx context.Context, name string) (r check.Result, ok boo
 // Recent returns up to limit results of a check, newest first.
 func (s *Store) Recent(ctx context.Context, name string, limit int) ([]check.Result, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT at_ns, status, latency_ns, status_code, error FROM results WHERE check_name = ? ORDER BY at_ns DESC, id DESC LIMIT ?",
+		"SELECT at_ns, status, latency_ns, status_code, error, answer, answers FROM results WHERE check_name = ? ORDER BY at_ns DESC, id DESC LIMIT ?",
 		name, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: recent %s: %w", name, err)
@@ -534,7 +552,7 @@ func (s *Store) Recent(ctx context.Context, name string, limit int) ([]check.Res
 		r := check.Result{CheckName: name}
 		var at, latency int64
 		var status string
-		if err := rows.Scan(&at, &status, &latency, &r.StatusCode, &r.Error); err != nil {
+		if err := rows.Scan(&at, &status, &latency, &r.StatusCode, &r.Error, &r.Answer, &r.Answers); err != nil {
 			return nil, fmt.Errorf("store: recent %s: %w", name, err)
 		}
 		r.At, r.Status, r.Latency = fromNanos(at), check.Status(status), time.Duration(latency)

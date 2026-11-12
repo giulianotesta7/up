@@ -95,3 +95,39 @@ func TestTagsRoundTripThroughTheRealAPI(t *testing.T) {
 		t.Fatalf("after delete = %+v", raw)
 	}
 }
+
+// Ping and DNS monitors carry their tags and their own fields together
+// through the real API, on add and edit.
+func TestPingAndDNSTagsRoundTripThroughTheRealAPI(t *testing.T) {
+	c, _, _ := realServer(t)
+	ctx := context.Background()
+	ping := config.Check{Name: "router", Kind: config.CheckPing, Host: "192.168.1.1", Interval: time.Minute, Timeout: 2 * time.Second, Tags: []string{"NAS"}}
+	dns := config.Check{Name: "api-dns", Kind: config.CheckDNS, Domain: "api.example.com", Record: "A", Resolver: "192.0.2.53", Expected: "203.0.113.10",
+		Interval: time.Minute, Timeout: 5 * time.Second, Tags: []string{"home", "nas"}}
+	for _, v := range []config.Check{ping, dns} {
+		if err := c.AddCheck(ctx, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snap, err := c.LoadSnapshot(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotPing, gotDNS := snap.Services[0].Check, snap.Services[1].Check
+	if gotPing.Kind != config.CheckPing || gotPing.Host != "192.168.1.1" || !reflect.DeepEqual(gotPing.Tags, []string{"nas"}) {
+		t.Fatalf("ping = %+v", gotPing)
+	}
+	if !gotDNS.SameDefinition(dns) || !reflect.DeepEqual(gotDNS.Tags, []string{"home", "nas"}) {
+		t.Fatalf("dns = %+v", gotDNS)
+	}
+	gotDNS.Tags, gotDNS.Expected = []string{"prod"}, "203.0.113.11"
+	if err := c.UpdateCheck(ctx, gotDNS); err != nil {
+		t.Fatal(err)
+	}
+	if snap, err = c.LoadSnapshot(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got := snap.Services[1].Check; got.Expected != "203.0.113.11" || got.Domain != "api.example.com" || !reflect.DeepEqual(got.Tags, []string{"prod"}) {
+		t.Fatalf("dns after edit = %+v", got)
+	}
+}

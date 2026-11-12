@@ -3,6 +3,12 @@ Description=up HTTP uptime monitor
 Documentation=https://github.com/heohlee/up
 
 [Service]
+# Ping monitors send ICMP through unprivileged ICMP sockets, which the kernel
+# allows to the groups in net.ipv4.ping_group_range. systemd sets it to every
+# group by default, so this unit needs no capability. If `up serve` logs
+# "cannot send pings", widen the range: sysctl net.ipv4.ping_group_range="0
+# 2147483647". A user unit cannot be given capabilities: raw sockets
+# (AmbientCapabilities=CAP_NET_RAW) are only for the system unit.
 Type=simple
 ExecStart=/usr/local/bin/up serve
 Restart=on-failure

@@ -89,15 +89,15 @@ func v11Windows(t *testing.T, path string) []string {
 var v11Tables = []string{"channels", "smtp_servers", "results", "mutes", "alert_state", "defaults", "daemon", "daemon_api", "certs", "channel_tests", "secret_key", "delivery_attempts"}
 
 func TestOpenMigratesV11AddingOnlyTags(t *testing.T) {
-	if schemaVersion != tagsVersion {
-		t.Fatalf("schemaVersion = %d, want %d", schemaVersion, tagsVersion)
+	if schemaVersion < tagsVersion {
+		t.Fatalf("schemaVersion = %d, want at least %d", schemaVersion, tagsVersion)
 	}
 	path := v11Database(t)
 	before, beforeChecks, beforeWindows := dumpTables(t, path, v11Tables...), v11Checks(t, path), v11Windows(t, path)
 	if len(beforeWindows) == 0 || len(before["mutes"]) == 0 {
 		t.Fatalf("the v11 fixture needs a window and a mute: %v %v", beforeWindows, before["mutes"])
 	}
-	want := fmt.Sprintf("database schema version %d is older than this up (%d)", tagsVersion-1, tagsVersion)
+	want := fmt.Sprintf("database schema version %d is older than this up (%d)", tagsVersion-1, schemaVersion)
 	if _, err := OpenReadOnly(path); err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("OpenReadOnly(v11) error = %v", err)
 	}
@@ -106,8 +106,8 @@ func TestOpenMigratesV11AddingOnlyTags(t *testing.T) {
 		t.Fatalf("Open(v11) error = %v", err)
 	}
 	defer s.Close()
-	if got := version(t, path); got != tagsVersion {
-		t.Fatalf("user_version = %d, want %d", got, tagsVersion)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version = %d, want %d", got, schemaVersion)
 	}
 	if after := dumpTables(t, path, v11Tables...); !reflect.DeepEqual(before, after) {
 		t.Fatalf("migration changed existing rows:\nbefore %v\nafter  %v", before, after)
@@ -210,8 +210,8 @@ func TestNewDatabaseHasTags(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
-	if got := version(t, path); got != tagsVersion {
-		t.Fatalf("user_version = %d, want %d", got, tagsVersion)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version = %d, want %d", got, schemaVersion)
 	}
 	db, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
@@ -221,11 +221,11 @@ func TestNewDatabaseHasTags(t *testing.T) {
 	if err := db.QueryRow("SELECT tags FROM checks WHERE name = 'api'").Scan(&text); err != nil || text != "" {
 		t.Fatalf("tags column = %q, %v, want empty", text, err)
 	}
-	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", tagsVersion+1)); err != nil {
+	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion+1)); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
-	want := fmt.Sprintf("database schema version %d is newer than this up supports (%d)", tagsVersion+1, tagsVersion)
+	want := fmt.Sprintf("database schema version %d is newer than this up supports (%d)", schemaVersion+1, schemaVersion)
 	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("Open(newer) error = %v", err)
 	}

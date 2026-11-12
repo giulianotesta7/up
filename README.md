@@ -21,6 +21,7 @@ Self-hosted HTTP uptime monitor with a terminal UI. One binary and a SQLite file
 
 - **HTTP checks** with per-monitor interval, timeout and expected status. Redirects are followed. Optional method, headers, body, expected text and response conditions (JSON value, body regex, max response time, response header).
 - **TCP checks** that connect to a host and port, for services without an HTTP endpoint.
+- **Ping and DNS checks**: one ICMP echo to a host, or one DNS query (A, AAAA, CNAME, MX, TXT) with an optional resolver and expected value.
 - **Managed from the TUI.** Add, edit, delete and mute monitors; the daemon picks up changes within ~2s.
 - **Remote TUI.** Run the daemon on a server and manage it from your laptop over an authenticated API.
 - **Check history.** Every result is stored and outages are derived from it. Results are kept for 30 days by default; retention is configurable.
@@ -159,6 +160,32 @@ A monitor with headers or a body does not follow a redirect to another scheme, h
 Set `Type` to `TCP` (first field, `←`/`→`) and enter a host (name or IP; IPv6 without brackets) and a port. The monitor is **up** when the connection opens and **down** if it is refused, DNS fails or it times out. Latency is the time to connect, including name resolution.
 
 It only proves that something is listening: no TLS, certificate or application check. TCP monitors have no URL, expected status or `TLS expiry`.
+
+### Ping monitors
+
+Set `Type` to `Ping` and enter a host (name or IP; IPv6 without brackets). Each check sends one ICMP echo request: the monitor is **up** when the reply arrives within the timeout (latency is the round-trip time) and **down** otherwise (`no reply from 192.168.1.1 in 2s`). A host name is resolved first, IPv4 before IPv6; one that does not resolve is down with `cannot resolve nas.home.arpa`. It proves the host answers ICMP, nothing about its services.
+
+**Requirement.** `up serve` sends pings through unprivileged ICMP sockets, which Linux allows to the groups listed in `net.ipv4.ping_group_range`, or through a raw socket when it has `CAP_NET_RAW`. No capability is needed in the usual setups:
+
+- **systemd** (the shipped user and system units): systemd sets `net.ipv4.ping_group_range` to every group by default.
+- **Docker**: unprivileged ICMP is allowed in containers by default; `docker-compose.yml` also sets the sysctl for its own container (Podman needs it: `--sysctl net.ipv4.ping_group_range="0 2147483647"`). It only applies to the container's network namespace.
+- **Elsewhere**: allow the group that runs `up serve`, for example every group: `sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"` (add it to `/etc/sysctl.d/` to keep it). As a last resort, the system service can get raw sockets instead with `sudo systemctl edit up` and `[Service]` `AmbientCapabilities=CAP_NET_RAW`; a user service cannot.
+
+The daemon checks this when it starts and logs `cannot send pings` when it cannot. Then ping monitors are not run: they stay pending with `cannot send pings`, record nothing and send no alerts, locally and with `--remote`. Restart `up serve` after changing the setting.
+
+In the TUI a dim `ping` tag follows the name and the detail's `Type` is `ICMP echo`. While the daemon cannot send pings, the form shows an amber line when `Type` is `Ping` (saving is still allowed) and ping monitors read `PENDING` with an amber `cannot send pings`, in the list and in the detail's `Last error`.
+
+### DNS monitors
+
+Set `Type` to `DNS` and enter a **domain**, a **record** type (`A`, `AAAA`, `CNAME`, `MX` or `TXT`), an optional **resolver** and an optional **expected** value. The query goes over UDP, again over TCP when the answer is truncated. DNS monitors need no permission.
+
+- **Resolver**: `host` or `host:port` (port 53 by default), an IPv6 address in brackets (`[fd00::53]:53`). Empty uses the system resolver: the `nameserver` lines of `/etc/resolv.conf`, in order. The next one is asked only when a server gives no reply at all (silent or refusing the connection); each gets an even share of the time left, so the check still ends within its timeout. An answer such as `NXDOMAIN` or `SERVFAIL` is final.
+- **Expected**: the monitor is up when any answer matches. `A` and `AAAA` compare addresses, `MX` the mail host (the priority is ignored), `CNAME` the first target (case and a final dot do not matter for host names) and `TXT` the whole text of a record, its strings joined. Empty: any answer is up.
+- **Down** on `NXDOMAIN for nas.home.arpa`, `SERVFAIL`, `REFUSED`, an answer without a record of the type (`no A record for nas.home.arpa`), no reply in the timeout (`no reply from 192.0.2.53:53 in 2s`, listing every system nameserver that stayed silent: `no reply from 192.0.2.53:53, 192.0.2.54:53 in 2s`) or a mismatch: `A = 203.0.113.9, want 203.0.113.10` (`+1` after the value when there were more answers).
+
+Latency is the query time. Each result keeps the answer shown (the one that matched, otherwise the first) and how many there were. DNSSEC is not validated.
+
+In the TUI the form rows are Domain, Record (`←`/`→`), Resolver (dim `system resolver` while empty) and Expected (dim `any answer` while empty). The list shows a dim `dns` tag and the answer in the last column (`A 203.0.113.10 +1`); the detail title adds `@resolver` when one is set, and its Status line ends with the answer (`· 203.0.113.10 +1`). A mismatch shows the answer once, in the reason.
 
 ### Heartbeat monitors
 
@@ -344,7 +371,7 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 | `POST`/`GET /api/v1/channels/{name}/test` | requests a channel test (`202`, or `409` while one is active) and reads the newest one; the daemon sends it |
 | `GET`/`POST /api/v1/checks/{name}/heartbeat-token` | shows a heartbeat's ping token, or replaces it (the old one stops working), as `{"token", "path"}`; `404` for a monitor that is not a heartbeat |
 
-Monitors take optional `tags` (a list, saved lowercase); the snapshot's `mute` and `maintenance` windows carry a `tag` when they come from a tag. HTTP monitors take optional `conditions`, an ordered list of `{"kind": "json", "path", "value"}`, `{"kind": "regex", "pattern"}`, `{"kind": "response_time", "within_ms"}` or `{"kind": "header", "name", "value"}`; the snapshot returns them the same way. Heartbeat monitors use `"kind": "heartbeat"` with `period_ms` and `grace_ms`. The snapshot carries each heartbeat's `heartbeat` state (`waiting`, `last_ping`, `deadline`) and the daemon's `api` listener (`listen`, `tls`); never the ping token.
+Monitors take optional `tags` (a list, saved lowercase); the snapshot's `mute` and `maintenance` windows carry a `tag` when they come from a tag. HTTP monitors take optional `conditions`, an ordered list of `{"kind": "json", "path", "value"}`, `{"kind": "regex", "pattern"}`, `{"kind": "response_time", "within_ms"}` or `{"kind": "header", "name", "value"}`; the snapshot returns them the same way. Heartbeat monitors use `"kind": "heartbeat"` with `period_ms` and `grace_ms`. Ping monitors use `"kind": "ping"` with `host`; DNS monitors use `"kind": "dns"` with `domain`, `record`, `resolver` and `expected`, and their results carry `answer` and `answers`. The snapshot's `pings` says whether the daemon can send pings (`allowed`, `denied`, or empty when unknown). The snapshot carries each heartbeat's `heartbeat` state (`waiting`, `last_ping`, `deadline`) and the daemon's `api` listener (`listen`, `tls`); never the ping token.
 
 Bodies are strict JSON, limited to 1 MiB. Errors: `400` invalid input, `404` not found, `409` duplicate or still in use. Rejected requests change nothing.
 

@@ -36,6 +36,9 @@ type SnapshotDTO struct {
 	Defaults DefaultsDTO `json:"defaults"`
 	// API is the daemon's API listener, which heartbeat pings reach.
 	API APIDTO `json:"api"`
+	// Pings is whether the daemon can send ICMP pings: "allowed", "denied",
+	// or empty when unknown (a daemon that predates ping monitors).
+	Pings string `json:"pings"`
 }
 
 // APIDTO is the address the daemon's API listens on, as bound, and whether
@@ -62,8 +65,10 @@ type HeartbeatDTO struct {
 // Method is the HTTP method (empty on write means GET). Host has no brackets
 // for IPv6. Conditions are plain and travel the same way in both directions.
 // A heartbeat has kind "heartbeat", PeriodMS and GraceMS and none of the HTTP
-// or TCP fields; its ping token is never in a CheckDTO. Tags are normalized
-// by the server ("NAS" is stored as "nas"); absent on write means none.
+// or TCP fields; its ping token is never in a CheckDTO. A ping check has kind
+// "ping" and Host; a DNS check has kind "dns", Domain, Record, Resolver and
+// Expected. Tags are normalized by the server ("NAS" is stored as "nas");
+// absent on write means none.
 type CheckDTO struct {
 	Name           string         `json:"name"`
 	URL            string         `json:"url"`
@@ -85,6 +90,10 @@ type CheckDTO struct {
 	Port           int            `json:"port"`
 	PeriodMS       int64          `json:"period_ms"`
 	GraceMS        int64          `json:"grace_ms"`
+	Domain         string         `json:"domain"`
+	Record         string         `json:"record"`
+	Resolver       string         `json:"resolver"`
+	Expected       string         `json:"expected"`
 	Tags           []string       `json:"tags"`
 }
 
@@ -155,12 +164,17 @@ type ChannelTestDTO struct {
 	Started   time.Time `json:"started"`
 	Finished  time.Time `json:"finished"`
 }
+
+// ResultDTO is one check result. Answer and Answers are a DNS check's shown
+// answer and how many there were; absent for other kinds.
 type ResultDTO struct {
 	At         time.Time    `json:"at"`
 	Status     check.Status `json:"status"`
 	LatencyMS  int64        `json:"latency_ms"`
 	StatusCode int          `json:"status_code"`
 	Error      string       `json:"error"`
+	Answer     string       `json:"answer,omitempty"`
+	Answers    int          `json:"answers,omitempty"`
 }
 type OutageDTO struct {
 	Start   time.Time `json:"start"`
@@ -305,7 +319,8 @@ func checkDTO(c config.Check) CheckDTO {
 	d := CheckDTO{Name: c.Name, URL: c.URL, IntervalMS: c.Interval.Milliseconds(), TimeoutMS: c.Timeout.Milliseconds(), ExpectedStatus: c.ExpectedStatus,
 		Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
 		Kind: c.Kind, Method: c.Method, BodySet: !c.Body.Empty(), ExpectText: c.ExpectText, Host: c.Host, Port: c.Port,
-		PeriodMS: c.Period.Milliseconds(), GraceMS: c.Grace.Milliseconds(), Conditions: conditionDTOs(c.Conditions), Tags: c.Tags}
+		PeriodMS: c.Period.Milliseconds(), GraceMS: c.Grace.Milliseconds(), Conditions: conditionDTOs(c.Conditions),
+		Domain: c.Domain, Record: c.Record, Resolver: c.Resolver, Expected: c.Expected, Tags: c.Tags}
 	if d.Kind == "" {
 		d.Kind = config.CheckHTTP
 	}
@@ -347,10 +362,10 @@ func (d ChannelTestDTO) ChannelTest() config.ChannelTest {
 func (d MaintenanceDTO) Window(check string) config.MaintenanceWindow { return d.window(check) }
 
 func resultDTO(r check.Result) ResultDTO {
-	return ResultDTO{r.At.UTC(), r.Status, r.Latency.Milliseconds(), r.StatusCode, r.Error}
+	return ResultDTO{At: r.At.UTC(), Status: r.Status, LatencyMS: r.Latency.Milliseconds(), StatusCode: r.StatusCode, Error: r.Error, Answer: r.Answer, Answers: r.Answers}
 }
 func (r ResultDTO) result(name string) check.Result {
-	return check.Result{CheckName: name, At: r.At, Status: r.Status, Latency: time.Duration(r.LatencyMS) * time.Millisecond, StatusCode: r.StatusCode, Error: r.Error}
+	return check.Result{CheckName: name, At: r.At, Status: r.Status, Latency: time.Duration(r.LatencyMS) * time.Millisecond, StatusCode: r.StatusCode, Error: r.Error, Answer: r.Answer, Answers: r.Answers}
 }
 
 // NewSnapshotDTO converts field by field without exposing sealed credentials.
@@ -398,6 +413,7 @@ func NewSnapshotDTO(s tui.Snapshot, now time.Time) SnapshotDTO {
 	d.Attempts, d.LastAttempts = attemptDTOs(s.Attempts), attemptDTOs(s.LastAttempts)
 	d.Defaults = defaultsDTO(s.Defaults)
 	d.API = APIDTO{Listen: s.API.Address, TLS: s.API.TLS}
+	d.Pings = string(s.Pings)
 	d.ChannelTests = []ChannelTestDTO{}
 	for _, t := range s.ChannelTests {
 		d.ChannelTests = append(d.ChannelTests, channelTestDTO(t))
@@ -474,6 +490,10 @@ func (d SnapshotDTO) Snapshot() tui.Snapshot {
 	s.Attempts, s.LastAttempts = Attempts(d.Attempts), Attempts(d.LastAttempts)
 	s.Defaults = d.Defaults.defaults()
 	s.API = config.APIListener{Address: d.API.Listen, TLS: d.API.TLS}
+	// Anything but a known answer is unknown, never a guess.
+	if p := config.PingPermission(d.Pings); p == config.PingAllowed || p == config.PingDenied {
+		s.Pings = p
+	}
 	return s
 }
 
@@ -518,7 +538,8 @@ func (c CheckDTO) snapshotCheck(key []byte) config.Check {
 	out := config.Check{Name: c.Name, URL: c.URL, Interval: time.Duration(c.IntervalMS) * time.Millisecond, Timeout: time.Duration(c.TimeoutMS) * time.Millisecond,
 		ExpectedStatus: c.ExpectedStatus, Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
 		Kind: c.Kind, Method: c.Method, ExpectText: c.ExpectText, Host: c.Host, Port: c.Port,
-		Period: time.Duration(c.PeriodMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond, Conditions: conditions(c.Conditions), Tags: c.Tags}
+		Period: time.Duration(c.PeriodMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond, Conditions: conditions(c.Conditions),
+		Domain: c.Domain, Record: c.Record, Resolver: c.Resolver, Expected: c.Expected, Tags: c.Tags}
 	if c.BodySet {
 		out.Body = placeholder(key)
 	}

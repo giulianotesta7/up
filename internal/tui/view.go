@@ -9,6 +9,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/heohlee/up/internal/config"
 )
 
 const timeLayout = "Jan 02 15:04:05"
@@ -33,7 +35,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 		// also consume terminal cells, including double-width characters.
 		statusWidth := 7
 		for _, s := range snap.Services {
-			statusWidth = max(statusWidth, ansi.StringWidth(s.Label()))
+			statusWidth = max(statusWidth, ansi.StringWidth(snap.shown(s).Label()))
 		}
 		// MUTED is always shown (13 cells), so its place does not move when a
 		// mute starts or ends.
@@ -99,12 +101,19 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			if i == selected {
 				marker = accentStyle.Render("▌")
 			}
+			s = snap.shown(s)
 			latency, last, reason := "", "", ""
 			if s.HasResult {
 				latency, last = formatLatency(s.Latest.Latency), ago(now, s.Latest.At)
 				reason = s.Latest.Error
+				if answer := dnsAnswer(s.Latest); reason == "" && answer != "" {
+					reason = helpStyle.Render(s.Check.Record + " " + answer)
+				}
 			}
 			trend := sparkline(s.Recent, 16)
+			if snap.Pings.Holds(s.Check) {
+				trend, reason = "", warnStyle.Render(config.PingDeniedReason)
+			}
 			if s.Check.Kind == kindHeartbeat {
 				latency, last, reason = helpStyle.Render("—"), heartbeatLast(s, now), heartbeatReason(s, snap, now)
 				trend = pingCells(s.Recent, 16, false)
@@ -129,7 +138,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 				name += strings.Repeat(" ", max(0, baseWidth-ansi.StringWidth(name))) + "  " + helpStyle.Render(tags)
 			}
 			cert := ""
-			if anyCert && s.Check.Kind != kindTCP && s.Check.Kind != kindHeartbeat {
+			if anyCert && (s.Check.Kind == "" || s.Check.Kind == config.CheckHTTP) {
 				cert = helpStyle.Render("—")
 			}
 			if s.HasCert {
@@ -231,10 +240,15 @@ func detailHelp(s Service, opts detailOptions) string {
 
 func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr error, width int, opts detailOptions) string {
 	var b strings.Builder
+	held := snap.Pings.Holds(s.Check)
+	s = snap.shown(s)
 	heartbeat := s.Check.Kind == kindHeartbeat
 	target := s.Check.Target()
-	if heartbeat {
+	switch s.Check.Kind {
+	case kindHeartbeat:
 		target = heartbeatTarget(s.Check)
+	case kindPing, kindDNS:
+		target = probeTarget(s.Check)
 	}
 	b.WriteString(titleStyle.Render(s.Check.Name) + "  " + target + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
@@ -258,6 +272,10 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		status := styledLabel(s, 0)
 		if s.HasResult {
 			status += "   last check " + ago(now, s.Latest.At) + " (" + formatLatency(s.Latest.Latency) + ")"
+			// A mismatch already names the answer in Last error.
+			if answer := dnsAnswer(s.Latest); answer != "" && s.Latest.Error == "" {
+				status += " · " + answer
+			}
 		}
 		field("Status", status)
 	}
@@ -299,7 +317,11 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		}
 		hold("Maintenance", head, s.heldPending())
 	}
-	field("Last error", orDash(s.Latest.Error))
+	if held {
+		field("Last error", warnStyle.Render(config.PingDeniedReason)+helpStyle.Render(" · README › Ping"))
+	} else {
+		field("Last error", orDash(s.Latest.Error))
+	}
 	if streak := streakLine(s, now); streak != "" {
 		field("Streak", streak)
 	}
@@ -319,6 +341,18 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 			field("Interval", shortDuration(s.Check.Interval))
 			field("Timeout", shortDuration(s.Check.Timeout))
 			field("Type", "TCP connect")
+		case kindPing:
+			field("Interval", shortDuration(s.Check.Interval))
+			field("Timeout", shortDuration(s.Check.Timeout))
+			field("Type", "ICMP echo")
+		case kindDNS:
+			field("Interval", shortDuration(s.Check.Interval))
+			field("Timeout", shortDuration(s.Check.Timeout))
+			expected := s.Check.Expected
+			if expected == "" {
+				expected = helpStyle.Render(expectedHint)
+			}
+			field("Expected", expected)
 		default:
 			field("Interval", shortDuration(s.Check.Interval))
 			field("Timeout", shortDuration(s.Check.Timeout))
