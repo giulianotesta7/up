@@ -349,7 +349,7 @@ func dumpTables(t *testing.T, path string, tables ...string) map[string][]string
 	out := map[string][]string{}
 	for _, table := range tables {
 		columns := "*"
-		if table == "results" {
+		if table == "results" { // answer, answers (v13) and run_ns (v14) read empty on older rows
 			columns = "id, check_name, at_ns, status, latency_ns, status_code, error"
 		}
 		rows, err := db.Query("SELECT " + columns + " FROM " + table + " ORDER BY 1, 2")

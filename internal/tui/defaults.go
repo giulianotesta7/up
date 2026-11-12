@@ -239,7 +239,7 @@ func renderDefaults(p defaultsPopup, snap Snapshot, now time.Time, loadErr error
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Defaults") + "\n")
 	b.WriteString(renderBanners(snap, now, loadErr))
-	b.WriteString(helpStyle.Render("New items only; existing ones keep their values.") + "\n\n")
+	b.WriteString(helpStyle.Render("New items only, except where noted.") + "\n\n")
 	row := func(focus int, label, rendered string) {
 		marker := " "
 		if p.focus == focus {
@@ -258,7 +258,7 @@ func renderDefaults(p defaultsPopup, snap Snapshot, now time.Time, loadErr error
 	}
 	b.WriteString(headerStyle.Render("NEW MAINTENANCE WINDOWS") + "\n")
 	text(defaultsZone, "IANA zone", "e.g. America/New_York")
-	b.WriteString("  " + helpStyle.Render("Also the time in heartbeat reasons.") + "\n")
+	b.WriteString("  " + helpStyle.Render("Also the time in heartbeat reasons and when cron heartbeats run.") + "\n")
 	b.WriteString("\n" + headerStyle.Render("NEW MONITORS") + "\n")
 	choices := channelChoices(snap)
 	choices[0] = "none"

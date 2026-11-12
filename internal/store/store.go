@@ -17,7 +17,7 @@ import (
 )
 
 // schemaVersion is the PRAGMA user_version this build writes and reads.
-const schemaVersion = 13
+const schemaVersion = 14
 
 // migrations[v] upgrades a database from schema version v to v+1. A new
 // database runs all of them in one transaction. Never edit a released entry:
@@ -231,6 +231,16 @@ CREATE TABLE daemon_pings (
 	id         INTEGER PRIMARY KEY CHECK (id = 1),
 	permission TEXT    NOT NULL
 );
+`,
+	// v13 -> v14: cron heartbeat schedules. Additive: existing rows read an
+	// empty schedule (period) and no cron expression, so existing heartbeats
+	// keep their period. schedule is '' or 'cron'; cron is the expression
+	// with its fields separated by one space. run_ns is the cron run a missed
+	// result was recorded for, 0 for every other result.
+	`
+ALTER TABLE checks ADD COLUMN schedule TEXT NOT NULL DEFAULT '';
+ALTER TABLE checks ADD COLUMN cron     TEXT NOT NULL DEFAULT '';
+ALTER TABLE results ADD COLUMN run_ns  INTEGER NOT NULL DEFAULT 0;
 `,
 }
 
@@ -541,7 +551,7 @@ func (s *Store) Latest(ctx context.Context, name string) (r check.Result, ok boo
 // Recent returns up to limit results of a check, newest first.
 func (s *Store) Recent(ctx context.Context, name string, limit int) ([]check.Result, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT at_ns, status, latency_ns, status_code, error, answer, answers FROM results WHERE check_name = ? ORDER BY at_ns DESC, id DESC LIMIT ?",
+		"SELECT at_ns, status, latency_ns, status_code, error, answer, answers, run_ns FROM results WHERE check_name = ? ORDER BY at_ns DESC, id DESC LIMIT ?",
 		name, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: recent %s: %w", name, err)
@@ -550,12 +560,15 @@ func (s *Store) Recent(ctx context.Context, name string, limit int) ([]check.Res
 	var results []check.Result
 	for rows.Next() {
 		r := check.Result{CheckName: name}
-		var at, latency int64
+		var at, latency, run int64
 		var status string
-		if err := rows.Scan(&at, &status, &latency, &r.StatusCode, &r.Error, &r.Answer, &r.Answers); err != nil {
+		if err := rows.Scan(&at, &status, &latency, &r.StatusCode, &r.Error, &r.Answer, &r.Answers, &run); err != nil {
 			return nil, fmt.Errorf("store: recent %s: %w", name, err)
 		}
 		r.At, r.Status, r.Latency = fromNanos(at), check.Status(status), time.Duration(latency)
+		if run != 0 {
+			r.Run = fromNanos(run)
+		}
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {

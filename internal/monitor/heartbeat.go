@@ -25,7 +25,9 @@ type DefaultsReader interface {
 // check: pings and reported failures are stored by the API, and every
 // discovery interval it observes the new ones, then records a missed
 // deadline when the clock is past the newest result + period + grace (see
-// check.Overdue), naming the last ping in the Defaults zone. Before the first result (WAITING) there is no deadline.
+// check.Overdue), naming the last ping in the Defaults zone, or for a cron
+// heartbeat past a run + grace without a ping for that run (see check.Due),
+// naming the run. Before the first result (WAITING) there is no deadline.
 // The deadline comes from stored results, so it survives restarts and
 // follows edits. idle rechecks held alerts when nothing new arrived.
 func watchHeartbeat(ctx context.Context, opts Options, c config.Check, observe func(check.Result), idle func()) {
@@ -54,8 +56,16 @@ func watchHeartbeat(ctx context.Context, opts Options, c config.Check, observe f
 				contact = r.At
 			}
 		}
-		if now := opts.now(); !seen.IsZero() && ctx.Err() == nil && now.After(check.NextDeadline(c, seen)) {
-			for _, r := range check.Overdue(c, seen, contact, now, missedZone(ctx, opts)) {
+		if now := opts.now(); !seen.IsZero() && ctx.Err() == nil {
+			var due []check.Result
+			switch {
+			case c.Schedule == config.ScheduleCron:
+				// Its runs are in the Defaults zone, so it is read every time.
+				due = check.Due(c, results, now, missedZone(ctx, opts))
+			case now.After(check.NextDeadline(c, seen)):
+				due = check.Overdue(c, seen, contact, now, missedZone(ctx, opts))
+			}
+			for _, r := range due {
 				if !recordMissed(ctx, opts, c, seen, r) {
 					break
 				}
@@ -92,9 +102,9 @@ func recentResults(ctx context.Context, opts Options, c config.Check) []check.Re
 	return results
 }
 
-// missedZone is the Defaults zone, read when a miss is due so a change applies
-// to the next one. It is UTC without a DefaultsReader or when the read or the
-// zone fails (logged).
+// missedZone is the Defaults zone, read when a miss may be due so a change
+// applies to the next one; cron heartbeats expect their runs in it. It is UTC
+// without a DefaultsReader or when the read or the zone fails (logged).
 func missedZone(ctx context.Context, opts Options) *time.Location {
 	reader, ok := opts.Store.(DefaultsReader)
 	if !ok {

@@ -116,7 +116,7 @@ func renderList(snap Snapshot, selected int, now time.Time, loadErr error, width
 			}
 			if s.Check.Kind == kindHeartbeat {
 				latency, last, reason = helpStyle.Render("—"), heartbeatLast(s, now), heartbeatReason(s, snap, now)
-				trend = pingCells(s.Recent, 16, false)
+				trend = pingCells(heartbeatCells(s, snap), 16, false)
 			}
 			name := s.Check.Name
 			if i == selected {
@@ -267,7 +267,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 
 	section("STATUS")
 	if heartbeat {
-		heartbeatStatus(field, s, now)
+		heartbeatStatus(field, s, snap, now)
 	} else {
 		status := styledLabel(s, 0)
 		if s.HasResult {
@@ -335,7 +335,11 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 		section("CONFIG")
 		switch s.Check.Kind {
 		case kindHeartbeat:
-			field("Period", shortDuration(s.Check.Period))
+			if isCronCheck(s.Check) {
+				field("Cron", s.Check.Cron)
+			} else {
+				field("Period", shortDuration(s.Check.Period))
+			}
 			field("Grace", shortDuration(s.Check.Grace))
 		case kindTCP:
 			field("Interval", shortDuration(s.Check.Interval))
@@ -387,7 +391,7 @@ func renderDetailWithOptions(snap Snapshot, s Service, now time.Time, loadErr er
 
 	switch {
 	case heartbeat:
-		renderPings(&b, s, width, opts, blank)
+		renderPings(&b, s, snap, width, opts, blank)
 		renderPingURL(&b, field, snap, width, opts.ping, blank)
 	case len(s.Recent) == 0:
 		section("LATENCY")

@@ -211,16 +211,28 @@ States:
 - `DOWN` when that deadline passes with no ping (the history shows `no ping since 02:14 UTC`, in the [defaults](#defaults) zone), and at once on `/fail` (`reported failure`).
 - `UP` again on the next ping.
 
+#### Cron schedules
+
+A job that does not run at a fixed interval, such as a backup on weekdays only, can use a **cron** schedule instead of a period: up then expects a ping for every run and nothing in between, so weekends raise no alert. The expression is the standard 5-field one (`minute hour day month weekday`, with `*`, ranges `1-5`, lists `1,3`, steps `*/15` and names `jan`, `mon`), or `@hourly`, `@daily`, `@weekly`, `@monthly` or `@yearly`; there are no seconds. As in cron, when both day and weekday are restricted a day matching either one runs.
+
+```
+0 2 * * 1-5      02:00 Monday to Friday
+30 1 1 * *       01:30 on the first of the month
+@daily           00:00 every day
+```
+
+Runs are in the [defaults](#defaults) zone (UTC until it is set). A run is missed when no ping arrives by the run plus its **grace**, and the history names it: `no ping for the 02:00 -03 run`. A ping counts for the latest run that has already started, or for a run starting within the next 5 minutes (in case the sender's clock is a little ahead), and several pings for the same run count once: a manual ping hours after a run does not cover the next one. Daylight saving changes follow cron: a run at a time the clock skips is expected when the clock jumps, and one at a repeated time once, the first time. An invalid expression is rejected when saving, for example `cron "0 25 * * *" is not valid: hour 25 is out of range 0-23`. Existing heartbeats keep their period; switching one to cron keeps its ping URL.
+
 Each missed deadline counts as one failed check and each ping as one success, so **alert after** and **recover after** count missed periods and pings. Channels, muting, maintenance windows, history, incidents and the delivery log work as for any monitor. If the daemon was stopped across several deadlines, it records the first and the latest when it starts again.
 
 The token in the URL only records pings for that monitor: it grants no API or configuration access, and the API access token never goes in a crontab. A local `up tui` builds the URL from `--api-listen` (scheme `https` with `--tls-cert`; an address without a host uses this machine's name), so behind a reverse proxy replace the host with the public one; with `--remote` it uses the server URL given to `up login`, path included, since this machine already reaches the API there. The token is stored encrypted with the server key, like webhook URLs, so a local `up tui` can only show it when it can read `<db>.key` (run it as the user that runs `up serve`, or use `--remote`); otherwise `v` explains this in a box.
 
 In the TUI:
 
-- **Form.** Heartbeat rows are Name, Period, Grace, Channel, Alert after (missed pings) and Recover after (pings), with how long after the last ping the first alert comes. An amber line says when the daemon has no API listener; saving is still allowed.
+- **Form.** Heartbeat rows are Name, Schedule (`‹ Period ›` by default), Period, Grace, Tags, Channel, Alert after (missed pings) and Recover after (pings), with how long after the last ping the first alert comes. `Schedule: ‹ Cron ›` swaps the Period row for a Cron row, which shows the field order `min hour day month weekday` while it has focus; below the form, the zone the runs are in and the next three runs (`Next runs  Mon 9 02:00 · Tue 10 02:00 · Wed 11 02:00`), blank while the expression does not parse. An amber line says when the daemon has no API listener; saving is still allowed.
 - **After saving** a new heartbeat, the form box shows the full URL once, on its own line, ready to select with the mouse; `esc` closes it. When the terminal is too narrow for that line, the base URL and the token get a line each: join them.
-- **List.** A dim `hb` tag follows the name, `LATENCY` is `—`, `TREND` has one cell per period (a ping, or a red `█` when missed or reported as failed) and `LAST CHECK` is the last ping. The last column says `no ping yet` (or `needs --api-listen`), `next by 02:30`, `missed · due by 03:30` or `job sent /fail`.
-- **Detail.** Status with the last ping, `Next due` (`before 02:30 (in 21h 12m)`), a `PINGS` row in place of the latency chart (`░` missed, `█` failed), and `PING URL` with the token masked: `v` shows it in place and any other key hides it. Incidents and recent alerts work as for any monitor.
+- **List.** A dim `hb` tag follows the name, `LATENCY` is `—`, `TREND` has one cell per period, or per expected run of a cron heartbeat (a ping, or a red `█` when missed or reported as failed) and `LAST CHECK` is the last ping. The last column says `no ping yet` (or `needs --api-listen`), `next by 02:30`, `missed · due by 03:30` or `job sent /fail`; a cron heartbeat's times are in the defaults zone with its abbreviation (`next by Mon 02:30 -03`).
+- **Detail.** The title has the schedule (`heartbeat · every 24h · grace 1h` or `heartbeat · cron 0 2 * * 1-5 · grace 1h`). Status with the last ping, `Next due` (`before 02:30 (in 21h 12m)`), a `PINGS` row in place of the latency chart (one cell per period or per run, `░` missed, `█` failed), and `PING URL` with the token masked: `v` shows it in place and any other key hides it. Incidents and recent alerts work as for any monitor.
 - **New token.** In Edit monitor, `Token: ‹ new ›` and `enter` ask first (`y` replace, `n` keep); after `y` the old URL stops working at once and the box shows the new one.
 
 The endpoint answers `200 {"ok":true}` when the ping is recorded and the same `404 {"error":"not found"}` for any token that matches no heartbeat, `405` for methods other than `POST` and `413` for a body over 1 KiB (a small body is ignored). It is rate limited per token (1/s, burst 5); tokens that match no heartbeat are also limited per client address (20/s, burst 100) and overall (50/s, burst 200), and all requests share a 500/s (burst 1000) safety cap, answering `429` with `Retry-After: 1`. Unknown tokens never slow down valid ones, so jobs behind one proxy are not blocked by guessing.
@@ -257,7 +269,7 @@ In `c`, set **Kind** to `webhook` (`←`/`→`), then enter the URL and, optiona
 }
 ```
 
-A heartbeat's `monitor` also carries its `period_ms` and `grace_ms` (its alert emails show `Heartbeat: every 24h, grace 30m` where other monitors show the URL); the ping token is never sent. `event` is `monitor.down`, `monitor.recovered`, `cert.expiring` (`result` carries `days_remaining`) or `test` (no `monitor` or `result`; it carries `channel` and `message`). A `2xx` response means delivered. Any other status, a network error or a timeout (10s) is a failure. Redirects are not followed and failures are not retried.
+A heartbeat's `monitor` also carries its `period_ms` (or `cron`) and `grace_ms` (its alert emails show `Heartbeat: every 24h, grace 30m` or `Heartbeat: cron 0 2 * * 1-5, grace 30m` where other monitors show the URL); the ping token is never sent. `event` is `monitor.down`, `monitor.recovered`, `cert.expiring` (`result` carries `days_remaining`) or `test` (no `monitor` or `result`; it carries `channel` and `message`). A `2xx` response means delivered. Any other status, a network error or a timeout (10s) is a failure. Redirects are not followed and failures are not retried.
 
 ### Push channels
 
@@ -305,7 +317,7 @@ In the TUI, tags are typed in the monitor form's `Tags` row, comma-separated (`n
 
 ### Defaults
 
-`f` opens the defaults for new items: the time zone of new maintenance windows (also the time shown in heartbeat reasons, such as `no ping since 12:10 -03`), and the channel, interval, timeout, expected status, alert after and recover after of new monitors. The new monitor and new window forms start from them. Existing monitors, channels and windows keep their values, and each window keeps its own zone. Until you save, the defaults are UTC, no channel, 30s, 5s, 200, and 1 and 1. Deleting the default channel makes the default none.
+`f` opens the defaults for new items: the time zone of new maintenance windows (also the time shown in heartbeat reasons, such as `no ping since 12:10 -03`, and the zone cron heartbeats run in), and the channel, interval, timeout, expected status, alert after and recover after of new monitors. The new monitor and new window forms start from them. Existing monitors, channels and windows keep their values, and each window keeps its own zone. Until you save, the defaults are UTC, no channel, 30s, 5s, 200, and 1 and 1. Deleting the default channel makes the default none.
 
 ### Certificate expiry
 
@@ -371,7 +383,7 @@ Every route requires `Authorization: Bearer <token>`; tokens in URLs are not acc
 | `POST`/`GET /api/v1/channels/{name}/test` | requests a channel test (`202`, or `409` while one is active) and reads the newest one; the daemon sends it |
 | `GET`/`POST /api/v1/checks/{name}/heartbeat-token` | shows a heartbeat's ping token, or replaces it (the old one stops working), as `{"token", "path"}`; `404` for a monitor that is not a heartbeat |
 
-Monitors take optional `tags` (a list, saved lowercase); the snapshot's `mute` and `maintenance` windows carry a `tag` when they come from a tag. HTTP monitors take optional `conditions`, an ordered list of `{"kind": "json", "path", "value"}`, `{"kind": "regex", "pattern"}`, `{"kind": "response_time", "within_ms"}` or `{"kind": "header", "name", "value"}`; the snapshot returns them the same way. Heartbeat monitors use `"kind": "heartbeat"` with `period_ms` and `grace_ms`. Ping monitors use `"kind": "ping"` with `host`; DNS monitors use `"kind": "dns"` with `domain`, `record`, `resolver` and `expected`, and their results carry `answer` and `answers`. The snapshot's `pings` says whether the daemon can send pings (`allowed`, `denied`, or empty when unknown). The snapshot carries each heartbeat's `heartbeat` state (`waiting`, `last_ping`, `deadline`) and the daemon's `api` listener (`listen`, `tls`); never the ping token.
+Monitors take optional `tags` (a list, saved lowercase); the snapshot's `mute` and `maintenance` windows carry a `tag` when they come from a tag. HTTP monitors take optional `conditions`, an ordered list of `{"kind": "json", "path", "value"}`, `{"kind": "regex", "pattern"}`, `{"kind": "response_time", "within_ms"}` or `{"kind": "header", "name", "value"}`; the snapshot returns them the same way. Heartbeat monitors use `"kind": "heartbeat"` with `grace_ms` and either `period_ms` or `"schedule": "cron"` with a `cron` expression (`schedule` reads back `period` or `cron`; an invalid expression is a `400` and nothing is stored). Ping monitors use `"kind": "ping"` with `host`; DNS monitors use `"kind": "dns"` with `domain`, `record`, `resolver` and `expected`, and their results carry `answer` and `answers`. The snapshot's `pings` says whether the daemon can send pings (`allowed`, `denied`, or empty when unknown). The snapshot carries each heartbeat's `heartbeat` state (`waiting`, `last_ping`, `deadline`) and the daemon's `api` listener (`listen`, `tls`); never the ping token.
 
 Bodies are strict JSON, limited to 1 MiB. Errors: `400` invalid input, `404` not found, `409` duplicate or still in use. Rejected requests change nothing.
 

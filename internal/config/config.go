@@ -98,6 +98,13 @@ type Check struct {
 	// URL, method, expected status, interval or timeout.
 	Period time.Duration
 	Grace  time.Duration
+	// Schedule is how a heartbeat's runs are expected: SchedulePeriod (the
+	// default; empty means it) or ScheduleCron, which expects a ping for every
+	// run of Cron, a standard 5-field expression in the Defaults zone (see
+	// ParseCron), and is missed Grace after a run without one; Period is 0.
+	// Heartbeat checks only.
+	Schedule string
+	Cron     string
 	// Tags group monitors for search, mutes and maintenance windows: at most
 	// MaxTags, lowercase letters a-z, digits and "-", in the order typed
 	// (see NormalizeTags). Any kind can have them.
@@ -143,6 +150,9 @@ func ValidateCheck(c Check) error {
 	}
 	if c.Kind != CheckDNS && c.Kind != CheckPing && c.hasDNSFields() {
 		errs = append(errs, errDNSFields)
+	}
+	if c.Kind != CheckHeartbeat && (c.Schedule != "" || c.Cron != "") {
+		errs = append(errs, errors.New("schedule and cron are only for heartbeat checks"))
 	}
 	switch {
 	case c.Kind == CheckHeartbeat:

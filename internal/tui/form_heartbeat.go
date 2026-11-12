@@ -15,6 +15,17 @@ const kindHeartbeat = config.CheckHeartbeat
 
 const heartbeatCopy = "Alerts when no ping arrives within period + grace."
 
+const cronCopy = "Alerts when no ping arrives within grace after a run."
+
+// cronHint is the Cron row's field order, shown while it has focus.
+const cronHint = "min hour day month weekday"
+
+// scheduleChoices are the Schedule row's choices.
+var scheduleChoices = []string{"Period", "Cron"}
+
+// cronLabelWidth lines up the values of the Zone and Next runs lines.
+const cronLabelWidth = len("Next runs  ")
+
 // noListenerLine warns that pings have nowhere to arrive.
 const noListenerLine = "! No API listener: pings cannot arrive. Run up serve --api-listen"
 
@@ -29,28 +40,47 @@ const pingMask = "••••••••"
 
 func (f monitorForm) isHeartbeat() bool { return f.kind == kindHeartbeat }
 
+// isCron reports whether the form is a heartbeat with Schedule ‹ Cron ›.
+func (f monitorForm) isCron() bool { return f.isHeartbeat() && f.schedule == config.ScheduleCron }
+
+func (f monitorForm) scheduleName() string {
+	if f.schedule == config.ScheduleCron {
+		return "Cron"
+	}
+	return "Period"
+}
+
 // tokenRow reports whether the form offers Token ‹ keep / new ›: only when
 // editing a monitor that already is a heartbeat.
 func (f monitorForm) tokenRow() bool { return f.isHeartbeat() && f.hadToken }
 
 // editHeartbeatForm edits a heartbeat. Interval and timeout start at the
-// built-in defaults in case the type is switched.
+// built-in defaults in case the type is switched; a cron heartbeat's period
+// starts at the new heartbeat default in case the schedule is.
 func editHeartbeatForm(c config.Check, detail bool) *monitorForm {
 	d := config.BuiltinDefaults()
-	return &monitorForm{
+	f := &monitorForm{
 		kind:   kindHeartbeat,
 		values: [5]string{c.Name, "", shortDuration(d.Interval), shortDuration(d.Timeout)}, period: shortDuration(c.Period), grace: shortDuration(c.Grace),
 		record:  config.DNSRecords[0],
 		channel: c.Channel, alertAfter: strconv.Itoa(c.FailuresToAlert()), recoverAfter: strconv.Itoa(c.SuccessesToRecover()), tlsExpiry: "on",
-		focus: focusPeriod, cursor: len([]rune(shortDuration(c.Period))), editing: true, returnDetail: detail, base: c, hadToken: true,
+		focus: focusPeriod, editing: true, returnDetail: detail, base: c, hadToken: true,
 	}
+	if c.Schedule == config.ScheduleCron {
+		f.schedule, f.cron, f.focus = config.ScheduleCron, c.Cron, focusCron
+		f.period = shortDuration(config.DefaultHeartbeatPeriod)
+	}
+	f.cursor = f.focusCursor()
+	return f
 }
 
 // heartbeatCheck converts text only, like check; it carries no probe field.
 func (f monitorForm) heartbeatCheck() (config.Check, error) {
 	c := config.Check{Name: f.values[0], Kind: kindHeartbeat, Channel: f.channel, Tags: config.ParseTags(f.tags)}
 	var err error
-	if c.Period, err = time.ParseDuration(f.period); err != nil {
+	if f.isCron() {
+		c.Schedule, c.Cron = config.ScheduleCron, f.cron
+	} else if c.Period, err = time.ParseDuration(f.period); err != nil {
 		return c, fmt.Errorf("period: %w", err)
 	}
 	if c.Grace, err = time.ParseDuration(f.grace); err != nil {
@@ -68,9 +98,64 @@ func (f monitorForm) heartbeatCheck() (config.Check, error) {
 // renderHeartbeatFields renders the rows before Channel for a heartbeat.
 func renderHeartbeatFields(b *strings.Builder, f monitorForm) {
 	textRow(b, f, 0, "Name", f.values[0])
-	textRow(b, f, focusPeriod, "Period", f.period)
+	marker, label := " ", "Schedule"
+	if f.focus == focusSchedule {
+		marker, label = accentStyle.Render(">"), accentStyle.Render(label)
+	}
+	fmt.Fprintf(b, "%s %s: %s\n", marker, label, renderChoice(f.scheduleName(), scheduleChoices, f.focus == focusSchedule))
+	if !f.isCron() {
+		textRow(b, f, focusPeriod, "Period", f.period)
+		textRow(b, f, focusGrace, "Grace", f.grace)
+		b.WriteString(helpStyle.Render(heartbeatCopy) + "\n")
+		return
+	}
+	var row strings.Builder
+	textRow(&row, f, focusCron, "Cron", f.cron)
+	line := strings.TrimSuffix(row.String(), "\n")
+	if f.focus == focusCron {
+		line += "   " + helpStyle.Render(cronHint)
+	}
+	b.WriteString(line + "\n")
 	textRow(b, f, focusGrace, "Grace", f.grace)
-	b.WriteString(helpStyle.Render(heartbeatCopy) + "\n")
+	b.WriteString(helpStyle.Render(cronCopy) + "\n")
+}
+
+// renderCronRuns writes the zone cron runs are in and, while the expression
+// parses, its next three runs there.
+func renderCronRuns(b *strings.Builder, f monitorForm, snap Snapshot, now time.Time) {
+	zone := snap.ScheduleZone()
+	b.WriteString(helpStyle.Render(fmt.Sprintf("%-*s", cronLabelWidth, "Zone")) + zone.String() + " (Defaults)\n")
+	runs := snap.NextRuns(config.Check{Kind: kindHeartbeat, Schedule: config.ScheduleCron, Cron: f.cron}, now, 3)
+	if len(runs) == 0 {
+		b.WriteString("\n")
+		return
+	}
+	b.WriteString(helpStyle.Render(fmt.Sprintf("%-*s", cronLabelWidth, "Next runs")) + formatRuns(runs, now.In(zone)) + "\n")
+}
+
+// formatRuns lists runs as "Mon 26 02:00 · Tue 27 02:00", in their own
+// location, with the month when it is not now's.
+func formatRuns(runs []time.Time, now time.Time) string {
+	out := make([]string, len(runs))
+	for i, run := range runs {
+		layout := "Mon 2 15:04"
+		if run.Year() != now.Year() || run.Month() != now.Month() {
+			layout = "Mon Jan 2 15:04"
+		}
+		out[i] = run.Format(layout)
+	}
+	return strings.Join(out, " · ")
+}
+
+// focusCronError moves the focus to the Cron row when a save error is about
+// the expression.
+func (f *monitorForm) focusCronError(err error) {
+	for _, line := range strings.Split(err.Error(), "\n") {
+		if strings.HasPrefix(line, "cron ") {
+			f.focus, f.cursor = focusCron, len([]rune(f.cron))
+			return
+		}
+	}
 }
 
 // firstAlertHint says how long after the last ping the first alert comes:
@@ -93,18 +178,26 @@ func renderTokenConfirm(b *strings.Builder) {
 	b.WriteString("\n" + renderHelp("y replace · n keep the token"))
 }
 
-// formVariants are the form as every Type would show it, and with the token
-// question, so the box can keep one size whichever is on screen.
+// formVariants are the form as every Type and Schedule would show it, and
+// with the token question, so the box can keep one size whichever is on
+// screen.
 func formVariants(f monitorForm) []monitorForm {
 	var out []monitorForm
 	for _, kind := range []string{"", kindTCP, kindHeartbeat, kindPing, kindDNS} {
 		v := f
 		v.confirm, v.cursor = false, 0
 		v.setKind(kind)
-		out = append(out, v)
-		if v.tokenRow() {
-			v.confirm = true
+		schedules := []string{v.schedule}
+		if v.isHeartbeat() {
+			schedules = []string{"", config.ScheduleCron}
+		}
+		for _, schedule := range schedules {
+			v.schedule, v.confirm = schedule, false
 			out = append(out, v)
+			if v.tokenRow() {
+				v.confirm = true
+				out = append(out, v)
+			}
 		}
 	}
 	return out

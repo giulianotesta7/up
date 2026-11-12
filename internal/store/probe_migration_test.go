@@ -193,8 +193,8 @@ func TestOpenMigratesV11ThroughTagsAndPingDNS(t *testing.T) {
 		t.Fatalf("Open(v11) error = %v", err)
 	}
 	defer s.Close()
-	if got := version(t, path); got != schemaVersion || schemaVersion != probesVersion {
-		t.Fatalf("user_version = %d, want %d", got, probesVersion)
+	if got := version(t, path); got != schemaVersion {
+		t.Fatalf("user_version = %d, want %d", got, schemaVersion)
 	}
 	if after := dumpTables(t, path, v11Tables...); !reflect.DeepEqual(before, after) {
 		t.Fatalf("migration changed existing rows:\nbefore %v\nafter  %v", before, after)

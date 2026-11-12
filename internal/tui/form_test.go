@@ -315,6 +315,29 @@ func TestFormCancelPreservesDetailAndPolling(t *testing.T) {
 	}
 }
 
+// A save error too long for an 80-column box wraps inside it, for every type.
+func TestSaveErrorWrapsInTheBoxAt80Columns(t *testing.T) {
+	_, m := formStore(t)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(Model)
+	m = fillForm(t, m, "api", "ftp://status.internal.example.com/health", "30s", "5s", "200")
+	m, cmd := press(t, m, keyEnter)
+	if cmd != nil {
+		t.Fatal("an ftp url saved")
+	}
+	requireText(t, m, "╭─ New monitor", `│ Cannot save monitor: url "ftp://status.internal.example.com/health" must `,
+		"│   use http or https ", "HTTP/HTTPS URL: ftp://status.internal.example.com/health")
+	requireWidth(t, m, 80)
+	if checks := storedChecks(t, m); len(checks) != 0 {
+		t.Fatalf("stored %+v", checks)
+	}
+
+	// Where it fits on one line the error stays one line.
+	next, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = next.(Model)
+	requireText(t, m, `│ Cannot save monitor: url "ftp://status.internal.example.com/health" must use http or https `)
+}
+
 func TestSaveDatabaseErrorRetainsDraft(t *testing.T) {
 	s, m := formStore(t)
 	m = fillForm(t, m, "draft", "http://example.com", "30s", "5s", "200")

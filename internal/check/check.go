@@ -62,6 +62,8 @@ type Result struct {
 	// answer arrived.
 	Answer  string
 	Answers int
+	// Run is the cron run a missed result was recorded for; zero otherwise.
+	Run time.Time
 }
 
 // Checker runs HTTP, TCP, ping and DNS checks.

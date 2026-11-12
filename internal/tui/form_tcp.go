@@ -40,7 +40,7 @@ func (f monitorForm) kindName() string {
 // choiceFocus reports whether the focused row is chosen with ←/→ instead of typed.
 func (f monitorForm) choiceFocus() bool {
 	switch f.focus {
-	case focusPort, focusPeriod, focusGrace, focusResolver, focusExpected, focusTags:
+	case focusPort, focusPeriod, focusGrace, focusResolver, focusExpected, focusTags, focusCron:
 		return false
 	}
 	return f.focus >= focusChannel && f.focus < focusAdvanced
@@ -54,7 +54,10 @@ func (f monitorForm) order() []int {
 	case f.isTCP():
 		rows = []int{focusType, 0, 1, focusPort, 2, 3, focusTags, focusChannel, focusAlertAfter, focusRecoverAfter}
 	case f.isHeartbeat():
-		rows = []int{focusType, 0, focusPeriod, focusGrace, focusTags, focusChannel, focusAlertAfter, focusRecoverAfter}
+		rows = []int{focusType, 0, focusSchedule, focusPeriod, focusGrace, focusTags, focusChannel, focusAlertAfter, focusRecoverAfter}
+		if f.isCron() {
+			rows[3] = focusCron
+		}
 		if f.tokenRow() {
 			rows = append(rows, focusToken)
 		}
@@ -88,6 +91,8 @@ func (f *monitorForm) text() *string {
 		return &f.period
 	case f.focus == focusGrace:
 		return &f.grace
+	case f.focus == focusCron:
+		return &f.cron
 	case f.focus == focusResolver:
 		return &f.resolver
 	case f.focus == focusExpected:
@@ -99,15 +104,16 @@ func (f *monitorForm) text() *string {
 }
 
 // setKind switches the monitor type. The other type's values are dropped, not
-// hidden: the target field, port, expected status, TLS choice, period, grace,
-// the DNS rows and every field carried over from an edited monitor start
-// over, keeping only the name.
+// hidden: the target field, port, expected status, TLS choice, schedule,
+// period, cron, grace, the DNS rows and every field carried over from an
+// edited monitor start over, keeping only the name.
 func (f *monitorForm) setKind(kind string) {
 	if f.kind == kind {
 		return
 	}
 	f.kind, f.newToken = kind, false
 	f.period, f.grace = shortDuration(config.DefaultHeartbeatPeriod), shortDuration(config.DefaultHeartbeatGrace)
+	f.schedule, f.cron = "", ""
 	f.values[1], f.port, f.tlsExpiry = "", "", "on"
 	f.record, f.resolver, f.expected = config.DNSRecords[0], "", ""
 	f.values[4] = ""

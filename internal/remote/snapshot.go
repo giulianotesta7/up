@@ -64,11 +64,12 @@ type HeartbeatDTO struct {
 // fields are ignored. Kind is "http" or "tcp" (empty on write means http) and
 // Method is the HTTP method (empty on write means GET). Host has no brackets
 // for IPv6. Conditions are plain and travel the same way in both directions.
-// A heartbeat has kind "heartbeat", PeriodMS and GraceMS and none of the HTTP
-// or TCP fields; its ping token is never in a CheckDTO. A ping check has kind
-// "ping" and Host; a DNS check has kind "dns", Domain, Record, Resolver and
-// Expected. Tags are normalized by the server ("NAS" is stored as "nas");
-// absent on write means none.
+// A heartbeat has kind "heartbeat", GraceMS, a Schedule ("period", read
+// back for every period heartbeat, or "cron"; empty on write means period)
+// with PeriodMS or Cron, and none of the HTTP or TCP fields; its ping token
+// is never in a CheckDTO. A ping check has kind "ping" and Host; a DNS check
+// has kind "dns", Domain, Record, Resolver and Expected. Tags are normalized
+// by the server ("NAS" is stored as "nas"); absent on write means none.
 type CheckDTO struct {
 	Name           string         `json:"name"`
 	URL            string         `json:"url"`
@@ -95,6 +96,8 @@ type CheckDTO struct {
 	Resolver       string         `json:"resolver"`
 	Expected       string         `json:"expected"`
 	Tags           []string       `json:"tags"`
+	Schedule       string         `json:"schedule"`
+	Cron           string         `json:"cron"`
 }
 
 // HeaderDTO is one request header: a plain name and a protected value.
@@ -175,6 +178,8 @@ type ResultDTO struct {
 	Error      string       `json:"error"`
 	Answer     string       `json:"answer,omitempty"`
 	Answers    int          `json:"answers,omitempty"`
+	// Run is a missed cron run's (check.Result.Run); absent otherwise.
+	Run time.Time `json:"run,omitzero"`
 }
 type OutageDTO struct {
 	Start   time.Time `json:"start"`
@@ -320,9 +325,13 @@ func checkDTO(c config.Check) CheckDTO {
 		Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
 		Kind: c.Kind, Method: c.Method, BodySet: !c.Body.Empty(), ExpectText: c.ExpectText, Host: c.Host, Port: c.Port,
 		PeriodMS: c.Period.Milliseconds(), GraceMS: c.Grace.Milliseconds(), Conditions: conditionDTOs(c.Conditions),
-		Domain: c.Domain, Record: c.Record, Resolver: c.Resolver, Expected: c.Expected, Tags: c.Tags}
+		Domain: c.Domain, Record: c.Record, Resolver: c.Resolver, Expected: c.Expected, Tags: c.Tags,
+		Schedule: c.Schedule, Cron: c.Cron}
 	if d.Kind == "" {
 		d.Kind = config.CheckHTTP
+	}
+	if d.Kind == config.CheckHeartbeat && d.Schedule == "" {
+		d.Schedule = config.SchedulePeriod
 	}
 	if d.Kind == config.CheckHTTP && d.Method == "" {
 		d.Method = "GET"
@@ -362,10 +371,10 @@ func (d ChannelTestDTO) ChannelTest() config.ChannelTest {
 func (d MaintenanceDTO) Window(check string) config.MaintenanceWindow { return d.window(check) }
 
 func resultDTO(r check.Result) ResultDTO {
-	return ResultDTO{At: r.At.UTC(), Status: r.Status, LatencyMS: r.Latency.Milliseconds(), StatusCode: r.StatusCode, Error: r.Error, Answer: r.Answer, Answers: r.Answers}
+	return ResultDTO{At: r.At.UTC(), Status: r.Status, LatencyMS: r.Latency.Milliseconds(), StatusCode: r.StatusCode, Error: r.Error, Answer: r.Answer, Answers: r.Answers, Run: r.Run.UTC()}
 }
 func (r ResultDTO) result(name string) check.Result {
-	return check.Result{CheckName: name, At: r.At, Status: r.Status, Latency: time.Duration(r.LatencyMS) * time.Millisecond, StatusCode: r.StatusCode, Error: r.Error, Answer: r.Answer, Answers: r.Answers}
+	return check.Result{CheckName: name, At: r.At, Status: r.Status, Latency: time.Duration(r.LatencyMS) * time.Millisecond, StatusCode: r.StatusCode, Error: r.Error, Answer: r.Answer, Answers: r.Answers, Run: r.Run}
 }
 
 // NewSnapshotDTO converts field by field without exposing sealed credentials.
@@ -539,7 +548,8 @@ func (c CheckDTO) snapshotCheck(key []byte) config.Check {
 		ExpectedStatus: c.ExpectedStatus, Channel: c.Channel, AlertAfter: c.AlertAfter, RecoverAfter: c.RecoverAfter, TLSOff: c.TLSOff,
 		Kind: c.Kind, Method: c.Method, ExpectText: c.ExpectText, Host: c.Host, Port: c.Port,
 		Period: time.Duration(c.PeriodMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond, Conditions: conditions(c.Conditions),
-		Domain: c.Domain, Record: c.Record, Resolver: c.Resolver, Expected: c.Expected, Tags: c.Tags}
+		Domain: c.Domain, Record: c.Record, Resolver: c.Resolver, Expected: c.Expected, Tags: c.Tags,
+		Schedule: c.Schedule, Cron: c.Cron}
 	if c.BodySet {
 		out.Body = placeholder(key)
 	}

@@ -307,6 +307,8 @@ type checkWrite struct {
 	Resolver       string                `json:"resolver,omitempty"`
 	Expected       string                `json:"expected,omitempty"`
 	Tags           []string              `json:"tags,omitempty"`
+	Schedule       string                `json:"schedule,omitempty"`
+	Cron           string                `json:"cron,omitempty"`
 	// CopyFrom (create only) names the stored monitor whose protected values
 	// the server copies for every value this check keeps.
 	CopyFrom string `json:"copy_from,omitempty"`
@@ -321,7 +323,7 @@ func checkDTO(v config.Check) checkWrite {
 	d := checkWrite{Name: v.Name, URL: v.URL, IntervalMS: v.Interval.Milliseconds(), TimeoutMS: v.Timeout.Milliseconds(), ExpectedStatus: v.ExpectedStatus, Channel: v.Channel,
 		AlertAfter: v.AlertAfter, RecoverAfter: v.RecoverAfter, TLSOff: v.TLSOff, Kind: v.Kind, Method: v.Method,
 		Body: protectedFor(v.BodyEdit, v.Body), ExpectText: v.ExpectText, Host: v.Host, Port: v.Port,
-		PeriodMS: v.Period.Milliseconds(), GraceMS: v.Grace.Milliseconds(),
+		PeriodMS: v.Period.Milliseconds(), GraceMS: v.Grace.Milliseconds(), Schedule: v.Schedule, Cron: v.Cron,
 		Domain: v.Domain, Record: v.Record, Resolver: v.Resolver, Expected: v.Expected, Tags: v.Tags}
 	for _, h := range v.Headers {
 		d.Headers = append(d.Headers, headerWrite{Name: h.Name, Value: protectedFor(h.Edit, h.Value)})

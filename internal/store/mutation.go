@@ -39,10 +39,10 @@ func (s *Store) UpdateCheck(ctx context.Context, c config.Check) error {
 	res, err := tx.ExecContext(ctx, `UPDATE checks
 SET kind = ?, url = ?, interval_ns = ?, timeout_ns = ?, expected_status = ?, channel = ?, alert_after = ?, recover_after = ?, tls_off = ?,
     method = ?, headers = ?, body = ?, body_key = ?, expect_text = ?, host = ?, port = ?, period_ns = ?, grace_ns = ?, conditions = ?, tags = ?,
-    domain = ?, record = ?, resolver = ?, expected = ? WHERE name = ?`,
+    domain = ?, record = ?, resolver = ?, expected = ?, schedule = ?, cron = ? WHERE name = ?`,
 		f.kind, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus, c.Channel, c.AlertAfter, c.RecoverAfter, c.TLSOff,
 		c.Method, f.headers, blob(f.body.Data), blob(f.body.Key), c.ExpectText, c.Host, c.Port, int64(c.Period), int64(c.Grace), f.conditions, encodeTags(c.Tags),
-		c.Domain, c.Record, c.Resolver, c.Expected, c.Name)
+		c.Domain, c.Record, c.Resolver, c.Expected, c.Schedule, c.Cron, c.Name)
 	if err != nil {
 		return fmt.Errorf("store: update check: %w", err)
 	}
@@ -116,8 +116,8 @@ func (s *Store) DeleteCheck(ctx context.Context, name string) error {
 // with mutations even across database handles/processes. The comparison covers
 // every field the check executes with: URL, kind, method, headers, body,
 // expected text, conditions, host, port, interval, timeout, expected status,
-// period, grace and the DNS domain, record, resolver and expected value. It
-// must
+// period, grace, the DNS domain, record, resolver and expected value, and the
+// heartbeat schedule and cron expression. It must
 // stay in step with config.Check.SameDefinition (channel and alert settings
 // do not change a measurement, so they are not compared). Schema v1 cannot
 // detect deletion and recreation with an identical definition during an
@@ -148,11 +148,12 @@ INSERT INTO results (check_name, at_ns, status, latency_ns, status_code, error, 
 SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (
 SELECT 1 FROM checks WHERE name = ? AND url = ? AND interval_ns = ? AND timeout_ns = ? AND expected_status = ?
   AND kind = ? AND method = ? AND headers = ? AND body = ? AND body_key = ? AND expect_text = ? AND host = ? AND port = ?
-  AND period_ns = ? AND grace_ns = ? AND conditions = ? AND domain = ? AND record = ? AND resolver = ? AND expected = ?)`,
+  AND period_ns = ? AND grace_ns = ? AND conditions = ? AND domain = ? AND record = ? AND resolver = ? AND expected = ?
+  AND schedule = ? AND cron = ?)`,
 		r.CheckName, r.At.UnixNano(), string(r.Status), int64(r.Latency), r.StatusCode, r.Error, r.Answer, r.Answers,
 		c.Name, c.URL, int64(c.Interval), int64(c.Timeout), c.ExpectedStatus,
 		kind, c.Method, headers, blob(c.Body.Data), blob(c.Body.Key), c.ExpectText, c.Host, c.Port, int64(c.Period), int64(c.Grace), conds,
-		c.Domain, c.Record, c.Resolver, c.Expected)
+		c.Domain, c.Record, c.Resolver, c.Expected, c.Schedule, c.Cron)
 	if err != nil {
 		return false, fmt.Errorf("store: record %s: %w", r.CheckName, err)
 	}

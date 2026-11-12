@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/heohlee/up/internal/config"
 )
@@ -33,6 +34,8 @@ const (
 	focusPeriod
 	focusGrace
 	focusToken
+	focusSchedule
+	focusCron
 	focusRecord
 	focusResolver
 	focusExpected
@@ -51,6 +54,8 @@ type monitorForm struct {
 	port         string // TCP only
 	period       string // heartbeat only
 	grace        string // heartbeat only
+	schedule     string // heartbeat only: "" is a period, config.ScheduleCron a cron expression
+	cron         string // heartbeat only
 	record       string // DNS only, like resolver and expected
 	resolver     string
 	expected     string
@@ -306,6 +311,8 @@ func (m Model) handleFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			case delta == 0:
 			case f.focus == focusType:
 				f.setKind(kindByName[cycleChoice(kindChoices, f.kindName(), delta)])
+			case f.focus == focusSchedule:
+				f.schedule = map[string]string{"Period": "", "Cron": config.ScheduleCron}[cycleChoice(scheduleChoices, f.scheduleName(), delta)]
 			case f.focus == focusRecord:
 				f.record = cycleChoice(config.DNSRecords, f.record, delta)
 			case f.focus == focusToken:
@@ -417,14 +424,52 @@ func (f *monitorForm) edit(msg tea.KeyPressMsg) {
 	}
 }
 
-func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error) string {
-	s, _ := renderFormFocus(f, snap, now, loadErr)
+func renderForm(f monitorForm, snap Snapshot, now time.Time, loadErr error, wrap int) string {
+	s, _ := renderFormFocus(f, snap, now, loadErr, wrap)
 	return s
 }
 
+const saveErrorPrefix = "Cannot save monitor: "
+
+// saveErrorWrap is the width the save error wraps to: 0 (one line) while it
+// fits the terminal, else the inner width of the box it would otherwise widen.
+func saveErrorWrap(err error, termWidth, boxWidth int) int {
+	if err == nil || termWidth <= 0 {
+		return 0
+	}
+	for _, line := range strings.Split(saveErrorPrefix+err.Error(), "\n") {
+		if ansi.StringWidth(line)+6 > termWidth {
+			return boxWidth - 4
+		}
+	}
+	return 0
+}
+
+// renderSaveError wraps text to width, continuation lines indented; 0 keeps
+// each line whole.
+func renderSaveError(text string, width int) string {
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		if width <= 0 || ansi.StringWidth(line) <= width {
+			lines = append(lines, line)
+			continue
+		}
+		first, _, _ := strings.Cut(ansi.Wrap(line, width, ""), "\n")
+		lines = append(lines, first)
+		rest := strings.TrimLeft(strings.TrimPrefix(line, first), " ")
+		for _, part := range strings.Split(ansi.Wrap(rest, width-2, ""), "\n") {
+			lines = append(lines, "  "+part)
+		}
+	}
+	for i := range lines {
+		lines[i] = warnStyle.Render(lines[i])
+	}
+	return strings.Join(lines, "\n")
+}
+
 // renderFormFocus also returns the line the focused field is on, so a tall
-// form can scroll to it.
-func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error) (string, int) {
+// form can scroll to it. The save error wraps to wrap columns (0: one line).
+func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error, wrap int) (string, int) {
 	var b strings.Builder
 	focusLine := 0
 	title := "New monitor"
@@ -504,7 +549,9 @@ func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error)
 	}
 	if f.isHeartbeat() {
 		b.WriteString("\n")
-		if hint := firstAlertHint(f); hint != "" {
+		if f.isCron() {
+			renderCronRuns(&b, f, snap, now)
+		} else if hint := firstAlertHint(f); hint != "" {
 			b.WriteString(helpStyle.Render(hint) + "\n")
 		}
 		if !snap.API.Enabled() {
@@ -523,7 +570,7 @@ func renderFormFocus(f monitorForm, snap Snapshot, now time.Time, loadErr error)
 		}
 	}
 	if f.err != nil {
-		b.WriteString("\n" + warnStyle.Render("Cannot save monitor: "+f.err.Error()) + "\n")
+		b.WriteString("\n" + renderSaveError(saveErrorPrefix+f.err.Error(), wrap) + "\n")
 	}
 	if f.saving {
 		b.WriteString("\n" + renderHelp("Saving monitor… · ctrl+c quit"))

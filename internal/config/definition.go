@@ -93,7 +93,8 @@ type Header struct {
 }
 
 // Canonical returns c in its one stored form, without changing c:
-// kind "http" becomes "", method "GET" becomes "", an empty header or
+// kind "http" becomes "", method "GET" becomes "", schedule "period"
+// becomes "", the cron fields are separated by one space, an empty header or
 // condition list becomes nil and tags are normalized (NormalizeTags). Edit
 // intents are kept. Copies the header, condition and tag slices.
 func (c Check) Canonical() Check {
@@ -103,6 +104,10 @@ func (c Check) Canonical() Check {
 	if c.Method == "GET" {
 		c.Method = ""
 	}
+	if c.Schedule == SchedulePeriod {
+		c.Schedule = ""
+	}
+	c.Cron = strings.Join(strings.Fields(c.Cron), " ")
 	if len(c.Headers) == 0 {
 		c.Headers = nil
 	} else {
@@ -133,6 +138,7 @@ func (c Check) SameDefinition(o Check) bool {
 		a.Method == b.Method && sameSealed(a.Body, b.Body) && a.ExpectText == b.ExpectText &&
 		a.Host == b.Host && a.Port == b.Port && a.Period == b.Period && a.Grace == b.Grace &&
 		a.Domain == b.Domain && a.Record == b.Record && a.Resolver == b.Resolver && a.Expected == b.Expected &&
+		a.Schedule == b.Schedule && a.Cron == b.Cron &&
 		slices.Equal(a.Conditions, b.Conditions) &&
 		slices.EqualFunc(a.Headers, b.Headers, func(x, y Header) bool {
 			return x.Name == y.Name && sameSealed(x.Value, y.Value)

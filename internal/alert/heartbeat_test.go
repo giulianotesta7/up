@@ -57,3 +57,33 @@ func TestHeartbeatWebhookAddsTheSchedule(t *testing.T) {
 		t.Fatalf("body = %s", raw)
 	}
 }
+
+var cronCheck = config.Check{Name: "backup", Kind: config.CheckHeartbeat, Schedule: config.ScheduleCron, Cron: "0 2 * * 1-5", Grace: 30 * time.Minute, Channel: "mail"}
+
+func TestCronHeartbeatEmailNamesTheCron(t *testing.T) {
+	sender := notifierSender{make(chan Message, 1)}
+	n := NewNotifier(Options{Store: emailStore(), Sender: sender, Hostname: "host", Location: time.UTC, Logger: quiet()})
+	if err := n.Deliver(context.Background(), cronCheck, check.Result{CheckName: "backup", Status: check.StatusDown, At: deliverAt, Error: "no ping for the 02:00 UTC run"}); err != nil {
+		t.Fatal(err)
+	}
+	down := <-sender.messages
+	if want := "backup is DOWN since Jan 02 18:04:05 (UTC).\nHeartbeat: cron 0 2 * * 1-5, grace 30m\nError:  no ping for the 02:00 UTC run\nHost:   host\n"; down.Body != want {
+		t.Fatalf("down = %q, want %q", down.Body, want)
+	}
+}
+
+func TestCronHeartbeatWebhookAddsTheCron(t *testing.T) {
+	n, _, requests := hookNotifier(t, http.StatusOK, "", "", nil)
+	c := cronCheck
+	c.Channel = "hook"
+	if err := n.Deliver(context.Background(), c, check.Fail("backup", deliverAt)); err != nil {
+		t.Fatal(err)
+	}
+	monitor := (<-requests).body["monitor"].(map[string]any)
+	if monitor["cron"] != "0 2 * * 1-5" || monitor["grace_ms"] != float64(30*time.Minute/time.Millisecond) {
+		t.Fatalf("monitor = %v", monitor)
+	}
+	if _, ok := monitor["period_ms"]; ok {
+		t.Fatalf("a cron heartbeat's webhook has period_ms: %v", monitor)
+	}
+}
