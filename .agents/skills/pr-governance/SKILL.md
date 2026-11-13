@@ -15,14 +15,14 @@ Do not use for read-only Q&A or local work that will not become a PR. Loading th
 
 ## Precedence
 
-Generic `branch-pr` and `gentle-ai-branch-pr` skills do not apply here. up has no shellcheck workflow and does not use `type:*` labels. `.github/workflows/` contains `pr-issue.yml`, `quality.yml`, `security.yml` and `release.yml`. Follow this project skill rather than importing checks from another repository.
+Generic `branch-pr` and `gentle-ai-branch-pr` skills do not apply here. up has no shellcheck workflow and does not use `type:*` labels. `.github/workflows/` contains `quality.yml`, `security.yml` and `release.yml`. Follow this project skill rather than importing checks from another repository.
 
 ## Hard Rules
 
-- Every PR links its governing issue with `Closes #<n>`. The issue is required by `issue-governance`; creating it authorizes the work, without an approval label or approval step.
-- The PR body follows `.github/PULL_REQUEST_TEMPLATE.md`: Why, Summary, Verification, Not verified, and the issue-closing line. Describe observed verification, not intended checks.
+- When a governing issue exists, link it with a standalone `Closes #<n>` line. The issue is optional (`issue-governance`) and no check requires the line; a missing issue or link never blocks a PR.
+- The PR body follows `.github/PULL_REQUEST_TEMPLATE.md`: Why, Summary, Verification, Not verified, and the optional issue-closing line. Describe observed verification, not intended checks.
 - PR labels are optional. Use only the existing GitHub defaults permitted by `issue-governance`; never invent `type:*` labels.
-- Every required check must pass before merge. Check definitions live under `.github/workflows/`: PR issue, Go quality, Go security / staticcheck and Go security / govulncheck. `PR issue` validates a standalone `Closes #<n>` against an existing same-repository issue (not a PR); comments and placeholders do not count. It runs trusted base code with read-only permissions. Making this check merge-blocking requires repository protection configuration; the workflow file alone does not establish that setting. Point at those definitions rather than duplicating their flags. Pending or failing required checks block merge, including on documentation-only PRs.
+- Every required check must pass before merge. Check definitions live under `.github/workflows/`: Go quality, Go security / staticcheck and Go security / govulncheck. Point at those definitions rather than duplicating their flags. Pending or failing required checks block merge, including on documentation-only PRs.
 - Preserve the merge-commit style used in this repository. With explicit merge authorization, use `gh pr merge --merge`, not squash or rebase. Never interpret readiness as permission to merge.
 
 ## Branch Naming
@@ -43,13 +43,12 @@ Branch and merge history show `feat/`, `docs/`, `chore/`, `ci/` and `refactor/`.
 
 ## What Proves A Pull Request Here
 
-- `CONTRIBUTING.md`: contributor-facing issue-first workflow and rollout requirements
-- `.github/workflows/pr-issue.yml`: issue-link validation using trusted base code
+- `CONTRIBUTING.md`: contributor-facing workflow and rollout requirements
 - `.github/workflows/quality.yml`: formatting, dependency tidiness, vet, build and race tests
 - `.github/workflows/security.yml`: staticcheck and govulncheck
 - `.github/workflows/release.yml`: release publication, not a shellcheck or PR-validation gate
 - `.agents/skills/go-tests/SKILL.md`: test layers and local evidence
-- `.agents/skills/issue-governance/SKILL.md`: issue requirement and permitted labels
+- `.agents/skills/issue-governance/SKILL.md`: optional issue policy and permitted labels
 
 Do not report another repository's checks as missing here. Do not call a local command run proof that remote required checks passed.
 
@@ -61,9 +60,9 @@ Use conventional titles consistent with history, such as `feat: ...`, `docs: ...
 
 | Condition | Result |
 | --- | --- |
-| Governing issue is absent or not linked with `Closes #<n>` | BLOCKED for PR readiness |
+| No issue, or an issue the PR does not link | GO: suggest adding `Closes #<n>` when an issue exists; never block on it |
 | A required check fails or is pending | BLOCKED for merge |
-| Issue is linked and required checks pass | GO for readiness, not authorization to publish or merge |
+| Required checks pass | GO for readiness, not authorization to publish or merge |
 | A configured release job does not run on the PR | Not a missing PR gate |
 
 ## Output Contract
@@ -71,9 +70,9 @@ Use conventional titles consistent with history, such as `feat: ...`, `docs: ...
 Return:
 
 - `pr`: number/URL or "none";
-- `issue_linked`: true/false, with the exact closing line;
+- `issue_linked`: true/false, with the exact closing line if any (informational);
 - `branch_valid`: true/false, with the naming deviation if any;
-- `gate`: GO or BLOCKED, naming missing issue linkage or required checks;
+- `gate`: GO or BLOCKED, naming only failing or pending required checks;
 - verification performed and anything not verified.
 
 ## References
@@ -81,6 +80,6 @@ Return:
 Paths below are repository-relative.
 
 - `AGENTS.md`: skill precedence and workflow gates
-- `.agents/skills/issue-governance/SKILL.md`: issue requirement and labels
+- `.agents/skills/issue-governance/SKILL.md`: optional issue policy and labels
 - `.github/PULL_REQUEST_TEMPLATE.md`: body contract
 - `.github/workflows/`: actual check and release definitions

@@ -412,7 +412,7 @@ A command-line flag overrides its environment variable.
 
 ## Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for the required issue-first workflow, development checks and PR conventions.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute, development checks and PR conventions.
 
 ## License
 

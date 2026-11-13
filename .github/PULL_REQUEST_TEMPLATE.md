@@ -14,4 +14,4 @@
 
 <!-- State skipped checks, environmental limits or remaining manual verification. -->
 
-Closes #<issue>
+<!-- If this PR resolves an issue, add a standalone line such as: Closes #123 (optional). -->
