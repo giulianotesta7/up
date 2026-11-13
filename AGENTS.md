@@ -17,5 +17,4 @@ When working on this project, load the relevant skill(s) BEFORE writing any code
 | --- | --- | --- |
 | `release-notes` | Release notes or release messages. | `.agents/skills/release-notes/SKILL.md` |
 | `go-tests` | Go tests, check execution, SQLite persistence, monitor scheduling, TUI behavior, CLI validation, installer tests, or Go CI evidence. | `.agents/skills/go-tests/SKILL.md` |
-| `pr-governance` | Creating, preparing, or reviewing a pull request in this repository. | `.agents/skills/pr-governance/SKILL.md` |
-| `issue-governance` | Creating an issue, starting a feature, fixing a bug, labeling, planning work, or any change to up. | `.agents/skills/issue-governance/SKILL.md` |
+| `git-workflow` | Starting any change to up, creating or triaging an issue, labeling, planning work, creating a branch, or creating, preparing, reviewing or merging a pull request. | `.agents/skills/git-workflow/SKILL.md` |
