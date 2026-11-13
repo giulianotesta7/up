@@ -46,4 +46,4 @@ For release-workflow changes, run `python3 .github/tests/test_release_workflow.p
 - Report checks actually run and explicitly list anything not verified.
 - Keep the change focused; if it has a governing issue, update the issue when scope changes.
 - Wait for all required checks, including documentation-only PRs. Local results are not proof that remote checks passed.
-- Maintainers merge with a **merge commit**, not squash or rebase.
+- Pull requests are merged with a **merge commit**, not squash or rebase.
